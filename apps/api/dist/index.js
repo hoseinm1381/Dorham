@@ -1037,8 +1037,21 @@ async function createApp(c = config(), options = {}) {
 }
 
 // apps/api/src/index.ts
+import { writeFile as writeFile2 } from "fs/promises";
+import path2 from "path";
 var { app, config: config2 } = await createApp();
 await app.listen({ port: config2.port, host: config2.host });
+await writeFile2(path2.join(config2.dataDir, "runtime-status.json"), JSON.stringify({
+  startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+  node: process.version,
+  platform: process.platform,
+  pid: process.pid,
+  host: config2.host,
+  port: config2.port,
+  publicUrl: config2.publicUrl,
+  database: config2.databaseUrl ? "postgresql" : "sqlite",
+  rssBytes: process.memoryUsage().rss
+}, null, 2), { mode: 384 }).catch((error) => app.log.warn({ error }, "Could not save startup evidence"));
 for (const event of ["SIGINT", "SIGTERM"]) process.once(event, () => {
   void app.close().then(() => process.exit(0));
 });
