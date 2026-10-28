@@ -1,8 +1,15 @@
-import { mkdir, cp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, cp, readFile, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 const root = process.cwd(), destination = path.resolve('artifacts/botkeep');
 await mkdir(destination, { recursive: true });
+// cp merges directories; discard only generated compilation outputs so stale
+// hashed assets/chunks cannot accumulate across deployment bundle builds.
+for (const entry of ['apps/api/dist', 'apps/web/dist']) {
+  const generated = path.resolve(destination, entry);
+  if (path.relative(root, generated).split(path.sep).join('/') !== `artifacts/botkeep/${entry}`) throw new Error('Unexpected generated bundle path');
+  await rm(generated, { recursive: true, force: true });
+}
 for (const entry of ['apps/api/dist', 'apps/web/dist', 'docs', 'deployment', '.env.example', '.dockerignore']) await cp(entry, path.join(destination, entry), { recursive: true });
 await writeFile(path.join(destination, 'README.txt'), 'Dorham compiled server bundle\nRequires patched Node 24.22.1 or newer within Node 24.\nRun npm ci --omit=dev, configure environment, then npm start.\nSee docs/DEPLOYMENT.md and docs/STATUS.md before exposing registration.\nSource, Windows and Android applications are separate deliverables.\n');
 const source = JSON.parse(await readFile('package.json', 'utf8'));
