@@ -1,6 +1,6 @@
 # Implementation and verification status
 
-Release candidate, 28 October 2026. Source and a compiled deployment branch have been pushed to GitHub with authorization. The application is running at https://dorham.bot-keep.xyz/ on Botkeep's free allocation. No service has been purchased. Implemented means source exists; tested applies only to the stated scenario. See [hosted verification](HOSTED-VERIFICATION.md).
+Release candidate, 28 October 2026. Source and a compiled deployment branch have been pushed to GitHub with authorization. The application was verified at https://dorham.bot-keep.xyz/ on Botkeep's free allocation, but is currently stopped and blocked by a provider backup operation that completed without releasing server controls. Support ticket #65cfa669 is awaiting staff. No service has been purchased. Implemented means source exists; tested applies only to the stated scenario. See [hosted verification](HOSTED-VERIFICATION.md).
 
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ Release candidate, 28 October 2026. Source and a compiled deployment branch have
 | External LiveKit API enforcement | Implemented; untested, blocked | Operator SFU host/credentials and networking required; no external service purchased |
 | Standalone production deployment bundle | Implemented, tested on Windows | Fresh independent runtime install; compiled startup, readiness, native modules, registration, snapshot and local WebSocket pass |
 | Linux runtime and native dependencies | Deployed; partly tested | SQLite, Argon2 registration and Sharp avatar upload work on Botkeep; exact runtime version is being recorded |
-| Botkeep ingress, HTTPS/WSS, polling and durable allocation | Deployed; partly tested | Public web registration/chat/avatar, native registration and socket connection pass; explicit WSS opening and polling pass on the alias; intermittent local connection resets remain |
+| Botkeep ingress, HTTPS/WSS, polling and durable allocation | Deployed; partly tested; currently blocked | Web registration/chat/avatar and native registration/socket pass; WSS opening and polling pass on alias. Completed infrastructure backup left Start/sync disabled; source-update persistence untested |
 | Dependency review | npm tested | Zero npm advisory findings in source and standalone runtime trees; no full security audit or Android advisory certification |
 
 The final local load run processed 200 messages across 20 sockets: **93.08 ms p95 acknowledgement**, **325.88 MiB peak RSS**, **303.12 MiB final RSS**, and **4,673,261 database/WAL bytes**. This short sample meets the initial local targets; sustained hosted resource use remains unverified. See [performance](PERFORMANCE.md).

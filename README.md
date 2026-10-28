@@ -2,7 +2,7 @@
 
 A small Discord-style application for a community of up to 100 accounts and 20 online users. React/PWA, Windows/Electron, Android/Capacitor, Fastify, Socket.IO, SQLite/Drizzle, and WebRTC. All branding and application artwork in this repository are original.
 
-The web application is deployed at **https://dorham.bot-keep.xyz/**. Native builds default to this instance; saved custom server addresses remain available. See [verification status](docs/STATUS.md) for the distinction between implementation, local testing, hosted checks and physical-device testing.
+The web application is deployed at **https://dorham.bot-keep.xyz/**. Native builds default to this instance; saved custom server addresses remain available. **Current hosting blocker:** Botkeep's completed backup operation has left the backend stopped and Start/sync disabled; support ticket #65cfa669 is awaiting staff. The cached PWA shell can display while the backend is unavailable. See [verification status](docs/STATUS.md) for current evidence and recovery steps.
 
 ## Run locally
 
