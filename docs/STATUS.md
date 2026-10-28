@@ -2,6 +2,8 @@
 
 Release candidate, 28 October 2026. Source and a compiled deployment branch have been pushed to GitHub with authorization. The application is running at https://dorham.bot-keep.xyz/ on Botkeep's free allocation. The earlier backup operation cleared; the support ticket is closed at the user's request. VPN connectivity enabled live web/Windows testing. No service has been purchased. Implemented means source exists; tested applies only to the stated scenario. See [hosted verification](HOSTED-VERIFICATION.md).
 
+Follow-up: the user's actual Chrome/VPN/Sweden call failed despite working chat. No TURN relay is configured. Observer voice membership and media-failure feedback are fixed in source and tested locally; their live rollout and a real relay-assisted call remain outstanding. See [voice/network follow-up](MEDIA-FOLLOWUP.md). Chrome-only Secure DNS was authorized but could not be applied by automation; Windows DNS remains unchanged.
+
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
 | TypeScript workspaces, contracts and production bundles | Implemented, tested | ESLint, type checking and builds pass |
@@ -28,7 +30,7 @@ Release candidate, 28 October 2026. Source and a compiled deployment branch have
 | Standalone production deployment bundle | Implemented, tested on Windows | Fresh independent runtime install; compiled startup, readiness, native modules, registration, snapshot and local WebSocket pass |
 | Linux runtime and native dependencies | Deployed; partly tested | SQLite, Argon2 registration and Sharp avatar upload work on Botkeep; verified Node bootstrap supplies the pinned patched runtime |
 | Botkeep ingress, HTTPS/WSS, polling and durable allocation | Deployed; partly tested | Web/native chat, avatars, WSS opening and explicit polling pass. Existing SQLite data survived a Git fast-forward update/restart; long-idle and hosted load tests remain open |
-| Active-socket shutdown | Implemented, tested | Fastify preClose closes upgraded sockets before HTTP drain; authenticated regression test and local reproduction pass (9 ms after fix) |
+| Active-socket shutdown/reconnect | Implemented, tested | Fastify preClose closes transports before HTTP drain; authenticated same-database restart regression and hosted automatic reconnect/message commit pass |
 | Hosted backup restoration | Tested in isolated local instance | Downloaded stopped-instance backup: SQLite integrity, accounts/message and avatar presence, readiness and authorized avatar CORS pass; no production restore performed |
 | Dependency review | npm tested | Zero npm advisory findings in source and standalone runtime trees; no full security audit or Android advisory certification |
 
