@@ -1029,7 +1029,6 @@ async function createApp(c = config(), options = {}) {
   maintenance.unref();
   app2.addHook("preClose", async () => {
     clearInterval(maintenance);
-    io.disconnectSockets(true);
     io.engine.close();
   });
   app2.addHook("onClose", async () => {
