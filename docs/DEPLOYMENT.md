@@ -38,6 +38,8 @@ If the provider does not offer durable SQLite files, configure a supported Postg
 
 Use an externally operated TURN service, supplied through `TURN_URLS` and either static credentials or `TURN_SECRET`. The latter generates expiring HMAC credentials compatible with a configured TURN REST shared secret. STUN alone cannot guarantee connectivity across restrictive NATs.
 
+The current hosted instance uses the operator's free ExpressTURN account over UDP/TCP 3478. Hosted Chrome and installed Windows forced-relay decoded-media checks pass. See [setup, limits and remaining acceptance](EXPRESSTURN.md). Credentials stay in private environment configuration; no relay runs inside Botkeep.
+
 An optional Cloudflare TURN credential adapter uses `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` on the backend, with temporary per-user client credentials. See [preparation, billing gate and verification](CLOUDFLARE-TURN.md). The current account requires payment activation; no Cloudflare relay is enabled under the user's no-billing instruction.
 
 For LiveKit, set `MEDIA_TRANSPORT=livekit`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. Follow [the official deployment guide](https://docs.livekit.io/transport/self-hosting/deployment/) for public addressing, TLS, and UDP/TCP ports. Keep media services outside Botkeep unless the provider explicitly approves them: [its terms](https://botkeep.cloud/terms) restrict unauthorized relays and excessive network use.

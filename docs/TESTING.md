@@ -8,6 +8,8 @@ The user revised the Chrome testing budget from 3 GiB to **4 GiB**. Large browse
 
 The ordinary suite uses two pages. `test:media-load` additionally requires `DORHAM_LARGE_MEDIA_TEST=1`, still respects the memory guard, and should not be enabled during routine development. The 20-browser/16-media-participant run was interrupted after the user reported memory pressure. It is **not a passed capacity result**. The 20-socket control-plane result is independent and passed without those browsers.
 
+The installed Windows relay scenario additionally counts its owned Dorham processes toward the same guard. Current relay run peaks are 2585.5 MiB (isolated local backend), 2742.5 MiB (public backend/Chrome) and 2607.9 MiB (public backend/installed Windows plus Chrome); none triggered the guard. Separate per-run memory evidence is preserved beside each relay report.
+
 ## Evidence
 
 `artifacts/evidence/control-plane-load.json` records the measured Node version, actual message timings, RSS, CPU time, event-loop delay, disk files, and enforced capacity outcomes. That scenario uses 20 real Socket.IO clients, 16 primary-room voice memberships, and five screen leases, but does not generate media. It is not a one-vCPU container or Botkeep certification.
@@ -26,6 +28,16 @@ Generated screenshots, Playwright traces/reports, compiler logs, audit reports, 
 - Full 16-person media quality under the user's memory budget on an appropriate test environment.
 
 Do not turn an unavailable test environment or an interrupted process into a success claim.
+
+## External relay verification
+
+Prepare an ignored private environment file (for example `.tools/relay-test.env`) with `TURN_URLS`, `TURN_USERNAME` and `TURN_PASSWORD` from an authorized relay account. Use the operator's real values; browser tools may return `[redacted]` instead of credentials. Never commit this file or place secrets in command arguments. Run `node --env-file=.tools/relay-test.env scripts/browser-tests.mjs --relay` on Windows with Node 24.22.1. The normal 4 GiB guard applies; only two browser contexts run. Ordinary browser tests explicitly clear external relay configuration.
+
+This opt-in test uses a fresh local database and real product signaling, forces relay-only ICE on both peers, requires a selected relay-to-relay candidate pair plus decoded audio samples, checks decoded non-black video from two simultaneous synthetic screen publishers, and tests unsubscribe/resubscribe. It writes sanitized RTP/candidate measurements to `artifacts/evidence/external-relay.json` or a separate failure report; network traces are disabled to avoid recording temporary TURN credentials. A pass proves relay media from this machine, not physical microphone quality or the remote friend's network. Repeat the real cross-network call after deploying credentials.
+
+After authorized deployment, set `DORHAM_RELAY_BASE_URL` to the application's HTTPS origin and run `node scripts/browser-tests.mjs --hosted-relay`. This uses the hosted backend and its issued ICE configuration, creates two named relay test accounts plus one test server, and leaves normal accounts/conversations untouched. Results use `hosted-relay.json`/`.png`. It does not start a local backend or require local TURN secrets. The 4 GiB guard still applies.
+
+Set `DORHAM_RELAY_ELECTRON_EXE` to an isolated installed `Dorham.exe` as well to substitute the Windows application for the second Chrome client. It uses a fresh temporary desktop profile, verifies renderer sandbox/isolation, joins through the native application UI, and writes `windows-hosted-relay` evidence. The guard includes its owned Dorham processes. Capture/microphone inputs remain synthetic; physical source selection and device quality require a person.
 
 ## Installed Windows live checks
 

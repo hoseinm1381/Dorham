@@ -2,7 +2,7 @@
 
 A small Discord-style application for a community of up to 100 accounts and 20 online users. React/PWA, Windows/Electron, Android/Capacitor, Fastify, Socket.IO, SQLite/Drizzle, and WebRTC. All branding and application artwork in this repository are original.
 
-The web application is deployed at **https://dorham.bot-keep.xyz/**. Native builds default to this instance; saved custom server addresses remain available. Public HTTPS, WSS, polling, web/Windows messages and protected Windows login have passed live checks through the workstation's VPN. Physical voice/capture and Android device tests remain open. See [verification status](docs/STATUS.md) for evidence and limits.
+The web application is deployed at **https://dorham.bot-keep.xyz/**. Native builds default to this instance; saved custom server addresses remain available. Public HTTPS, WSS, polling, web/Windows messages and protected Windows login have passed live checks through the workstation's VPN. A free external relay is configured: Chrome and the installed Windows app pass forced-relay decoded audio and two screen streams with synthetic devices. Physical remote voice/capture and Android device tests remain open. See [relay setup](docs/EXPRESSTURN.md) and [verification status](docs/STATUS.md) for evidence and limits.
 
 ## Run locally
 

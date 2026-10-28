@@ -21,3 +21,15 @@ The separate browser suite uses two actual Chrome contexts with synthetic microp
 The browser memory guard records every sample in `artifacts/evidence/browser-memory.json`. In the completed run, combined Chrome/Edge usage peaked at 3211.3 MiB, including unrelated existing tabs, and task-owned browser usage peaked at 1835.3 MiB. No unrelated browser process was closed. The revised budget is 4096 MiB with an early stop at 3500 MiB combined usage.
 
 Before a capacity claim, run the opt-in 16-person media test on a machine with an explicitly approved memory budget or distribute clients across machines. Record elapsed sustained workload, aggregate client CPU/RSS, per-peer bitrate and loss, speech intelligibility, two shared screens in one room and five globally, ICE restarts, and physical Android/cross-network results. Never substitute a successful signaling connection for decoded media.
+
+## External relay functional measurements
+
+The configured free ExpressTURN relay passed both peers forced to relay-only ICE, bidirectional decoded audio with nonzero energy, two simultaneous non-black decoded screen streams and unsubscribe/resubscribe. These are short synthetic tests from the VPN-connected workstation, including fixture setup; they are not a voice-quality or throughput benchmark.
+
+| Scenario | Peak combined browser/app MiB | Selected-pair RTT seconds | Decoded screen frames at sample |
+| --- | --- | --- | --- |
+| Isolated local backend, two Chrome clients | 2585.5 | 0.798–0.983 | 16 / 27 |
+| Public Botkeep backend, two Chrome clients | 2742.5 | 0.407–0.423 | 28 / 27 |
+| Public backend, installed Windows app and Chrome | 2607.9 | 0.648–0.769 | 24 / 37 |
+
+Measurements include unrelated Chrome/Edge memory; the Windows run also counts the test's owned Dorham processes. All remained below the 4 GiB guard. Some samples showed packet loss and high RTT, so physical intelligibility and monitor fidelity remain acceptance gates. Sanitized RTP/loss/energy counters, screenshots and memory samples are preserved in `artifacts/evidence/relay-final.json` and the three per-scenario reports. No TURN password or account token is included.
