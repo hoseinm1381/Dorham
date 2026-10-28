@@ -2,6 +2,8 @@
 
 Authorized public deployment: https://dorham.bot-keep.xyz/ (client default), https://qrmtdd.bot-keep.xyz/ (permanent address). Source: https://github.com/hoseinm1381/Dorham, branch `main`; compiled runtime branch `codex/botkeep`. No paid service was enabled. The backup operation cleared, and support ticket #65cfa669 is **closed at the user's request**.
 
+Later follow-up: deployment `eba59f5` from source `fc950cd` is now live with observer voice membership and truthful media-status/stream-timeout UI. Hosted observer join/leave visibility passed, without microphone capture; `/ready` returned 200 and ordinary `npm start` was restored. The optional Cloudflare adapter is prepared separately (`8949409` / `5facd31`) and has not been enabled or deployed: the account requires a billing subscription, which the user prohibited. The user's real cross-network call remains unresolved. See [media follow-up](MEDIA-FOLLOWUP.md) and [Cloudflare preparation](CLOUDFLARE-TURN.md). The earlier results below describe the preceding deployment and remain historical evidence.
+
 Botkeep allocation: Halloween Free, one of three slots used, 1024 MB RAM, 100% CPU and 1024 MB storage assigned. The process binds `0.0.0.0:57267`, using platform `SERVER_PORT`, production HTTPS/cookie/origin configuration in private `.env`, and `DATA_DIR=./data`. No TURN/SFU is running on Botkeep.
 
 | Check | Result and evidence |
