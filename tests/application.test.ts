@@ -14,6 +14,16 @@ describe('permissions', () => {
   });
 });
 describe('accounts and access', () => {
+  it('closes the server while authenticated WebSocket clients remain connected', async () => {
+    h = await harness(); const user = await h.register('shutdown_check'); const socket = await h.connect(user);
+    expect(socket.connected).toBe(true);
+    const stopped = new Promise<void>(resolve => socket.once('disconnect', () => resolve()));
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([h.app.close(), new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('Shutdown waited for a chat client')), 2000); })]);
+      await stopped; expect(socket.connected).toBe(false);
+    } finally { if (timeout) clearTimeout(timeout); socket.disconnect(); }
+  });
   it('validates input, rejects foreign origins, claims administration once, and warns before WAL-backed storage fills', async () => {
     h = await harness({ maxDatabaseMiB: 1 }); const a = await h.register('alice'), b = await h.register('bravo');
     expect((await h.api(a, '/servers', { name: '' })).statusCode).toBe(400);
