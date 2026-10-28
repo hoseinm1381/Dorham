@@ -3,19 +3,24 @@ import { mkdtemp, readFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
+import { isIP } from 'node:net';
 import { createApp } from '../apps/api/src/app';
 import { config } from '../apps/api/src/config';
 
 // Run after installing into an isolated local directory. Never uses the normal user profile.
 const executablePath = process.argv[2]; if (!executablePath) throw new Error('Pass the installed Dorham.exe path.');
 const liveServer = process.env.DORHAM_SMOKE_SERVER_URL;
+const displayName = liveServer ? 'Windows deployment check' : 'Desktop check';
+const username = `desktop_${Date.now().toString(36)}`;
+const testResolveIp = process.env.DORHAM_TEST_RESOLVE_IP;
+if (testResolveIp && (!liveServer || !isIP(testResolveIp))) throw new Error('A test DNS override requires a live server and a valid IP.');
 const instance = JSON.parse(await readFile('apps/web/src/instance.json', 'utf8'));
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'dorham-desktop-test-'));
 const backend = liveServer ? null : await createApp(config({ dataDir: path.join(temporary, 'server'), origins: ['dorham://app'], databaseUrl: '' }), { logger: false, rateLimit: false });
 if (backend) await backend.app.listen({ host: '127.0.0.1', port: 0 });
 const address = liveServer || `http://127.0.0.1:${(backend!.app.server.address() as any).port}`;
 const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')); delete env.ELECTRON_RUN_AS_NODE;
-const desktop = await electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temporary, 'profile')}`], env, timeout: 30000 });
+const desktop = await electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temporary, 'profile')}`, ...(testResolveIp ? [`--host-resolver-rules=MAP ${new URL(address).hostname} ${testResolveIp}`] : [])], env, timeout: 30000 });
 try {
   const page = await desktop.firstWindow(); await page.getByRole('heading', { name: 'Welcome back.' }).waitFor();
   page.on('response', response => { const url = new URL(response.url()); if (url.pathname.startsWith('/api/')) console.log('API', url.pathname, response.status()); });
@@ -34,13 +39,26 @@ try {
   const polling = liveServer ? await page.evaluate(async address => {
     const response = await fetch(`${address}/socket.io/?EIO=4&transport=polling`);
     return response.ok && (await response.text()).startsWith('0{');
-  }, address) : undefined;
+  }, address).catch(() => false) : undefined;
   if (liveServer) console.log('Hosted transports:', JSON.stringify({ wssUpgrade, polling }));
   await page.getByRole('button', { name: 'Create an account', exact: true }).click();
-  await page.getByLabel('Server address', { exact: true }).fill(address); await page.getByLabel('Display name', { exact: true }).fill('Desktop check');
-  await page.getByLabel('Username', { exact: true }).fill(`desktop_${Date.now().toString(36)}`); await page.getByLabel('Password', { exact: true }).fill(crypto.randomUUID());
-  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await page.getByRole('heading', { name: 'Hey, Desktop.' }).waitFor();
+  await page.getByLabel('Server address', { exact: true }).fill(address); await page.getByLabel('Display name', { exact: true }).fill(displayName);
+  await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill(crypto.randomUUID());
+  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await page.getByRole('heading', { name: `Hey, ${displayName.split(' ')[0]}.` }).waitFor();
   await page.locator('.connection-light.connected').waitFor();
+  const remoteAvatars = page.locator('img[src*="/avatars/"]');
+  if (liveServer) {
+    assert.ok(await remoteAvatars.count(), 'The hosted fixture has an uploaded avatar.');
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('img[src*="/avatars/"]')].every(image => image.complete && image.naturalWidth > 0));
+  }
+  let dmMessage: string | undefined;
+  if (liveServer) {
+    await page.getByRole('button', { name: 'Message Web deployment check', exact: true }).click();
+    dmMessage = `Windows to web verification ${new Date().toISOString()}`;
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill(dmMessage);
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await page.getByTestId('message').filter({ hasText: dmMessage }).waitFor();
+  }
   const encrypted = await readFile(path.join(temporary, 'profile', 'settings.json'), 'utf8');
   const secret = await page.evaluate(() => window.desktop!.getSecret()); assert.ok(secret); assert.ok(!encrypted.includes(secret));
   await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/windows-installed.png' });
@@ -48,7 +66,7 @@ try {
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   const lifecycle = await desktop.evaluate(({ BrowserWindow }) => ({ windows: BrowserWindow.getAllWindows().length, visible: BrowserWindow.getAllWindows()[0].isVisible() }));
   assert.deepEqual(lifecycle, { windows: 1, visible: false });
-  await writeFile(`artifacts/evidence/windows-${liveServer ? 'live-' : ''}smoke.json`, JSON.stringify({ testedAt: new Date().toISOString(), executablePath, server: address, defaultServer: instance.defaultServerUrl, installed: true, nativeRegistration: true, socketConnected: true, wssUpgrade, polling, isolatedProfile: temporary, sandbox: true, contextIsolation: true, nodeIntegration: false, encryptedCredentials: true, trayCloseWhileInCall: 'window hidden, process retained', physicalMedia: 'untested' }, null, 2));
+  await writeFile(`artifacts/evidence/windows-${liveServer ? 'live-' : ''}smoke.json`, JSON.stringify({ testedAt: new Date().toISOString(), executablePath, server: address, defaultServer: instance.defaultServerUrl, username, displayName, dmMessage, remoteAvatarsLoaded: liveServer ? true : undefined, testResolveIp, installed: true, nativeRegistration: true, socketConnected: true, wssUpgrade, polling, isolatedProfile: temporary, sandbox: true, contextIsolation: true, nodeIntegration: false, encryptedCredentials: true, trayCloseWhileInCall: 'window hidden, process retained', physicalMedia: 'untested' }, null, 2));
   console.log('Installed Windows app passed rendering, native registration, protected credentials, sandbox and background-close checks.');
 } catch (error) {
   const page = await desktop.firstWindow(); await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/windows-failure.png' });
