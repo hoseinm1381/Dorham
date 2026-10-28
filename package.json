@@ -1,0 +1,33 @@
+{
+  "name": "dorham-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env apps/api/dist/index.js",
+    "db:migrate": "node --env-file-if-exists=.env apps/api/dist/database.js migrate",
+    "db:backup": "node --env-file-if-exists=.env apps/api/dist/database.js backup",
+    "db:restore": "node --env-file-if-exists=.env apps/api/dist/database.js restore"
+  },
+  "dependencies": {
+    "fastify": "5.12.7",
+    "@fastify/cookie": "11.1.5",
+    "@fastify/cors": "11.3.1",
+    "@fastify/helmet": "13.2.0",
+    "@fastify/rate-limit": "11.2.1",
+    "@fastify/static": "10.1.8",
+    "@fastify/multipart": "10.1.6",
+    "argon2": "0.45.1",
+    "better-sqlite3": "13.0.3",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1",
+    "socket.io": "4.8.4",
+    "zod": "4.6.7",
+    "dotenv": "18.0.9",
+    "livekit-server-sdk": "2.19.2",
+    "sharp": "0.35.5"
+  }
+}
