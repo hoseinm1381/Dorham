@@ -1027,8 +1027,12 @@ async function createApp(c = config(), options = {}) {
     }
   }, 5e3);
   maintenance.unref();
-  app2.addHook("onClose", async () => {
+  app2.addHook("preClose", async () => {
     clearInterval(maintenance);
+    io.disconnectSockets(true);
+    io.engine.close();
+  });
+  app2.addHook("onClose", async () => {
     await new Promise((resolve) => io.close(() => resolve()));
     await db.close();
     if (existsSync(lockPath) && readFileSync(lockPath, "utf8") === String(process.pid)) unlinkSync(lockPath);
