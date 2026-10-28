@@ -9,7 +9,7 @@ import { io } from 'socket.io-client';
 const directory = process.argv[2]; if (!directory) throw new Error('Pass an independently installed deployment-bundle directory.');
 const probe = createServer(); await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve)); const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
 const data = await mkdtemp(path.join(os.tmpdir(), 'dorham-production-data-')), origin = 'https://production-smoke.invalid';
-const child = spawn(process.execPath, ['apps/api/dist/index.js'], { cwd: directory, env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', SERVER_PORT: String(port), PUBLIC_URL: origin, ALLOWED_ORIGINS: origin, DATA_DIR: data, DATABASE_URL: '', COOKIE_SECURE: 'true' }, windowsHide: true });
+const child = spawn(process.execPath, ['deployment/start.mjs'], { cwd: directory, env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', SERVER_PORT: String(port), PUBLIC_URL: origin, ALLOWED_ORIGINS: origin, DATA_DIR: data, DATABASE_URL: '', COOKIE_SECURE: 'true' }, windowsHide: true });
 let logs = ''; child.stdout.on('data', chunk => { logs = (logs + chunk).slice(-12000); }); child.stderr.on('data', chunk => { logs = (logs + chunk).slice(-12000); });
 const base = `http://127.0.0.1:${port}`; let socket;
 try {
