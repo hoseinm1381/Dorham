@@ -1,6 +1,6 @@
 import { randomUUID, createHmac } from 'node:crypto';
 import { z } from 'zod';
-import { basePermissions, resolvePermissions, canManage, requestId as requestIdSchema, type Role, type Permission, type PublicUser, type Message, type VoiceRoom } from '@dorham/contracts';
+import { basePermissions, resolvePermissions, canManage, requestId as requestIdSchema, type Role, type Permission, type PublicUser, type Message, type VoiceRoom, type VoicePresence } from '@dorham/contracts';
 import type { Connection, Database, Row } from './db';
 import type { Config } from './config';
 import { fail, hash } from './security';
@@ -65,7 +65,7 @@ export class Service {
         const read = await tx.one('SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?', [conversationId, userId]);
         unread[conversationId] = { sequence: Number(cv?.sequence || 0), readSequence: Number(read?.sequence || 0) };
       }
-      return { me: publicUser(me!), servers, channels, dms: dms.map(d => ({ id: d.conversation_id, user: publicUser(d) })), users: (await tx.all('SELECT * FROM users ORDER BY username LIMIT 100')).map(publicUser), unread, mediaTransport: this.c.mediaTransport, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
+      return { me: publicUser(me!), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map(d => ({ id: d.conversation_id, user: publicUser(d) })), users: (await tx.all('SELECT * FROM users ORDER BY username LIMIT 100')).map(publicUser), unread, mediaTransport: this.c.mediaTransport, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
     });
   }
   async createServer(userId: string, requestId: string, name: string) {
@@ -256,6 +256,16 @@ export class Service {
     const changed = (current?.user_id || null) !== (chosen?.user_id || null) || (current && current.expires_at < now && chosen);
     const epoch = Number(current?.epoch || 0) + (changed || !current ? 1 : 0);
     await tx.run('INSERT INTO coordinators(channel_id,user_id,epoch,expires_at) VALUES(?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET user_id=excluded.user_id,epoch=excluded.epoch,expires_at=excluded.expires_at', [channelId, chosen?.user_id || null, epoch, chosen ? Number(chosen.heartbeat) + 15000 : 0]);
+  }
+  async voiceDirectory(userId: string, tx: Connection = this.db): Promise<VoicePresence[]> {
+    const rooms: VoicePresence[] = [], now = Date.now();
+    for (const ch of await tx.all('SELECT DISTINCT channel_id FROM voice_members WHERE heartbeat>=?', [now - 30000])) {
+      try { await this.channel(tx, userId, ch.channel_id); } catch { continue; }
+      const members = (await tx.all('SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? AND v.heartbeat>=? ORDER BY v.joined_at', [ch.channel_id, now - 30000])).map(vm => ({ user: publicUser({ ...vm, id: vm.user_id }), muted: Boolean(vm.muted), deafened: Boolean(vm.deafened), serverMuted: Boolean(vm.server_muted) }));
+      const shares = await tx.one('SELECT COUNT(*) AS count FROM share_leases WHERE channel_id=? AND expires_at>=?', [ch.channel_id, now]);
+      rooms.push({ channelId: ch.channel_id, members, shares: Number(shares!.count) });
+    }
+    return rooms;
   }
   async room(userId: string, channelId: string): Promise<VoiceRoom> {
     return this.db.transaction(async tx => { await this.channel(tx, userId, channelId); await this.maintainRoom(tx, channelId); return this.roomView(tx, channelId); });

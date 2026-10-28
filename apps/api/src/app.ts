@@ -210,6 +210,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       for (const s of io.sockets.sockets.values()) { try { await service.conversation(db, s.data.userId, payload.conversationId); s.emit(kind, payload); } catch { /* access denied */ } }
     } else if (kind === 'voice:changed') {
       for (const s of io.sockets.sockets.values()) {
+        s.emit('voice:directory', await service.voiceDirectory(s.data.userId));
         if (!s.data.voiceChannel) continue;
         const vm = await db.one('SELECT channel_id FROM voice_members WHERE user_id=? AND socket_id=?', [s.data.userId, s.id]);
         if (!vm) { s.emit('voice:removed', {}); s.data.voiceChannel = null; continue; }

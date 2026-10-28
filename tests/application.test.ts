@@ -123,6 +123,23 @@ describe('messages and membership', () => {
   });
 });
 describe('real-time voice control', () => {
+  it('shows authorized voice membership to observers before they join and hides private rooms', async () => {
+    h = await harness(); const owner = await h.register('owner'), observer = await h.register('observer'), outsider = await h.register('outsider');
+    const server = (await h.api(owner, '/servers', { name: 'Visible voice' })).json();
+    const invite = (await h.api(owner, `/servers/${server.id}/invites`, {})).json(); await h.api(observer, '/invites/join', { code: invite.code });
+    const channel = (await h.api(owner, '/bootstrap')).json().channels.find((c: any) => c.kind === 'voice');
+    const speaker = await h.connect(owner), watcher = await h.connect(observer), stranger = await h.connect(outsider);
+    const seen = new Promise<any>(resolve => watcher.once('voice:directory', resolve)), hidden = new Promise<any>(resolve => stranger.once('voice:directory', resolve));
+    await event(speaker, 'voice:join', { channelId: channel.id, eligible: true });
+    expect((await seen)[0].members[0].user.id).toBe(owner.id); expect(await hidden).toEqual([]);
+    expect((await h.api(observer, '/bootstrap')).json().voicePresence[0].members[0].user.id).toBe(owner.id);
+    const changed = new Promise<any>(resolve => watcher.once('voice:directory', resolve));
+    await event(speaker, 'voice:state', { muted: true, deafened: false, requestId: randomUUID() }); expect((await changed)[0].members[0].muted).toBe(true);
+    await h.api(owner, `/channels/${channel.id}`, { role: 'member', permissions: { view: false } }, 'PATCH');
+    expect((await h.api(observer, '/bootstrap')).json().voicePresence).toEqual([]);
+    const empty = new Promise<any>(resolve => watcher.once('voice:directory', resolve));
+    await event(speaker, 'voice:leave', { requestId: randomUUID() }); expect(await empty).toEqual([]);
+  });
   it('revokes live speaking and sharing when a role loses channel privileges', async () => {
     h = await harness(); const owner = await h.register('owner'), member = await h.register('member');
     const server = (await h.api(owner, '/servers', { name: 'Permissions' })).json();

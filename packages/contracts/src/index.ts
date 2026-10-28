@@ -16,6 +16,7 @@ export type ConversationEvent = { conversationId: string; sequence: number; kind
 export type VoiceMember = { user: PublicUser; muted: boolean; deafened: boolean; serverMuted: boolean; canShare: boolean; epoch: string; eligible: boolean; joinedAt: number };
 export type Share = { id: string; channelId: string; userId: string; expiresAt: number };
 export type VoiceRoom = { channelId: string; members: VoiceMember[]; shares: Share[]; coordinatorId: string | null; coordinatorEpoch: number; transport: 'mesh' | 'livekit' };
+export type VoicePresence = { channelId: string; members: Pick<VoiceMember, 'user' | 'muted' | 'deafened' | 'serverMuted'>[]; shares: number };
 export type Signal = { channelId: string; to: string; from?: string; epoch: string; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit | null; streams?: { streamId: string; kind: 'audio' | 'screen'; leaseId?: string }[]; subscription?: { leaseId: string; enabled: boolean } };
 export type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
 export const credentialsSchema = z.object({ username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/), password: z.string().min(10).max(128) });

@@ -2,14 +2,14 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 async function register(page: Page, username: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('correct-horse-123'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible(); }
 async function api(page: Page, route: string, body?: any, method = body ? 'POST' : 'GET') { return page.evaluate(async ({ route, body, method }) => { const auth = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch(`/api/v1${route}`, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': auth.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(await r.text()); return r.json(); }, { route, body, method }); }
-async function instrument(page: Page) {
-  await page.addInitScript(() => {
+async function instrument(page: Page, relayOnly = false) {
+  await page.addInitScript((relayOnly: boolean) => {
     const original = RTCPeerConnection; (window as any).__pcs = [];
     (window as any).__gains = []; const gain = AudioContext.prototype.createGain; AudioContext.prototype.createGain = function() { const node = gain.call(this); (window as any).__gains.push(node); return node; };
-    (window as any).RTCPeerConnection = new Proxy(original, { construct(target, args) { const pc = new target(...args); (window as any).__pcs.push(pc); return pc; } });
+    (window as any).RTCPeerConnection = new Proxy(original, { construct(target, args) { const pc = new target({ ...args[0], ...(relayOnly ? { iceTransportPolicy: 'relay' } : {}) }); (window as any).__pcs.push(pc); return pc; } });
     // Deterministic test capture feeds the actual product WebRTC implementation.
     navigator.mediaDevices.getDisplayMedia = async () => { const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360; const context = canvas.getContext('2d')!; let frame = 0; const timer = setInterval(() => { context.fillStyle = frame++ % 2 ? '#7564e6' : '#83daba'; context.fillRect(0, 0, 640, 360); context.fillStyle = '#fff'; context.font = '40px sans-serif'; context.fillText(`Synthetic capture ${frame}`, 40, 180); }, 50); const stream = canvas.captureStream(15); stream.getTracks()[0].addEventListener('ended', () => clearInterval(timer)); return stream; };
-  });
+  }, relayOnly);
 }
 async function stats(page: Page) { return page.evaluate(async () => { const results: any[] = []; for (const pc of (window as any).__pcs || []) { if (pc.connectionState !== 'closed') (await pc.getStats()).forEach((r: any) => results.push({ ...r })); } return results; }); }
 
@@ -40,7 +40,13 @@ test('actual WebRTC decodes audio/video, applies volume and mute, unsubscribes a
   await register(page, `VoiceA${suffix}`); await register(other, `VoiceB${suffix}`);
   const server = await api(page, '/servers', { name: 'Voice lab' }); const invite = await api(page, `/servers/${server.id}/invites`, {}); await api(other, '/invites/join', { code: invite.code });
   await page.getByRole('button', { name: 'Open Voice lab', exact: true }).click(); await other.getByRole('button', { name: 'Open Voice lab', exact: true }).click();
-  await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await other.getByRole('button', { name: 'Lounge', exact: true }).click();
+  await page.getByRole('button', { name: 'Lounge', exact: true }).click();
+  await expect(other.getByLabel('Participants in Lounge')).toContainText(`VoiceA${suffix}`);
+  await expect(other.locator('.voice-panel')).toHaveCount(0);
+  await mkdir('artifacts/evidence', { recursive: true }); await other.screenshot({ path: 'artifacts/evidence/voice-observer-before-join.png' });
+  await other.reload(); await other.getByRole('button', { name: 'Open Voice lab', exact: true }).click();
+  await expect(other.getByLabel('Participants in Lounge')).toContainText(`VoiceA${suffix}`);
+  await other.getByRole('button', { name: 'Lounge', exact: true }).click();
   await expect(page.locator('.voice-card')).toHaveCount(2); await expect(other.locator('.voice-card')).toHaveCount(2);
   await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'audio' && r.totalSamplesReceived > 0), { timeout: 30000 }).toBe(true).catch(async e => {
     const pcs = await other.evaluate(() => (window as any).__pcs.map((p: RTCPeerConnection) => ({ state: p.connectionState, signaling: p.signalingState, local: p.localDescription?.type, remote: p.remoteDescription?.type })));
@@ -60,5 +66,27 @@ test('actual WebRTC decodes audio/video, applies volume and mute, unsubscribes a
   await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(other.locator('.voice-card')).toHaveCount(1); await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); await expect(other.locator('.diagnostics')).toContainText(`VoiceB${suffix}`);
   await mkdir('artifacts/evidence', { recursive: true }); await other.screenshot({ path: 'artifacts/evidence/voice-migration.png', fullPage: true });
   const { writeFile } = await import('node:fs/promises'); await writeFile('artifacts/evidence/webrtc.json', JSON.stringify({ scenario: 'two Chrome contexts, actual WebRTC, fake microphone and deterministic canvas capture', beforeCoordinatorLeave: before, decodedMedia }, null, 2));
+  await a.close(); await b.close();
+});
+
+
+test('blocked ICE reports missing media and waiting video instead of a successful call', async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ['microphone'] }), b = await browser.newContext({ permissions: ['microphone'] }), page = await a.newPage(), other = await b.newPage();
+  await instrument(page, true); await instrument(other, true); const suffix = Date.now().toString().slice(-7);
+  await register(page, `BlockedA${suffix}`); await register(other, `BlockedB${suffix}`);
+  const server = await api(page, '/servers', { name: 'Blocked media lab' }); const invite = await api(page, `/servers/${server.id}/invites`, {}); await api(other, '/invites/join', { code: invite.code });
+  await page.getByRole('button', { name: 'Open Blocked media lab', exact: true }).click(); await other.getByRole('button', { name: 'Open Blocked media lab', exact: true }).click();
+  await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await other.getByRole('button', { name: 'Lounge', exact: true }).click();
+  await expect(other.locator('.voice-card')).toHaveCount(2);
+  await expect(other.locator('.voice-signal')).not.toContainText('Voice connected');
+  await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+  await expect(other.locator('.screen-status')).toContainText('Connecting to screen');
+  await expect(other.locator('.screen-status')).toContainText('No video received yet', { timeout: 22000 });
+  await expect(other.getByRole('alert')).toContainText('enable a media relay', { timeout: 16000 });
+  await expect(other.locator('.voice-signal')).toContainText('taking too long');
+  expect((await stats(other)).some(r => r.type === 'inbound-rtp' && (r.framesDecoded > 0 || r.totalSamplesReceived > 0))).toBe(false);
+  await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click();
+  await expect(other.locator('.diagnostics pre')).toContainText('"relayConfigured": false');
+  await other.screenshot({ path: 'artifacts/evidence/blocked-media-diagnostics.png' });
   await a.close(); await b.close();
 });

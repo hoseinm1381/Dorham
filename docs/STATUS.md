@@ -2,6 +2,8 @@
 
 Release candidate, 28 October 2026. Source and a compiled deployment branch have been pushed to GitHub with authorization. The application is running at https://dorham.bot-keep.xyz/ on Botkeep's free allocation. The earlier backup operation cleared; the support ticket is closed at the user's request. VPN connectivity enabled live web/Windows testing. No service has been purchased. Implemented means source exists; tested applies only to the stated scenario. See [hosted verification](HOSTED-VERIFICATION.md).
 
+Follow-up: the user's actual Chrome/VPN/Sweden call failed despite working chat. No TURN relay is configured. Observer voice membership and media-failure feedback are fixed in source and tested locally; their live rollout and a real relay-assisted call remain outstanding. See [voice/network follow-up](MEDIA-FOLLOWUP.md). Chrome-only Secure DNS was authorized but could not be applied by automation; Windows DNS remains unchanged.
+
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
 | TypeScript workspaces, contracts and production bundles | Implemented, tested | ESLint, type checking and builds pass |
