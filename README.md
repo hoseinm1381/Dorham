@@ -31,6 +31,8 @@ For development, `npm run dev` starts the API on port 3001 and Vite on 5173. Set
 
 Direct media needs working peer connectivity. Configure TURN for restrictive networks. Mesh moderation controls the official clients and signaling; it cannot stop modified clients from independently exchanging media. An external SFU provides the stronger enforcement path. See [media architecture](docs/ARCHITECTURE.md).
 
+Noise suppression and echo cancellation default to on. Web/Windows expose their preferences and applied microphone settings under **Voice & connection → Microphone processing**. Saved changes apply when rejoining voice. See [audio processing and verification](docs/AUDIO-PROCESSING.md).
+
 ## Build and verify
 
 ```powershell

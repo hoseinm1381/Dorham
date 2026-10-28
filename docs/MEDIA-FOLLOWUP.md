@@ -2,6 +2,8 @@
 
 The user reported a real two-person Chrome test: chat worked, one participant used a VPN and the other was in Sweden, but voice and screen sharing failed. A person's voice-channel membership was also invisible until the viewer joined voice. The earlier local decoded-media checks did not establish cross-network media reliability.
 
+The operator subsequently confirmed the follow-up call worked after relay configuration and requested noise/echo cancellation. Built-in processing was already requested on browser and Android capture. The new web/Windows controls expose those defaults and the actual applied microphone settings; saved changes apply after rejoining. See [audio processing](AUDIO-PROCESSING.md). The earlier remote-call acceptance gates below are historical; physical acoustic suppression/echo quality still needs listening tests.
+
 ## Findings and fixes
 
 - The sidebar used only the viewer's joined `room`; the backend sent room updates only to active voice participants. The fix adds an authorized, minimal `voice:directory` snapshot and bootstrap field. Observers see visible-channel members, mute/deafen state and changes without opening a microphone. Channel overrides and server membership are checked again before each directory delivery. No signaling epochs or credentials are included.

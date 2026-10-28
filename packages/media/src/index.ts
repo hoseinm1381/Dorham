@@ -1,8 +1,11 @@
 import type { Socket } from 'socket.io-client';
 import type { VoiceRoom, Signal, Result, Share } from '@dorham/contracts';
+import type { AudioProcessing, AudioProcessingState } from './audio-processing';
+export { defaultAudioProcessing } from './audio-processing';
+export type { AudioProcessing, AudioProcessingState };
 export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream };
 export type MediaEvents = { room: VoiceRoom | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };
-export type MediaOptions = { socket: Socket; userId: string; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
+export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
 export type MediaCapabilities = { audio: boolean; screenCapture: boolean; nativeVideo: boolean; amplification: boolean };
 export interface MediaTransport {
   room: VoiceRoom | null;
@@ -10,6 +13,7 @@ export interface MediaTransport {
   join(channelId: string): Promise<void>; leave(): Promise<void>;
   setMuted(value: boolean): Promise<void>; setDeafened(value: boolean): Promise<void>;
   setVolume(userId: string, value: number): void; setDevice(deviceId: string): Promise<void>;
+  getAudioProcessing?(): AudioProcessingState; setAudioProcessing?(settings: AudioProcessing): Promise<void>;
   startShare(quality?: '720p15' | '720p30' | '1080p30'): Promise<void>; stopShare(): Promise<void>;
   subscribe(share: Share, enabled: boolean): Promise<void>;
   getStats(): Promise<Record<string, any>>; destroy(): Promise<void>;

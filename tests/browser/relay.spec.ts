@@ -55,7 +55,8 @@ async function measurements(page: Page) {
         if (report.type === 'local-candidate') candidates.push({ type: report.candidateType, protocol: report.protocol, relayProtocol: report.relayProtocol });
       });
       const local = pair && reports.get(pair.localCandidateId), remote = pair && reports.get(pair.remoteCandidateId);
-      results.push({ state: peer.connectionState, iceState: peer.iceConnectionState, gathering: peer.iceGatheringState, signaling: peer.signalingState, localCandidateType: local?.candidateType, remoteCandidateType: remote?.candidateType, relayProtocol: local?.relayProtocol, protocol: local?.protocol, roundTripTime: pair?.currentRoundTripTime, media, candidates });
+      const microphoneProcessing = peer.getSenders().filter(sender => sender.track?.kind === 'audio').map(sender => { const s = sender.track!.getSettings(); return { echoCancellation: s.echoCancellation, noiseSuppression: s.noiseSuppression }; });
+      results.push({ state: peer.connectionState, iceState: peer.iceConnectionState, gathering: peer.iceGatheringState, signaling: peer.signalingState, localCandidateType: local?.candidateType, remoteCandidateType: remote?.candidateType, relayProtocol: local?.relayProtocol, protocol: local?.protocol, roundTripTime: pair?.currentRoundTripTime, microphoneProcessing, media, candidates });
     }
     return results;
   });
@@ -92,6 +93,12 @@ test('external TURN carries decoded audio and two screen streams with direct ICE
     console.log('Relay test: both clients joined the voice room.');
     for (const p of [page, other]) await expect.poll(async () => (await measurements(p)).some(peer => peer.localCandidateType === 'relay' && peer.remoteCandidateType === 'relay' && peer.media.some(r => r.kind === 'audio' && r.totalSamplesReceived > 1000)), { timeout: 45000 }).toBe(true);
     console.log('Relay test: both clients decode audio over selected TURN pairs.');
+    await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click();
+    await expect(other.getByRole('checkbox', { name: 'Noise suppression', exact: true })).toBeChecked();
+    await expect(other.getByRole('checkbox', { name: 'Echo cancellation', exact: true })).toBeChecked();
+    for (const p of [page, other]) expect((await measurements(p)).flatMap(peer => peer.microphoneProcessing)[0]).toMatchObject({ echoCancellation: true, noiseSuppression: true });
+    await other.screenshot({ path: `artifacts/evidence/${evidenceName}-audio-controls.png` });
+    await other.getByRole('button', { name: 'Close dialog', exact: true }).click();
     for (const p of [page, other]) await p.getByRole('button', { name: 'Share screen', exact: true }).click();
     for (const p of [page, other]) {
       await expect.poll(async () => (await measurements(p)).some(peer => peer.media.some(r => r.kind === 'video' && r.framesDecoded > 5)), { timeout: 45000 }).toBe(true);

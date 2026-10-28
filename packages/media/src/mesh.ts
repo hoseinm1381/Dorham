@@ -1,5 +1,6 @@
 import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
 import { ack, type MediaTransport, type MediaOptions } from './index';
+import { defaultAudioProcessing, browserAudioProcessing, type AudioProcessing } from './audio-processing';
 type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaElementAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number; connectionTimer?: ReturnType<typeof setTimeout>; timedOut: boolean; iceErrors: number[] };
 export class MeshTransport implements MediaTransport {
   room: VoiceRoom | null = null;
@@ -8,6 +9,8 @@ export class MeshTransport implements MediaTransport {
   protected peers = new Map<string, Peer>(); protected mic: MediaStream | null = null; protected screen: MediaStream | null = null;
   protected context: AudioContext | null = null; protected lease: Share | null = null; protected channelId: string | null = null;
   protected epoch = ''; protected iceServers: RTCIceServer[] = []; protected muted = false; protected deafened = false;
+  private audioProcessing: AudioProcessing = { ...defaultAudioProcessing };
+  private captureProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private heartbeat?: ReturnType<typeof setInterval>; private meter?: ReturnType<typeof setInterval>; private volumes = new Map<string, number>();
   private joining = false; private destroyed = false; private signalQueue: Promise<unknown> = Promise.resolve();
   private hiddenShares = new Set<string>();
@@ -19,6 +22,7 @@ export class MeshTransport implements MediaTransport {
   private onConnect = () => { if (this.channelId && !this.joining) void this.rejoin().catch(e => this.error(e)); };
   private onDisconnect = () => { this.options.emit('status', 'Reconnecting voice…'); };
   constructor(protected options: MediaOptions) {
+    this.audioProcessing = { ...defaultAudioProcessing, ...options.audioProcessing };
     const s = options.socket; s.on('voice:room', this.onRoom); s.on('voice:signal', this.onSignal); s.on('voice:removed', this.onRemoved); s.on('connect', this.onConnect); s.on('disconnect', this.onDisconnect);
   }
   protected error(e: any) { if (!this.destroyed) this.options.emit('error', e.message || String(e)); }
@@ -27,7 +31,9 @@ export class MeshTransport implements MediaTransport {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access requires HTTPS or localhost.');
     this.joining = true;
     try {
-      this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      const processing = { ...this.audioProcessing };
+      this.mic = await navigator.mediaDevices.getUserMedia({ audio: { ...processing, autoGainControl: true }, video: false });
+      this.captureProcessing = processing;
       this.context = new AudioContext(); await this.context.resume(); this.channelId = channelId;
       await this.rejoin();
       this.heartbeat = setInterval(() => { if (this.options.socket.connected && this.room) void ack(this.options.socket, 'voice:heartbeat', { eligible: this.peers.size === 0 || [...this.peers.values()].some(p => p.pc.connectionState === 'connected') }).catch(e => this.error(e)); }, 5000);
@@ -151,10 +157,14 @@ export class MeshTransport implements MediaTransport {
   async setDeafened(value: boolean) { this.deafened = value; await this.setMuted(this.muted); for (const userId of this.peers.keys()) this.applyVolume(userId); }
   setVolume(userId: string, value: number) { this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolume(userId); }
   async setDevice(deviceId: string) {
-    const next = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    const next = await navigator.mediaDevices.getUserMedia({ audio: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), ...this.captureProcessing, autoGainControl: true } });
     const old = this.mic; this.mic = next;
     for (const p of this.peers.values()) { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(next.getAudioTracks()[0]); }
     old?.getTracks().forEach(t => t.stop()); this.attachMicMeter(); await this.setMuted(this.muted);
+  }
+  getAudioProcessing() { return browserAudioProcessing(this.audioProcessing, this.mic?.getAudioTracks()[0], this.captureProcessing); }
+  async setAudioProcessing(settings: AudioProcessing) {
+    this.audioProcessing = { ...settings };
   }
   async startShare(quality: '720p15' | '720p30' | '1080p30' = '720p15') {
     if (!this.channelId) throw new Error('Join a voice channel first.');
@@ -188,7 +198,7 @@ export class MeshTransport implements MediaTransport {
     if (!enabled) this.options.emit('screenRemoved', share.id); else this.attachTracks(share.userId, p);
   }
   async getStats() {
-    const result: Record<string, any> = { connectivity: { relayConfigured: this.iceServers.some(server => (Array.isArray(server.urls) ? server.urls : [server.urls]).some(url => /^turns?:/i.test(url))), microphoneState: this.mic?.getAudioTracks()[0]?.readyState || 'absent', captureState: this.screen?.getVideoTracks()[0]?.readyState || 'absent' } };
+    const result: Record<string, any> = { audioProcessing: this.getAudioProcessing(), connectivity: { relayConfigured: this.iceServers.some(server => (Array.isArray(server.urls) ? server.urls : [server.urls]).some(url => /^turns?:/i.test(url))), microphoneState: this.mic?.getAudioTracks()[0]?.readyState || 'absent', captureState: this.screen?.getVideoTracks()[0]?.readyState || 'absent' } };
     for (const [userId, p] of this.peers) {
       const stats = await p.pc.getStats(); const rows: any[] = [];
       stats.forEach(r => { if (['inbound-rtp', 'outbound-rtp', 'remote-inbound-rtp', 'candidate-pair'].includes(r.type)) rows.push({ ...r }); });

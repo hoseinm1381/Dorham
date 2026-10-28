@@ -5,6 +5,8 @@ async function api(page: Page, route: string, body?: any, method = body ? 'POST'
 async function instrument(page: Page, relayOnly = false) {
   await page.addInitScript((relayOnly: boolean) => {
     const original = RTCPeerConnection; (window as any).__pcs = [];
+    const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); (window as any).__microphones = [];
+    navigator.mediaDevices.getUserMedia = async constraints => { const stream = await capture(constraints); (window as any).__microphones.push(stream); return stream; };
     (window as any).__gains = []; const gain = AudioContext.prototype.createGain; AudioContext.prototype.createGain = function() { const node = gain.call(this); (window as any).__gains.push(node); return node; };
     (window as any).RTCPeerConnection = new Proxy(original, { construct(target, args) { const pc = new target({ ...args[0], ...(relayOnly ? { iceTransportPolicy: 'relay' } : {}) }); (window as any).__pcs.push(pc); return pc; } });
     // Deterministic test capture feeds the actual product WebRTC implementation.
@@ -89,4 +91,38 @@ test('blocked ICE reports missing media and waiting video instead of a successfu
   await expect(other.locator('.diagnostics pre')).toContainText('"relayConfigured": false');
   await other.screenshot({ path: 'artifacts/evidence/blocked-media-diagnostics.png' });
   await a.close(); await b.close();
+});
+
+
+test('microphone processing defaults on, persists and applies on rejoin without unmuting', async ({ browser }) => {
+  const context = await browser.newContext({ permissions: ['microphone'] }), page = await context.newPage();
+  page.setDefaultTimeout(15000);
+  const settings = () => page.evaluate(() => [...new Set(((window as any).__microphones as MediaStream[]).flatMap(stream => stream.getAudioTracks()))].filter(track => track.readyState === 'live').map(track => ({ ...track.getSettings(), enabled: track.enabled, trackId: track.id })));
+  const open = () => page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click();
+  const close = () => page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  const join = () => page.getByRole('button', { name: 'Lounge', exact: true }).click();
+  try {
+    await instrument(page); await register(page, 'Processing' + Date.now().toString().slice(-7));
+    await page.getByRole('button', { name: 'Create a server', exact: true }).click(); await page.getByLabel('Server name', { exact: true }).fill('Microphone lab'); await page.getByRole('button', { name: 'Create space', exact: true }).click();
+    await page.getByRole('button', { name: 'Open Microphone lab', exact: true }).click(); await join();
+    await expect(page.locator('.voice-card')).toHaveCount(1); await open();
+    const initial = await settings(); expect(initial[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true });
+    for (const label of ['Noise suppression', 'Echo cancellation']) { await expect(page.getByRole('checkbox', { name: label, exact: true })).toBeChecked(); await page.getByRole('checkbox', { name: label, exact: true }).uncheck(); }
+    await expect(page.getByText('Saved. Leave and rejoin voice to apply these changes.', { exact: true })).toBeVisible();
+    expect((await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true, trackId: initial[0].trackId });
+    await page.getByRole('combobox', { name: /^Microphone/ }).selectOption('');
+    await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true });
+    await page.reload(); await page.getByRole('button', { name: 'Open Microphone lab', exact: true }).click(); await join();
+    await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false });
+    await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await open();
+    for (const label of ['Noise suppression', 'Echo cancellation']) { await expect(page.getByRole('checkbox', { name: label, exact: true })).not.toBeChecked(); await page.getByRole('checkbox', { name: label, exact: true }).check(); }
+    const pendingWhileMuted = await settings(); expect(pendingWhileMuted[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false, enabled: false });
+    await close(); await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(page.locator('.voice-panel')).toHaveCount(0); await join();
+    await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true, enabled: false });
+    await open(); await expect(page.getByText('Saved. Leave and rejoin voice to apply these changes.', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 10000 }); await expect(page.locator('.voice-card')).toHaveCount(1);
+    await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/audio-processing-controls.png' });
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile('artifacts/evidence/audio-processing.json', JSON.stringify({ measuredAt: new Date().toISOString(), initial, persistedAfterReload: 'both false verified on the new microphone track', pendingWhileMuted, enabledAfterRejoin: await settings(), limitations: 'Actual browser capture/settings; acoustic noise/echo attenuation on physical devices is not measured.' }, null, 2));
+  } finally { await context.close(); }
 });
