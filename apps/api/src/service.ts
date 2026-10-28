@@ -4,11 +4,13 @@ import { basePermissions, resolvePermissions, canManage, requestId as requestIdS
 import type { Connection, Database, Row } from './db';
 import type { Config } from './config';
 import { fail, hash } from './security';
+import { CloudflareTurn, cloudflareTurnTtl } from './turn';
 
 export const publicUser = (u: Row): PublicUser => ({ id: u.id, username: u.username, displayName: u.display_name, bio: u.bio, avatar: u.avatar, status: u.status, instanceAdmin: Boolean(u.instance_admin) });
 export class Service {
   notify: (kind: string, payload: any) => Promise<void> = async () => {};
-  constructor(public db: Database, public c: Config) {}
+  private cloudflareTurn: CloudflareTurn | null;
+  constructor(public db: Database, public c: Config) { this.cloudflareTurn = c.cloudflareTurnKeyId ? new CloudflareTurn(c.cloudflareTurnKeyId, c.cloudflareTurnApiToken) : null; }
   async mutate<T>(userId: string, requestId: string, operation: string, payload: unknown, fn: (tx: Connection) => Promise<T>): Promise<T> {
     requestIdSchema.parse(requestId);
     const fingerprint = hash(JSON.stringify(payload));
@@ -281,6 +283,10 @@ export class Service {
     return { channelId, members, shares, coordinatorId: coordinator?.user_id || null, coordinatorEpoch: Number(coordinator?.epoch || 0), transport: this.c.mediaTransport };
   }
   async joinVoice(userId: string, socketId: string, channelId: string, eligible: boolean) {
+    const access = await this.channel(this.db, userId, channelId);
+    if (access.kind !== 'voice') fail(400, 'NOT_VOICE', 'Select a voice channel.');
+    // Fetch outside the write transaction and before creating membership. Revalidate below.
+    const iceServers = this.c.mediaTransport === 'mesh' && this.cloudflareTurn ? await this.cloudflareTurn.forUser(userId) : this.iceServers(userId);
     const result = await this.db.transaction(async tx => {
       const ch = await this.channel(tx, userId, channelId);
       if (ch.kind !== 'voice') fail(400, 'NOT_VOICE', 'Select a voice channel.');
@@ -294,7 +300,7 @@ export class Service {
       await tx.run('INSERT INTO voice_members(user_id,channel_id,socket_id,epoch,server_muted,eligible,heartbeat,joined_at) VALUES(?,?,?,?,?,?,?,?)', [userId, channelId, socketId, epoch, ch.permissions.speak ? 0 : 1, eligible ? 1 : 0, now, now]);
       if (previous && previous.channel_id !== channelId) await this.maintainRoom(tx, previous.channel_id);
       await this.maintainRoom(tx, channelId); return { epoch, room: await this.roomView(tx, channelId) };
-    }); await this.notify('voice:changed', {}); return { ...result, iceServers: this.iceServers(userId) };
+    }); await this.notify('voice:changed', {}); return { ...result, iceServers, ...(this.cloudflareTurn ? { iceServersExpiresAt: Date.now() + (cloudflareTurnTtl - 60) * 1000 } : {}) };
   }
   iceServers(userId: string) {
     const servers: RTCIceServer[] = this.c.stunUrls.length ? [{ urls: this.c.stunUrls }] : [];

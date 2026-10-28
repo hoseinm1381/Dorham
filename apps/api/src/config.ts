@@ -8,6 +8,7 @@ export function config(overrides: Partial<{
   maxUsers: number; maxOnline: number; maxVoice: number; roomShares: number; globalShares: number;
   retentionDays: number; maxMessages: number; maxDatabaseMiB: number; maxAvatarsMiB: number;
   stunUrls: string[]; turnUrls: string[]; turnUsername: string; turnPassword: string; turnSecret: string;
+  cloudflareTurnKeyId: string; cloudflareTurnApiToken: string;
   mediaTransport: 'mesh' | 'livekit'; livekitUrl: string; livekitKey: string; livekitSecret: string;
 }> = {}) {
   const num = (key: string, fallback: number) => { const n = Number(process.env[key] || fallback); if (!Number.isSafeInteger(n) || n < 1) throw new Error(`Invalid ${key}`); return n; };
@@ -26,10 +27,13 @@ export function config(overrides: Partial<{
     maxDatabaseMiB: num('MAX_DATABASE_MIB', 256), maxAvatarsMiB: num('MAX_AVATARS_MIB', 16),
     stunUrls: list('STUN_URLS', 'stun:stun.l.google.com:19302'), turnUrls: list('TURN_URLS'),
     turnUsername: process.env.TURN_USERNAME || '', turnPassword: process.env.TURN_PASSWORD || '', turnSecret: process.env.TURN_SECRET || '',
+    cloudflareTurnKeyId: process.env.CLOUDFLARE_TURN_KEY_ID || '', cloudflareTurnApiToken: process.env.CLOUDFLARE_TURN_API_TOKEN || '',
     mediaTransport: (process.env.MEDIA_TRANSPORT === 'livekit' ? 'livekit' : 'mesh') as 'mesh' | 'livekit',
     livekitUrl: process.env.LIVEKIT_URL || '', livekitKey: process.env.LIVEKIT_API_KEY || '', livekitSecret: process.env.LIVEKIT_API_SECRET || '',
     ...overrides
   };
+  if (Boolean(c.cloudflareTurnKeyId) !== Boolean(c.cloudflareTurnApiToken)) throw new Error('Both Cloudflare TURN key ID and API token are required');
+  if (c.cloudflareTurnKeyId && (!/^[a-zA-Z0-9_-]{1,128}$/.test(c.cloudflareTurnKeyId) || c.turnUrls.length)) throw new Error('Use one TURN provider and a valid Cloudflare TURN key ID');
   if (c.mediaTransport === 'livekit' && (!c.livekitUrl || !c.livekitKey || !c.livekitSecret)) throw new Error('LiveKit credentials required');
   if (c.production && !c.publicUrl.startsWith('https://')) throw new Error('Production PUBLIC_URL must use HTTPS');
   return c;

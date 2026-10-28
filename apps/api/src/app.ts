@@ -234,7 +234,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
         if (Date.now() - windowStart > 10000) { windowStart = Date.now(); eventCount = 0; }
         if (++eventCount > 400) fail(429, 'RATE_LIMIT', 'Too many real-time actions.');
         await validSocket(socket); const result = await fn(body); ack({ ok: true, data: result });
-      } catch (e: any) { ack({ ok: false, error: { code: e.code || 'INVALID_REQUEST', message: e instanceof ZodError ? 'Invalid real-time payload.' : (e.status && e.status < 500 ? e.message : 'Real-time action failed.') } }); }
+      } catch (e: any) { ack({ ok: false, error: { code: e.code || 'INVALID_REQUEST', message: e instanceof ZodError ? 'Invalid real-time payload.' : ((e.status && e.status < 500) || e.code === 'TURN_UNAVAILABLE' ? e.message : 'Real-time action failed.') } }); }
     });
     handle('message:send', async b => { const m = messageSchema.parse(b); return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo); });
     handle('typing', async b => { const v = z.object({ conversationId: id, active: z.boolean() }).parse(b); await service.conversation(db, socket.data.userId, v.conversationId, true); for (const s of io.sockets.sockets.values()) { if (s.id === socket.id) continue; try { await service.conversation(db, s.data.userId, v.conversationId); s.emit('typing', { ...v, userId: socket.data.userId }); } catch { /* private */ } } return {}; });

@@ -4,6 +4,8 @@ Release candidate, 28 October 2026. Source and a compiled deployment branch have
 
 Follow-up: the user's actual Chrome/VPN/Sweden call failed despite working chat. No TURN relay is configured. Observer voice membership and media-failure feedback are fixed in source and tested locally; their live rollout and a real relay-assisted call remain outstanding. See [voice/network follow-up](MEDIA-FOLLOWUP.md). Chrome-only Secure DNS was authorized but could not be applied by automation; Windows DNS remains unchanged.
 
+Cloudflare TURN preparation: server-side credential integration, configuration validation and five controlled-response tests pass (19 unit/integration tests total). Live Cloudflare activation is blocked by the account's mandatory card/billing subscription page; no billing, subscription or key was activated. See [setup and limits](CLOUDFLARE-TURN.md).
+
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
 | TypeScript workspaces, contracts and production bundles | Implemented, tested | ESLint, type checking and builds pass |
