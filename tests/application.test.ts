@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { harness, event } from './helpers';
 import { basePermissions, resolvePermissions, canManage } from '@dorham/contracts';
+import { io } from 'socket.io-client';
+import { createApp } from '../apps/api/src/app';
 let h: Awaited<ReturnType<typeof harness>> | undefined;
 afterEach(async () => { await h?.close(); h = undefined; });
 describe('permissions', () => {
@@ -14,15 +16,24 @@ describe('permissions', () => {
   });
 });
 describe('accounts and access', () => {
-  it('closes the server while authenticated WebSocket clients remain connected', async () => {
-    h = await harness(); const user = await h.register('shutdown_check'); const socket = await h.connect(user);
+  it('closes active WebSockets and lets authenticated clients reconnect after restart', async () => {
+    h = await harness(); const user = await h.register('shutdown_check');
+    const socket = io(h.url, { transports: ['websocket'], auth: { token: user.token }, reconnectionDelay: 50, reconnectionDelayMax: 100 });
+    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('connect_error', reject); });
     expect(socket.connected).toBe(true);
-    const stopped = new Promise<void>(resolve => socket.once('disconnect', () => resolve()));
+    const stopped = new Promise<string>(resolve => socket.once('disconnect', resolve));
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let restarted: Awaited<ReturnType<typeof createApp>> | undefined;
     try {
       await Promise.race([h.app.close(), new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('Shutdown waited for a chat client')), 2000); })]);
-      await stopped; expect(socket.connected).toBe(false);
-    } finally { if (timeout) clearTimeout(timeout); socket.disconnect(); }
+      if (timeout) clearTimeout(timeout);
+      expect(await stopped).not.toBe('io server disconnect'); expect(socket.connected).toBe(false);
+      const reconnected = new Promise<void>(resolve => socket.once('connect', resolve));
+      restarted = await createApp(h.config, { logger: false, rateLimit: false });
+      await restarted.app.listen({ port: Number(new URL(h.url).port), host: '127.0.0.1' });
+      await Promise.race([reconnected, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('Client did not reconnect after restart')), 2000); })]);
+      expect(socket.connected).toBe(true);
+    } finally { if (timeout) clearTimeout(timeout); socket.disconnect(); await restarted?.app.close(); }
   });
   it('validates input, rejects foreign origins, claims administration once, and warns before WAL-backed storage fills', async () => {
     h = await harness({ maxDatabaseMiB: 1 }); const a = await h.register('alice'), b = await h.register('bravo');

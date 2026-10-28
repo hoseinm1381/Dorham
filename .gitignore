@@ -12,6 +12,7 @@ coverage/
 *.log
 *.tsbuildinfo
 .tools/
+.cache/
 .codegraph/
 apps/android/android/.gradle/
 apps/android/android/.idea/

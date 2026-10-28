@@ -285,7 +285,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }, 5000); maintenance.unref();
   // Upgraded sockets must close before Fastify starts draining the HTTP server.
   // Waiting until onClose deadlocks a restart while any chat client stays online.
-  app.addHook('preClose', async () => { clearInterval(maintenance); io.disconnectSockets(true); io.engine.close(); });
+  app.addHook('preClose', async () => { clearInterval(maintenance); io.engine.close(); });
   app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
   return { app, db, service, io, config: c };
 }
