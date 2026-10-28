@@ -35,6 +35,7 @@
     "db:backup": "tsx scripts/database.ts backup",
     "db:restore": "tsx scripts/database.ts restore",
     "deploy:bundle": "node scripts/deploy-bundle.mjs",
+    "deploy:branch": "node scripts/deploy-branch.mjs",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

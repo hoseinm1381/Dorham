@@ -1,10 +1,11 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { io, type Socket } from 'socket.io-client';
+import instance from './instance.json';
 declare global { interface Window { desktop?: { getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; version: string } } }
 const store = registerPlugin<any>('DorhamSecrets');
 export const native = Capacitor.isNativePlatform() || Boolean(window.desktop);
 let base = '', csrf = '', access = '', accessExpires = 0, refreshPromise: Promise<boolean> | null = null;
-export async function initialize() { if (window.desktop) base = await window.desktop.getServer(); else if (native) base = localStorage.getItem('dorham.server') || ''; }
+export async function initialize() { const defaultServer = import.meta.env.VITE_DEFAULT_SERVER_URL || instance.defaultServerUrl; if (window.desktop) base = await window.desktop.getServer() || defaultServer; else if (native) base = localStorage.getItem('dorham.server') || defaultServer; }
 export const serverUrl = () => base;
 export async function setServer(value: string) { const url = new URL(value); if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '10.0.2.2'].includes(url.hostname))) throw new Error('Use HTTPS for your server address.'); if (base !== url.origin) { access = ''; csrf = ''; await setSecret(null); } base = url.origin; if (window.desktop) await window.desktop.setServer(base); else localStorage.setItem('dorham.server', base); }
 export const assetUrl = (value: string | null) => value ? `${base}${value}` : undefined;

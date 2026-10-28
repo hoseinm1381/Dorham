@@ -1,6 +1,6 @@
 # Implementation and verification status
 
-Local release candidate, 28 October 2026. Nothing has been pushed, published, purchased, or deployed to Botkeep. Implemented means source exists; tested applies only to the stated scenario.
+Release candidate, 28 October 2026. Source and a compiled deployment branch have been pushed to GitHub with authorization. The application is running at https://dorham.bot-keep.xyz/ on Botkeep's free allocation. No service has been purchased. Implemented means source exists; tested applies only to the stated scenario. See [hosted verification](HOSTED-VERIFICATION.md).
 
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
@@ -26,8 +26,8 @@ Local release candidate, 28 October 2026. Nothing has been pushed, published, pu
 | Retention, quotas and storage pressure | Implemented; partly tested | Warning against committed WAL pages passes; long retention/storage-pressure soak untested |
 | External LiveKit API enforcement | Implemented; untested, blocked | Operator SFU host/credentials and networking required; no external service purchased |
 | Standalone production deployment bundle | Implemented, tested on Windows | Fresh independent runtime install; compiled startup, readiness, native modules, registration, snapshot and local WebSocket pass |
-| Linux container and native dependencies | Prepared, untested | Docker/Linux runtime unavailable here |
-| Botkeep ingress, HTTPS/WSS, polling and durable allocation | Untested, blocked | Requires separately authorized live deployment and every gate in DEPLOYMENT.md |
+| Linux runtime and native dependencies | Deployed; partly tested | SQLite, Argon2 registration and Sharp avatar upload work on Botkeep; exact runtime version is being recorded |
+| Botkeep ingress, HTTPS/WSS, polling and durable allocation | Deployed; partly tested | Public web registration/chat/avatar, native registration and socket connection pass; explicit WSS opening and polling pass on the alias; intermittent local connection resets remain |
 | Dependency review | npm tested | Zero npm advisory findings in source and standalone runtime trees; no full security audit or Android advisory certification |
 
 The final local load run processed 200 messages across 20 sockets: **93.08 ms p95 acknowledgement**, **325.88 MiB peak RSS**, **303.12 MiB final RSS**, and **4,673,261 database/WAL bytes**. This short sample meets the initial local targets; sustained hosted resource use remains unverified. See [performance](PERFORMANCE.md).
@@ -42,5 +42,5 @@ Packages are under `artifacts`: unsigned Windows installer, installable Android 
 2. On Windows, exercise physical microphone and the native source picker with another client, fullscreen, tray return/quit and installer upgrades. The automatic shell test does not certify physical capture/audio.
 3. Configure external TURN/SFU credentials through environment variables. Test cross-network/forced-relay peers, ICE failure, token expiry, moderator mute/kick/share-stop, subscription changes and SFU API failure. Mesh cannot prevent modified clients from exchanging media independently.
 4. Run the 16-person decoded-media workload on separate machines or a separately approved larger environment. Keep this workstation's 4 GiB guard enabled; do not restart the large test here. Record sustained CPU/RSS, bitrate/loss, intelligibility, two room screens and five globally.
-5. With separate deployment authorization, import the compiled bundle, set the actual persistent mount and Domains/HTTPS, then complete [all live hosting checks](DEPLOYMENT.md). Test WSS first and polling explicitly if upgrade fails; repeat persistence checks after restart and redeploy. Record actual provider storage, RAM and CPU allocation.
-6. Supply signing identities only for signed distribution. Keep the Windows certificate and Android release keystore outside source and preserve update identities independently. GitHub push and public release still require authorization.
+5. Complete the remaining [live hosting checks](DEPLOYMENT.md) and consult [current hosted evidence](HOSTED-VERIFICATION.md). Keep the data directory intact during source updates. Hosted load, long idle connections, independent backup restoration and cross-network media remain separate gates.
+6. Supply signing identities only for signed distribution. Keep the Windows certificate and Android release keystore outside source and preserve update identities independently.
