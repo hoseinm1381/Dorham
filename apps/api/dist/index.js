@@ -1,7 +1,7 @@
 import {
   config,
   openDatabase
-} from "./chunk-GXUPFVZD.js";
+} from "./chunk-CIPPY6MO.js";
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
@@ -12,7 +12,7 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import { Server as SocketServer } from "socket.io";
-import { z as z3, ZodError } from "zod";
+import { z as z4, ZodError } from "zod";
 import { randomUUID as randomUUID2 } from "crypto";
 import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from "fs";
 import { mkdir, writeFile, unlink, readdir, stat } from "fs/promises";
@@ -40,7 +40,7 @@ function canManage(actor, target) {
 
 // apps/api/src/service.ts
 import { randomUUID, createHmac } from "crypto";
-import { z as z2 } from "zod";
+import { z as z3 } from "zod";
 
 // apps/api/src/security.ts
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
@@ -77,17 +77,89 @@ async function limited(fn) {
   }
 }
 
+// apps/api/src/turn.ts
+import { z as z2 } from "zod";
+var cloudflareTurnTtl = 86400;
+var iceResponse = z2.object({ iceServers: z2.array(z2.object({
+  urls: z2.union([z2.string(), z2.array(z2.string()).min(1).max(12)]),
+  username: z2.string().min(1).max(2048).optional(),
+  credential: z2.string().min(1).max(2048).optional()
+})).min(1).max(8) });
+var CloudflareTurn = class {
+  constructor(keyId, apiToken, fetcher = fetch, now = Date.now) {
+    this.keyId = keyId;
+    this.apiToken = apiToken;
+    this.fetcher = fetcher;
+    this.now = now;
+  }
+  keyId;
+  apiToken;
+  fetcher;
+  now;
+  cache = /* @__PURE__ */ new Map();
+  async forUser(userId) {
+    const now = this.now(), previous = this.cache.get(userId);
+    if (previous && previous.until > now) return structuredClone(await previous.request);
+    for (const [id2, entry2] of this.cache) if (entry2.until <= now) this.cache.delete(id2);
+    if (this.cache.size >= 100) this.cache.delete(this.cache.keys().next().value);
+    const entry = { until: now + 6e4, request: this.generate() };
+    this.cache.set(userId, entry);
+    return structuredClone(await entry.request);
+  }
+  async generate() {
+    try {
+      const response = await this.fetcher(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(this.keyId)}/credentials/generate-ice-servers`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ttl: cloudflareTurnTtl }),
+        signal: AbortSignal.timeout(5e3),
+        redirect: "error"
+      });
+      if (!response.ok || !response.body) throw new Error("TURN response failed");
+      const reader = response.body.getReader(), chunks = [];
+      let bytes = 0;
+      try {
+        for (; ; ) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bytes += value.length;
+          if (bytes > 65536) throw new Error("TURN response exceeded budget");
+          chunks.push(value);
+        }
+      } finally {
+        await reader.cancel().catch(() => {
+        });
+        reader.releaseLock();
+      }
+      const parsed = iceResponse.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      const servers = [];
+      for (const server of parsed.iceServers) {
+        const urls = (Array.isArray(server.urls) ? server.urls : [server.urls]).filter((url) => /^(stun|turn|turns):(?:stun|turn)\.cloudflare\.com:(3478|443|80|5349)(\?transport=(udp|tcp))?$/.test(url));
+        if (!urls.length) continue;
+        if (urls.some((url) => /^turns?:/.test(url)) && (!server.username || !server.credential)) throw new Error("TURN credentials missing");
+        servers.push({ urls, ...server.username ? { username: server.username } : {}, ...server.credential ? { credential: server.credential } : {} });
+      }
+      if (!servers.some((server) => server.urls.some((url) => /^turns?:/.test(url)))) throw new Error("TURN relay missing");
+      return servers;
+    } catch {
+      return fail(503, "TURN_UNAVAILABLE", "The media relay is unavailable. Please retry shortly or contact the server owner.");
+    }
+  }
+};
+
 // apps/api/src/service.ts
 var publicUser = (u) => ({ id: u.id, username: u.username, displayName: u.display_name, bio: u.bio, avatar: u.avatar, status: u.status, instanceAdmin: Boolean(u.instance_admin) });
 var Service = class {
   constructor(db, c) {
     this.db = db;
     this.c = c;
+    this.cloudflareTurn = c.cloudflareTurnKeyId ? new CloudflareTurn(c.cloudflareTurnKeyId, c.cloudflareTurnApiToken) : null;
   }
   db;
   c;
   notify = async () => {
   };
+  cloudflareTurn;
   async mutate(userId, requestId2, operation, payload, fn) {
     requestId.parse(requestId2);
     const fingerprint = hash(JSON.stringify(payload));
@@ -421,6 +493,9 @@ var Service = class {
     return { channelId, members, shares, coordinatorId: coordinator?.user_id || null, coordinatorEpoch: Number(coordinator?.epoch || 0), transport: this.c.mediaTransport };
   }
   async joinVoice(userId, socketId, channelId, eligible) {
+    const access = await this.channel(this.db, userId, channelId);
+    if (access.kind !== "voice") fail(400, "NOT_VOICE", "Select a voice channel.");
+    const iceServers = this.c.mediaTransport === "mesh" && this.cloudflareTurn ? await this.cloudflareTurn.forUser(userId) : this.iceServers(userId);
     const result = await this.db.transaction(async (tx) => {
       const ch = await this.channel(tx, userId, channelId);
       if (ch.kind !== "voice") fail(400, "NOT_VOICE", "Select a voice channel.");
@@ -437,7 +512,7 @@ var Service = class {
       return { epoch, room: await this.roomView(tx, channelId) };
     });
     await this.notify("voice:changed", {});
-    return { ...result, iceServers: this.iceServers(userId) };
+    return { ...result, iceServers, ...this.cloudflareTurn ? { iceServersExpiresAt: Date.now() + (cloudflareTurnTtl - 60) * 1e3 } : {} };
   }
   iceServers(userId) {
     const servers = this.c.stunUrls.length ? [{ urls: this.c.stunUrls }] : [];
@@ -520,11 +595,11 @@ var Service = class {
   }
 };
 var schemas = {
-  name: z2.string().trim().min(1).max(64),
-  profile: z2.object({ displayName: z2.string().trim().min(1).max(48), bio: z2.string().max(500), status: z2.enum(["online", "idle", "busy"]), requestId }),
-  channel: z2.object({ name: z2.string().trim().min(1).max(64), kind: z2.enum(["text", "voice"]), requestId }),
-  role: z2.enum(["owner", "administrator", "moderator", "member"]),
-  permissions: z2.object({ view: z2.boolean().optional(), write: z2.boolean().optional(), speak: z2.boolean().optional(), share: z2.boolean().optional(), manageChannels: z2.boolean().optional(), manageMembers: z2.boolean().optional(), moderate: z2.boolean().optional() }).strict()
+  name: z3.string().trim().min(1).max(64),
+  profile: z3.object({ displayName: z3.string().trim().min(1).max(48), bio: z3.string().max(500), status: z3.enum(["online", "idle", "busy"]), requestId }),
+  channel: z3.object({ name: z3.string().trim().min(1).max(64), kind: z3.enum(["text", "voice"]), requestId }),
+  role: z3.enum(["owner", "administrator", "moderator", "member"]),
+  permissions: z3.object({ view: z3.boolean().optional(), write: z3.boolean().optional(), speak: z3.boolean().optional(), share: z3.boolean().optional(), manageChannels: z3.boolean().optional(), manageMembers: z3.boolean().optional(), moderate: z3.boolean().optional() }).strict()
 };
 
 // apps/api/src/sfu.ts
@@ -691,7 +766,7 @@ async function createApp(c = config(), options = {}) {
     return sessionFor(user.id, req.headers["x-dorham-native"] === "1", reply);
   });
   app2.post("/api/v1/auth/refresh", { config: authRate }, async (req) => {
-    const body = z3.object({ refreshToken: z3.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
+    const body = z4.object({ refreshToken: z4.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
     const outcome = await db.transaction(async (tx) => {
       const reused = await tx.one("SELECT session_id FROM used_refresh WHERE hash=?", [fingerprint]);
       if (reused) {
@@ -712,14 +787,14 @@ async function createApp(c = config(), options = {}) {
     api.addHook("preHandler", authenticate);
     api.get("/auth/me", async (req) => ({ user: publicUser(req.account), csrf: req.session.csrf }));
     api.post("/auth/logout", async (req, reply) => {
-      z3.object({ requestId }).parse(req.body);
+      z4.object({ requestId }).parse(req.body);
       await db.run("DELETE FROM sessions WHERE id=?", [req.session.id]);
       for (const s of io.sockets.sockets.values()) if (s.data.sessionId === req.session.id) s.disconnect(true);
       reply.clearCookie("dorham_session", { path: "/" });
       return { success: true };
     });
     api.post("/auth/password", async (req) => {
-      const b = z3.object({ currentPassword: z3.string().max(128), password: z3.string().min(10).max(128), requestId }).parse(req.body);
+      const b = z4.object({ currentPassword: z4.string().max(128), password: z4.string().min(10).max(128), requestId }).parse(req.body);
       if (!await passwordVerify(req.account.password_hash, b.currentPassword)) fail(401, "INVALID_CREDENTIALS", "Current password is incorrect.");
       const encoded = await passwordHash(b.password);
       const result = await service.mutate(req.account.id, b.requestId, "password.change", { fingerprint: hash(b.password) }, async (tx) => {
@@ -731,7 +806,7 @@ async function createApp(c = config(), options = {}) {
       return result;
     });
     api.post("/admin/claim", async (req) => {
-      const b = z3.object({ secret: z3.string().max(256), requestId }).parse(req.body);
+      const b = z4.object({ secret: z4.string().max(256), requestId }).parse(req.body);
       if (!c.bootstrapSecret || !equal(c.bootstrapSecret, b.secret)) fail(403, "FORBIDDEN", "Bootstrap secret is invalid.");
       return service.mutate(req.account.id, b.requestId, "admin.claim", {}, async (tx) => {
         if (await tx.one("SELECT value FROM meta WHERE key='admin_claimed'")) fail(409, "ALREADY_CLAIMED", "Instance administration has already been claimed.");
@@ -778,11 +853,11 @@ async function createApp(c = config(), options = {}) {
       return result;
     });
     api.post("/servers", async (req) => {
-      const b = z3.object({ name: schemas.name, requestId }).parse(req.body);
+      const b = z4.object({ name: schemas.name, requestId }).parse(req.body);
       return service.createServer(req.account.id, b.requestId, b.name);
     });
     api.patch("/servers/:id", async (req) => {
-      const b = z3.object({ name: schemas.name.optional(), delete: z3.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete).parse(req.body);
+      const b = z4.object({ name: schemas.name.optional(), delete: z4.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete).parse(req.body);
       return service.changeServer(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/channels", async (req) => {
@@ -790,30 +865,30 @@ async function createApp(c = config(), options = {}) {
       return service.createChannel(req.account.id, b.requestId, id.parse(req.params.id), b.name, b.kind);
     });
     api.patch("/channels/:id", async (req) => {
-      const b = z3.object({ name: schemas.name.optional(), delete: z3.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
+      const b = z4.object({ name: schemas.name.optional(), delete: z4.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
       return service.changeChannel(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/invites", async (req) => {
-      const b = z3.object({ hours: z3.number().int().min(1).max(168).default(24), uses: z3.number().int().min(1).max(100).default(10), requestId }).parse(req.body);
+      const b = z4.object({ hours: z4.number().int().min(1).max(168).default(24), uses: z4.number().int().min(1).max(100).default(10), requestId }).parse(req.body);
       return service.invite(req.account.id, b.requestId, id.parse(req.params.id), token(), b.hours, b.uses);
     });
     api.post("/invites/join", async (req) => {
-      const b = z3.object({ code: z3.string().min(10).max(100), requestId }).parse(req.body);
+      const b = z4.object({ code: z4.string().min(10).max(100), requestId }).parse(req.body);
       return service.joinInvite(req.account.id, b.requestId, b.code);
     });
     api.get("/servers/:id/members", async (req) => service.members(req.account.id, id.parse(req.params.id)));
     api.patch("/servers/:serverId/members/:userId", async (req) => {
-      const b = z3.object({ role: schemas.role.optional(), remove: z3.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
+      const b = z4.object({ role: schemas.role.optional(), remove: z4.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
       return service.changeMember(req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b);
     });
     api.post("/dms", async (req) => {
-      const b = z3.object({ userId: id, requestId }).parse(req.body);
+      const b = z4.object({ userId: id, requestId }).parse(req.body);
       const result = await service.dm(req.account.id, b.requestId, b.userId);
       await service.notify("state:changed", {});
       return result;
     });
     api.get("/conversations/:id/messages", async (req) => {
-      const b = z3.object({ before: z3.coerce.number().int().min(1).optional(), after: z3.coerce.number().int().min(0).optional() }).parse(req.query);
+      const b = z4.object({ before: z4.coerce.number().int().min(1).optional(), after: z4.coerce.number().int().min(0).optional() }).parse(req.query);
       return service.history(req.account.id, id.parse(req.params.id), b.before, b.after);
     });
     api.post("/messages", async (req) => {
@@ -821,16 +896,16 @@ async function createApp(c = config(), options = {}) {
       return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo);
     });
     api.patch("/messages/:id", async (req) => {
-      const b = z3.object({ content: z3.string().trim().min(1).max(4e3).optional(), delete: z3.boolean().optional(), emoji: z3.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z3.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
+      const b = z4.object({ content: z4.string().trim().min(1).max(4e3).optional(), delete: z4.boolean().optional(), emoji: z4.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z4.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
       return service.changeMessage(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/conversations/:id/read", async (req) => {
-      const b = z3.object({ sequence: z3.number().int().min(0), requestId }).parse(req.body);
+      const b = z4.object({ sequence: z4.number().int().min(0), requestId }).parse(req.body);
       return service.read(req.account.id, b.requestId, id.parse(req.params.id), b.sequence);
     });
     api.get("/voice/:id", async (req) => service.room(req.account.id, id.parse(req.params.id)));
     api.post("/voice/:id/moderate", async (req) => {
-      const b = z3.object({ userId: id, action: z3.enum(["mute", "unmute", "kick", "stopShare"]), requestId }).parse(req.body);
+      const b = z4.object({ userId: id, action: z4.enum(["mute", "unmute", "kick", "stopShare"]), requestId }).parse(req.body);
       return service.moderate(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.action);
     });
     api.get("/admin/metrics", async (req) => {
@@ -931,7 +1006,7 @@ async function createApp(c = config(), options = {}) {
         const result = await fn(body);
         ack({ ok: true, data: result });
       } catch (e) {
-        ack({ ok: false, error: { code: e.code || "INVALID_REQUEST", message: e instanceof ZodError ? "Invalid real-time payload." : e.status && e.status < 500 ? e.message : "Real-time action failed." } });
+        ack({ ok: false, error: { code: e.code || "INVALID_REQUEST", message: e instanceof ZodError ? "Invalid real-time payload." : e.status && e.status < 500 || e.code === "TURN_UNAVAILABLE" ? e.message : "Real-time action failed." } });
       }
     });
     handle("message:send", async (b) => {
@@ -939,7 +1014,7 @@ async function createApp(c = config(), options = {}) {
       return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo);
     });
     handle("typing", async (b) => {
-      const v = z3.object({ conversationId: id, active: z3.boolean() }).parse(b);
+      const v = z4.object({ conversationId: id, active: z4.boolean() }).parse(b);
       await service.conversation(db, socket.data.userId, v.conversationId, true);
       for (const s of io.sockets.sockets.values()) {
         if (s.id === socket.id) continue;
@@ -952,37 +1027,37 @@ async function createApp(c = config(), options = {}) {
       return {};
     });
     handle("voice:join", async (b) => {
-      const v = z3.object({ channelId: id, eligible: z3.boolean() }).parse(b);
+      const v = z4.object({ channelId: id, eligible: z4.boolean() }).parse(b);
       const result = await service.joinVoice(socket.data.userId, socket.id, v.channelId, v.eligible);
       socket.data.voiceChannel = v.channelId;
       return result;
     });
     handle("voice:leave", async (b) => {
-      z3.object({ requestId }).parse(b);
+      z4.object({ requestId }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "leave");
       socket.data.voiceChannel = null;
       return result;
     });
     handle("voice:heartbeat", async (b) => {
-      const v = z3.object({ eligible: z3.boolean().optional() }).parse(b);
+      const v = z4.object({ eligible: z4.boolean().optional() }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "heartbeat", v);
       if ("room" in result) socket.emit("voice:room", result.room);
       return result;
     });
     handle("voice:state", async (b) => {
-      const v = z3.object({ muted: z3.boolean(), deafened: z3.boolean(), requestId }).parse(b);
+      const v = z4.object({ muted: z4.boolean(), deafened: z4.boolean(), requestId }).parse(b);
       return service.voiceAction(socket.data.userId, socket.id, "state", v);
     });
     handle("share:start", async (b) => {
-      const v = z3.object({ requestId }).parse(b);
+      const v = z4.object({ requestId }).parse(b);
       return service.share(socket.data.userId, socket.id, v.requestId);
     });
     handle("share:stop", async (b) => {
-      const v = z3.object({ requestId }).parse(b);
+      const v = z4.object({ requestId }).parse(b);
       return service.share(socket.data.userId, socket.id, v.requestId, true);
     });
     handle("voice:sfu", async (b) => {
-      const v = z3.object({ channelId: id }).parse(b);
+      const v = z4.object({ channelId: id }).parse(b);
       return sfu.credentials(socket.data.userId, socket.id, v.channelId);
     });
     handle("voice:signal", async (b) => {
