@@ -24,7 +24,7 @@ try {
   const acknowledgement = 'Windows received the web reply after restarting.';
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill(acknowledgement);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await page.getByTestId('message').filter({ hasText: acknowledgement }).waitFor();
+  await page.getByTestId('message').filter({ hasText: acknowledgement }).last().waitFor();
   await page.screenshot({ path: 'artifacts/evidence/windows-live-dm.png' });
   await writeFile('artifacts/evidence/windows-live-persistence.json', JSON.stringify({ testedAt: new Date().toISOString(), server: fixture.server, nativeAppRestartLogin: true, protectedRefreshRotated: true, webReplyReceived: true, acknowledgement, socketConnected: true }, null, 2));
   console.log('Native persistent login, refresh rotation and web/Windows DM exchange passed.');

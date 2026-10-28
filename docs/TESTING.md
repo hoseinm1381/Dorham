@@ -19,10 +19,16 @@ Generated screenshots, Playwright traces/reports, compiler logs, audit reports, 
 ## Remaining acceptance scenarios
 
 - Native Android microphone, route switching, MediaProjection consent, background duration, screen locking, OEM battery controls, and OS termination on physical devices.
-- Windows installation, microphone/capture, tray lifecycle, and upgrades against the built installer.
+- Windows physical microphone/capture, interactive tray lifecycle, and installer upgrades; isolated install/uninstall and automatic tray-close tests already pass.
 - Cross-network voice/capture using configured TURN, restrictive firewalls, and different client platforms.
 - External LiveKit publication permissions, moderator revocation, expired credentials, SFU/API failure, and subscription behavior.
-- Actual Botkeep HTTPS/WSS ingress, sustained connection behavior, restart/redeploy persistence, native Linux dependencies, and measured shared-plan resource use.
+- Botkeep sustained connections and representative hosted load; HTTPS/WSS/polling, native Linux modules, data persistence through update/restart and isolated backup restoration already pass.
 - Full 16-person media quality under the user's memory budget on an appropriate test environment.
 
 Do not turn an unavailable test environment or an interrupted process into a success claim.
+
+## Installed Windows live checks
+
+With the isolated test installation available, set `DORHAM_SMOKE_SERVER_URL=https://dorham.bot-keep.xyz` and run `node_modules/.bin/tsx tests/desktop-smoke.ts`. It records explicit WSS/polling, protected credentials, sandbox settings and a test DM to the existing `Web deployment check` fixture. No resolver override was used in the final VPN run. After replying from that web account, run `node_modules/.bin/tsx tests/desktop-persistence.ts` to reopen the isolated profile, verify refresh rotation and the reply, and acknowledge it. These tests create only clearly named deployment test data and do not open the user's normal profile. Their screenshots/evidence are in `artifacts/evidence/windows-live-*`.
+
+The unit/integration suite now has 13 tests, including shutdown while an authenticated WebSocket remains connected. `scripts/production-smoke.mjs <independent-runtime-directory>` verifies the deployed startup entry, native database/password modules and Socket.IO without resolving dependencies from this workspace.

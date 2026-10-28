@@ -1,6 +1,6 @@
 # Deployment
 
-For this account's actual deployment, results and pending provider recovery, see [hosted verification](HOSTED-VERIFICATION.md). The procedure below is the reproducible setup, not a claim that all live gates passed.
+For this account's actual deployment and measured results, see [hosted verification](HOSTED-VERIFICATION.md). The procedure below is the reproducible setup, not a claim that all live gates passed.
 
 ## Botkeep preparation
 
@@ -17,6 +17,10 @@ The Halloween plan is a shared account pool: 1 vCore, 1 GiB RAM, 1 GiB storage, 
 7. Set a random bootstrap administration secret through Environment, claim it in the application, and then remove the secret from the environment. The database records that it has already been claimed.
 
 The application loads `.env` where provided. Environment values override `.env`. Do not include real secrets in source, ZIPs, screenshots, or support logs.
+
+`npm start` runs `deployment/start.mjs`. On an older Linux Node 24 runtime, it downloads the official Node 24.22.1 binary archive, verifies its pinned SHA256, and caches only the executable and a binary-hash receipt under `.cache`. It uses `process.execve` so there is one backend process and shutdown signals reach it directly. First boot requires HTTPS access to nodejs.org and `tar`; subsequent cached boots need no runtime download. Preserve this cache across imports. A current Node 24 runtime starts the API directly. Inspect the private `data/runtime-status.json` for the actual Node version after successful listen; `/ready` remains the live-health check.
+
+If the panel GitHub sync reports busy/unreachable, an existing clean deployment checkout can update through a one-time startup command: `git fetch origin codex/botkeep && git merge --ff-only <reviewed-deployment-sha> && npm start`. Push that exact compiled branch first, preserve `.env`, `data` and `.cache`, and let conflicts abort safely. After verifying the update, restore the startup command to `npm start`. Do not use destructive reset/clean commands or assume Redeploy fetches GitHub. Versions before the active-socket shutdown fix must have app chat clients disconnected before restarting.
 
 ## Mandatory live gates
 

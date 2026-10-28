@@ -1,13 +1,13 @@
 # Implementation and verification status
 
-Release candidate, 28 October 2026. Source and a compiled deployment branch have been pushed to GitHub with authorization. The application was verified at https://dorham.bot-keep.xyz/ on Botkeep's free allocation, but is currently stopped and blocked by a provider backup operation that completed without releasing server controls. Support ticket #65cfa669 is awaiting staff. No service has been purchased. Implemented means source exists; tested applies only to the stated scenario. See [hosted verification](HOSTED-VERIFICATION.md).
+Release candidate, 28 October 2026. Source and a compiled deployment branch have been pushed to GitHub with authorization. The application is running at https://dorham.bot-keep.xyz/ on Botkeep's free allocation. The earlier backup operation cleared; the support ticket is closed at the user's request. VPN connectivity enabled live web/Windows testing. No service has been purchased. Implemented means source exists; tested applies only to the stated scenario. See [hosted verification](HOSTED-VERIFICATION.md).
 
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
 | TypeScript workspaces, contracts and production bundles | Implemented, tested | ESLint, type checking and builds pass |
 | Registration, transactional account cap, Argon2id, CSRF and sessions | Implemented, tested | Concurrent registration, cookie/CSRF, hashing and refresh-reuse checks |
 | Separate single-use instance administration | Implemented, tested | Public registration grants no administration; one secret claim succeeds |
-| Profiles, avatars, presence | Implemented; partly tested | UI builds; avatar API and complete presence transitions remain untested |
+| Profiles, avatars, presence | Implemented; partly tested | Hosted avatar upload and native rendering pass; complete presence transitions remain untested |
 | Servers, invitations, role hierarchy and channel overrides | Implemented, tested | Invite exhaustion, unauthorized access, hierarchy, removal and live demotion checks |
 | Channel chat, DMs, editing, reactions and unread state | Implemented, tested | Real backend/database/browser scenarios; participant restrictions and retries |
 | Replies, deletion, pagination and replay | Implemented; partly tested | API deletion/replay/cursors pass; pagination/reply UI acceptance remains untested |
@@ -26,8 +26,10 @@ Release candidate, 28 October 2026. Source and a compiled deployment branch have
 | Retention, quotas and storage pressure | Implemented; partly tested | Warning against committed WAL pages passes; long retention/storage-pressure soak untested |
 | External LiveKit API enforcement | Implemented; untested, blocked | Operator SFU host/credentials and networking required; no external service purchased |
 | Standalone production deployment bundle | Implemented, tested on Windows | Fresh independent runtime install; compiled startup, readiness, native modules, registration, snapshot and local WebSocket pass |
-| Linux runtime and native dependencies | Deployed; partly tested | SQLite, Argon2 registration and Sharp avatar upload work on Botkeep; exact runtime version is being recorded |
-| Botkeep ingress, HTTPS/WSS, polling and durable allocation | Deployed; partly tested; currently blocked | Web registration/chat/avatar and native registration/socket pass; WSS opening and polling pass on alias. Completed infrastructure backup left Start/sync disabled; source-update persistence untested |
+| Linux runtime and native dependencies | Deployed; partly tested | SQLite, Argon2 registration and Sharp avatar upload work on Botkeep; verified Node bootstrap supplies the pinned patched runtime |
+| Botkeep ingress, HTTPS/WSS, polling and durable allocation | Deployed; partly tested | Web/native chat, avatars, WSS opening and explicit polling pass. Existing SQLite data survived a Git fast-forward update/restart; long-idle and hosted load tests remain open |
+| Active-socket shutdown/reconnect | Implemented, tested | Fastify preClose closes transports before HTTP drain; authenticated same-database restart regression and hosted automatic reconnect/message commit pass |
+| Hosted backup restoration | Tested in isolated local instance | Downloaded stopped-instance backup: SQLite integrity, accounts/message and avatar presence, readiness and authorized avatar CORS pass; no production restore performed |
 | Dependency review | npm tested | Zero npm advisory findings in source and standalone runtime trees; no full security audit or Android advisory certification |
 
 The final local load run processed 200 messages across 20 sockets: **93.08 ms p95 acknowledgement**, **325.88 MiB peak RSS**, **303.12 MiB final RSS**, and **4,673,261 database/WAL bytes**. This short sample meets the initial local targets; sustained hosted resource use remains unverified. See [performance](PERFORMANCE.md).
@@ -42,5 +44,5 @@ Packages are under `artifacts`: unsigned Windows installer, installable Android 
 2. On Windows, exercise physical microphone and the native source picker with another client, fullscreen, tray return/quit and installer upgrades. The automatic shell test does not certify physical capture/audio.
 3. Configure external TURN/SFU credentials through environment variables. Test cross-network/forced-relay peers, ICE failure, token expiry, moderator mute/kick/share-stop, subscription changes and SFU API failure. Mesh cannot prevent modified clients from exchanging media independently.
 4. Run the 16-person decoded-media workload on separate machines or a separately approved larger environment. Keep this workstation's 4 GiB guard enabled; do not restart the large test here. Record sustained CPU/RSS, bitrate/loss, intelligibility, two room screens and five globally.
-5. Complete the remaining [live hosting checks](DEPLOYMENT.md) and consult [current hosted evidence](HOSTED-VERIFICATION.md). Keep the data directory intact during source updates. Hosted load, long idle connections, independent backup restoration and cross-network media remain separate gates.
+5. Complete the remaining [live hosting checks](DEPLOYMENT.md) and consult [current hosted evidence](HOSTED-VERIFICATION.md). Keep the data directory intact during source updates. Hosted load, long idle connections and cross-network media remain separate gates. Repeat private backup exports as real data grows.
 6. Supply signing identities only for signed distribution. Keep the Windows certificate and Android release keystore outside source and preserve update identities independently.
