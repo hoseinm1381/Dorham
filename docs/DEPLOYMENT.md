@@ -1,5 +1,7 @@
 # Deployment
 
+For this account's actual deployment, results and pending provider recovery, see [hosted verification](HOSTED-VERIFICATION.md). The procedure below is the reproducible setup, not a claim that all live gates passed.
+
 ## Botkeep preparation
 
 The public Botkeep documentation describes GitHub/ZIP import, runtime environment variables, a persistent volume, assigned HTTP ports, and Domains/HTTPS routing. It instructs HTTP applications to bind `0.0.0.0` and `SERVER_PORT`. It does not establish that this account's allocation, WebSocket upgrade behavior, exact volume mount, or native module installation has been verified. These remain live deployment gates.
