@@ -1,0 +1,25 @@
+appId: com.dorham.chat
+productName: Dorham
+directories:
+  app: apps/desktop
+  output: artifacts/windows
+files:
+  - main.cjs
+  - preload.cjs
+  - dist/**/*
+  - icon.ico
+  - icon.png
+  - '!node_modules/**/*'
+npmRebuild: false
+toolsets:
+  nsis: 1.2.1
+win:
+  target: nsis
+  icon: apps/desktop/icon.ico
+artifactName: Dorham-${version}-Windows-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true

@@ -1,0 +1,199 @@
+import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
+import { ack, type MediaTransport, type MediaOptions } from './index';
+type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaElementAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number };
+export class MeshTransport implements MediaTransport {
+  room: VoiceRoom | null = null;
+  getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true }; }
+  async reconnect() { if (this.channelId && !this.joining) await this.rejoin(); }
+  protected peers = new Map<string, Peer>(); protected mic: MediaStream | null = null; protected screen: MediaStream | null = null;
+  protected context: AudioContext | null = null; protected lease: Share | null = null; protected channelId: string | null = null;
+  protected epoch = ''; protected iceServers: RTCIceServer[] = []; protected muted = false; protected deafened = false;
+  private heartbeat?: ReturnType<typeof setInterval>; private meter?: ReturnType<typeof setInterval>; private volumes = new Map<string, number>();
+  private joining = false; private destroyed = false; private signalQueue: Promise<unknown> = Promise.resolve();
+  private hiddenShares = new Set<string>();
+  private screenTarget = { bitrate: 1200000, fps: 15 };
+  private micAnalyser: AnalyserNode | null = null; private micSource: MediaStreamAudioSourceNode | null = null;
+  private onRoom = (room: VoiceRoom) => { void this.updateRoom(room).catch(e => this.error(e)); };
+  private onSignal = (signal: Signal) => { this.signalQueue = this.signalQueue.then(() => this.receive(signal)).catch(e => this.error(e)); };
+  private onRemoved = () => { void this.leave(); this.options.emit('error', 'You were disconnected from the voice channel.'); };
+  private onConnect = () => { if (this.channelId && !this.joining) void this.rejoin().catch(e => this.error(e)); };
+  private onDisconnect = () => { this.options.emit('status', 'Reconnecting voice…'); };
+  constructor(protected options: MediaOptions) {
+    const s = options.socket; s.on('voice:room', this.onRoom); s.on('voice:signal', this.onSignal); s.on('voice:removed', this.onRemoved); s.on('connect', this.onConnect); s.on('disconnect', this.onDisconnect);
+  }
+  protected error(e: any) { if (!this.destroyed) this.options.emit('error', e.message || String(e)); }
+  async join(channelId: string) {
+    if (this.channelId) await this.leave();
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access requires HTTPS or localhost.');
+    this.joining = true;
+    try {
+      this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      this.context = new AudioContext(); await this.context.resume(); this.channelId = channelId;
+      await this.rejoin();
+      this.heartbeat = setInterval(() => { if (this.options.socket.connected && this.room) void ack(this.options.socket, 'voice:heartbeat', { eligible: this.peers.size === 0 || [...this.peers.values()].some(p => p.pc.connectionState === 'connected') }).catch(e => this.error(e)); }, 5000);
+      this.attachMicMeter();
+      this.meter = setInterval(() => {
+        const amplitude = (a: AnalyserNode) => { const b = new Float32Array(a.fftSize); a.getFloatTimeDomainData(b); return Math.sqrt(b.reduce((sum, x) => sum + x * x, 0) / b.length) > 0.018; };
+        this.options.emit('speaking', { userId: this.options.userId, speaking: Boolean(this.micAnalyser) && !this.muted && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted && amplitude(this.micAnalyser!) });
+        for (const [userId, p] of this.peers) if (p.audio) this.options.emit('speaking', { userId, speaking: p.audio.gain.gain.value > 0 && amplitude(p.audio.analyser) });
+      }, 150);
+    } catch (e) { await this.leave(); throw e; } finally { this.joining = false; }
+  }
+  private async rejoin() {
+    if (!this.channelId || !this.mic) return;
+    for (const userId of [...this.peers.keys()]) this.removePeer(userId);
+    if (this.screen) await this.stopShare();
+    const result = await ack(this.options.socket, 'voice:join', { channelId: this.channelId, eligible: Boolean(this.context && this.mic.active && navigator.onLine) });
+    this.epoch = result.epoch; this.iceServers = result.iceServers; await this.updateRoom(result.room);
+    await this.publishState(); this.options.emit('status', 'Voice connected');
+  }
+  private metadata(): NonNullable<Signal['streams']> {
+    const streams: NonNullable<Signal['streams']> = [];
+    if (this.mic) streams.push({ streamId: this.mic.id, kind: 'audio' });
+    if (this.screen && this.lease) streams.push({ streamId: this.screen.id, kind: 'screen', leaseId: this.lease.id }); return streams;
+  }
+  private async signal(userId: string, payload: Partial<Signal>) {
+    if (!this.channelId || !this.epoch) return;
+    await ack(this.options.socket, 'voice:signal', { channelId: this.channelId, epoch: this.epoch, to: userId, streams: this.metadata(), ...payload });
+  }
+  private createPeer(userId: string, epoch: string) {
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers, bundlePolicy: 'max-bundle' });
+    const p: Peer = { pc, epoch, makingOffer: false, ignoreOffer: false, settingAnswer: false, pendingIce: [], streams: [], received: new Map(), screenSubscribed: true, restarts: 0 };
+    this.peers.set(userId, p);
+    for (const track of this.mic?.getTracks() || []) pc.addTrack(track, this.mic!);
+    if (this.screen) p.screenSender = pc.addTrack(this.screen.getVideoTracks()[0], this.screen);
+    pc.onnegotiationneeded = async () => {
+      try { p.makingOffer = true; await pc.setLocalDescription(); await this.signal(userId, { description: pc.localDescription!.toJSON() }); } catch (e) { if (pc.signalingState !== 'closed') this.error(e); } finally { p.makingOffer = false; }
+    };
+    pc.onicecandidate = e => { if (e.candidate) void this.signal(userId, { candidate: e.candidate.toJSON() }).catch(err => this.error(err)); };
+    pc.ontrack = e => {
+      const stream = e.streams[0] || new MediaStream([e.track]); p.received.set(stream.id, stream); this.attachTracks(userId, p);
+      e.track.onended = () => { if (e.track.kind === 'video') { const meta = p.streams.find(s => s.streamId === stream.id); if (meta?.leaseId) this.options.emit('screenRemoved', meta.leaseId); } };
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') { p.restarts = 0; this.options.emit('status', 'Voice connected'); }
+      if (pc.connectionState === 'failed' && p.restarts++ < 3) { pc.restartIce(); this.options.emit('status', 'Repairing media connection…'); }
+      else if (pc.connectionState === 'failed') this.error(new Error('Direct media connection failed. Configure TURN or select SFU mode.'));
+      if (pc.connectionState === 'disconnected') setTimeout(() => { if (pc.connectionState === 'disconnected' && p.restarts++ < 3) pc.restartIce(); }, 3000);
+    };
+    return p;
+  }
+  private attachTracks(userId: string, p: Peer) {
+    for (const [streamId, stream] of p.received) {
+      const metadata = p.streams.find(s => s.streamId === streamId);
+      if (!metadata) continue;
+      if (metadata.kind === 'audio' && stream.getAudioTracks().length && !p.audio && this.context) {
+        const element = document.createElement('audio'); element.autoplay = true; element.srcObject = stream; element.style.display = 'none'; document.body.appendChild(element);
+        const source = this.context.createMediaElementSource(element), gain = this.context.createGain(), analyser = this.context.createAnalyser(); analyser.fftSize = 512;
+        source.connect(gain).connect(analyser).connect(this.context.destination); p.audio = { source, element, gain, analyser }; this.applyVolume(userId);
+        void element.play().catch(() => this.error(new Error('Audio playback was blocked. Rejoin voice to enable audio.')));
+      }
+      if (metadata.kind === 'screen' && metadata.leaseId && !this.hiddenShares.has(metadata.leaseId) && this.room?.shares.some(s => s.id === metadata.leaseId && s.userId === userId)) this.options.emit('screen', { userId, leaseId: metadata.leaseId, stream });
+    }
+  }
+  private async receive(v: Signal) {
+    if (v.channelId !== this.channelId || !v.from || !this.epoch) return;
+    let member = this.room?.members.find(m => m.user.id === v.from);
+    if (!member || member.epoch !== v.epoch) { const room = await ack(this.options.socket, 'voice:heartbeat', {}); if (room.room) await this.updateRoom(room.room); member = this.room?.members.find(m => m.user.id === v.from); }
+    if (!member || member.epoch !== v.epoch) return;
+    const p = this.peers.get(v.from) || this.createPeer(v.from, v.epoch), pc = p.pc;
+    if (v.streams) { p.streams = v.streams; this.attachTracks(v.from, p); }
+    if (v.subscription) {
+      if (this.lease?.id === v.subscription.leaseId) { p.screenSubscribed = v.subscription.enabled; if (p.screenSender) await p.screenSender.replaceTrack(v.subscription.enabled ? this.screen?.getVideoTracks()[0] || null : null); }
+      return;
+    }
+    if (v.description) {
+      const ready = !p.makingOffer && (pc.signalingState === 'stable' || p.settingAnswer), collision = v.description.type === 'offer' && !ready;
+      const polite = this.options.userId.localeCompare(v.from) > 0;
+      p.ignoreOffer = !polite && collision;
+      if (p.ignoreOffer) return;
+      p.settingAnswer = v.description.type === 'answer';
+      try { await pc.setRemoteDescription(v.description); } finally { p.settingAnswer = false; }
+      for (const candidate of p.pendingIce.splice(0)) await pc.addIceCandidate(candidate).catch(e => { if (!p.ignoreOffer) throw e; });
+      if (v.description.type === 'offer') { await pc.setLocalDescription(); await this.signal(v.from, { description: pc.localDescription!.toJSON() }); }
+    } else if (v.candidate) {
+      if (!pc.remoteDescription) p.pendingIce.push(v.candidate);
+      else try { await pc.addIceCandidate(v.candidate); } catch (e) { if (!p.ignoreOffer) throw e; }
+    }
+  }
+  private async updateRoom(room: VoiceRoom) {
+    if (room.channelId !== this.channelId) return;
+    this.room = room;
+    for (const [userId, p] of this.peers) if (!room.members.some(m => m.user.id === userId && m.epoch === p.epoch)) this.removePeer(userId);
+    if (this.epoch) for (const m of room.members) if (m.user.id !== this.options.userId && !this.peers.has(m.user.id)) this.createPeer(m.user.id, m.epoch);
+    for (const track of this.mic?.getAudioTracks() || []) track.enabled = !this.muted && !this.deafened && !room.members.find(m => m.user.id === this.options.userId)?.serverMuted;
+    for (const [userId, p] of this.peers) { this.applyVolume(userId); this.attachTracks(userId, p); }
+    if (this.lease && !room.shares.some(s => s.id === this.lease!.id)) await this.stopShare();
+    this.options.emit('room', room);
+  }
+  private applyVolume(userId: string) {
+    const p = this.peers.get(userId); if (!p?.audio) return;
+    const member = this.room?.members.find(m => m.user.id === userId);
+    p.audio.gain.gain.value = this.deafened || member?.serverMuted || member?.muted || member?.deafened ? 0 : (this.volumes.get(userId) ?? 1);
+  }
+  private attachMicMeter() { this.micSource?.disconnect(); if (!this.context || !this.mic) return; this.micSource = this.context.createMediaStreamSource(this.mic); this.micAnalyser = this.context.createAnalyser(); this.micAnalyser.fftSize = 512; this.micSource.connect(this.micAnalyser); }
+  private removePeer(userId: string) { const p = this.peers.get(userId); if (p) { p.pc.onnegotiationneeded = null; p.pc.onicecandidate = null; p.pc.close(); p.audio?.source.disconnect(); p.audio?.gain.disconnect(); if (p.audio) { p.audio.element.pause(); p.audio.element.srcObject = null; p.audio.element.remove(); } for (const s of p.streams) if (s.leaseId) this.options.emit('screenRemoved', s.leaseId); this.peers.delete(userId); } }
+  private async publishState() { if (this.room) await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); }
+  async setMuted(value: boolean) { this.muted = value; for (const t of this.mic?.getAudioTracks() || []) t.enabled = !value && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted; await this.publishState(); }
+  async setDeafened(value: boolean) { this.deafened = value; await this.setMuted(this.muted); for (const userId of this.peers.keys()) this.applyVolume(userId); }
+  setVolume(userId: string, value: number) { this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolume(userId); }
+  async setDevice(deviceId: string) {
+    const next = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    const old = this.mic; this.mic = next;
+    for (const p of this.peers.values()) { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(next.getAudioTracks()[0]); }
+    old?.getTracks().forEach(t => t.stop()); this.attachMicMeter(); await this.setMuted(this.muted);
+  }
+  async startShare(quality: '720p15' | '720p30' | '1080p30' = '720p15') {
+    if (!this.channelId) throw new Error('Join a voice channel first.');
+    if (this.screen) return;
+    this.screenTarget = { bitrate: quality === '1080p30' ? 2500000 : 1200000, fps: quality === '720p15' ? 15 : 30 };
+    const constraints = { width: { ideal: quality === '1080p30' ? 1920 : 1280 }, height: { ideal: quality === '1080p30' ? 1080 : 720 }, frameRate: { ideal: quality === '720p15' ? 15 : 30, max: 30 } };
+    const screen = await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: false });
+    try {
+      const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID() }); this.lease = result.lease; this.screen = screen;
+      screen.getVideoTracks()[0].onended = () => { void this.stopShare(); };
+      for (const [userId, p] of this.peers) {
+        p.screenSubscribed = true;
+        if (p.screenSender) { p.screenSender.setStreams(screen); await p.screenSender.replaceTrack(screen.getVideoTracks()[0]); } else p.screenSender = p.pc.addTrack(screen.getVideoTracks()[0], screen);
+        const parameters = p.screenSender.getParameters(); if (!parameters.encodings?.length) parameters.encodings = [{}]; parameters.encodings[0].maxBitrate = quality === '1080p30' ? 2500000 : 1200000; parameters.encodings[0].maxFramerate = quality === '720p15' ? 15 : 30;
+        await p.screenSender.setParameters(parameters).catch(() => {}); await this.signal(userId, {});
+      }
+    } catch (e) { screen.getTracks().forEach(t => t.stop()); await this.stopShare(); throw e; }
+  }
+  async stopShare() {
+    const screen = this.screen, lease = this.lease; this.screen = null; this.lease = null;
+    screen?.getTracks().forEach(t => { t.onended = null; t.stop(); });
+    for (const p of this.peers.values()) if (p.screenSender) await p.screenSender.replaceTrack(null).catch(() => {});
+    if (lease && this.options.socket.connected && this.channelId) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {});
+  }
+  async subscribe(share: Share, enabled: boolean) {
+    if (enabled) this.hiddenShares.delete(share.id); else this.hiddenShares.add(share.id);
+    const p = this.peers.get(share.userId);
+    if (!p) throw new Error('Publisher is no longer connected.');
+    for (const s of p.streams) if (s.leaseId === share.id) for (const t of p.received.get(s.streamId)?.getTracks() || []) t.enabled = enabled;
+    await this.signal(share.userId, { subscription: { leaseId: share.id, enabled } });
+    if (!enabled) this.options.emit('screenRemoved', share.id); else this.attachTracks(share.userId, p);
+  }
+  async getStats() {
+    const result: Record<string, any> = {};
+    for (const [userId, p] of this.peers) {
+      const stats = await p.pc.getStats(); const rows: any[] = [];
+      stats.forEach(r => { if (['inbound-rtp', 'outbound-rtp', 'remote-inbound-rtp', 'candidate-pair'].includes(r.type)) rows.push({ ...r }); });
+      result[userId] = { state: p.pc.connectionState, iceState: p.pc.iceConnectionState, audioContext: this.context?.state, audioAttached: Boolean(p.audio), receivedStreams: [...p.received.keys()], describedStreams: p.streams, reports: rows };
+      const congested = rows.some(r => r.type === 'remote-inbound-rtp' && (r.roundTripTime > 0.4 || r.fractionLost > 0.08));
+      if (p.screenSender?.track) { const params = p.screenSender.getParameters(); if (params.encodings?.[0]) { params.encodings[0].maxBitrate = congested ? 450000 : this.screenTarget.bitrate; params.encodings[0].maxFramerate = congested ? 10 : this.screenTarget.fps; await p.screenSender.setParameters(params).catch(() => {}); } }
+    }
+    this.options.emit('stats', result); return result;
+  }
+  async leave() {
+    const previous = this.channelId; this.channelId = null; clearInterval(this.heartbeat); clearInterval(this.meter);
+    await this.stopShare(); for (const userId of [...this.peers.keys()]) this.removePeer(userId);
+    this.mic?.getTracks().forEach(t => t.stop()); this.mic = null; this.micSource?.disconnect(); this.micSource = null; this.micAnalyser = null; await this.context?.close().catch(() => {}); this.context = null; this.room = null; this.epoch = '';
+    if (previous && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {});
+    this.options.emit('room', null); this.options.emit('status', '');
+  }
+  async destroy() {
+    this.destroyed = true; await this.leave(); const s = this.options.socket;
+    s.off('voice:room', this.onRoom); s.off('voice:signal', this.onSignal); s.off('voice:removed', this.onRemoved); s.off('connect', this.onConnect); s.off('disconnect', this.onDisconnect);
+  }
+}

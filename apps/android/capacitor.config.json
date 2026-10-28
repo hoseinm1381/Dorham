@@ -1,0 +1,5 @@
+{
+  "appId": "com.dorham.chat", "appName": "Dorham", "webDir": "../web/dist",
+  "android": { "allowMixedContent": false, "backgroundColor": "#101218" },
+  "server": { "androidScheme": "https", "hostname": "localhost" }
+}

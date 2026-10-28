@@ -1,0 +1,88 @@
+{
+  "name": "dorham",
+  "version": "0.1.0",
+  "private": true,
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  },
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"tsx watch apps/api/src/index.ts\" \"vite --config apps/web/vite.config.ts\"",
+    "start": "node --env-file-if-exists=.env apps/api/dist/index.js",
+    "build": "npm run build:api && npm run build:web && npm run build:desktop",
+    "build:api": "tsup --config tsup.config.ts",
+    "build:web": "node scripts/icons.mjs && vite build --config apps/web/vite.config.ts && node scripts/pwa-build.mjs",
+    "build:desktop": "node scripts/desktop-build.mjs",
+    "package:windows": "npm run build && node scripts/windows-package.mjs",
+    "android:sync": "npm run build:web && npm exec --workspace @dorham/android -- cap sync android",
+    "android:build": "node scripts/android-build.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "node scripts/browser-tests.mjs",
+    "test:media-load": "node scripts/browser-tests.mjs --capacity",
+    "test:load": "tsx tests/load.ts",
+    "db:migrate": "tsx scripts/database.ts migrate",
+    "db:backup": "tsx scripts/database.ts backup",
+    "db:restore": "tsx scripts/database.ts restore",
+    "deploy:bundle": "node scripts/deploy-bundle.mjs",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@fastify/cookie": "11.1.5",
+    "@fastify/cors": "11.3.1",
+    "@fastify/helmet": "13.2.0",
+    "@fastify/multipart": "10.1.6",
+    "@fastify/rate-limit": "11.2.1",
+    "@fastify/static": "10.1.8",
+    "argon2": "0.45.1",
+    "better-sqlite3": "13.0.3",
+    "dotenv": "18.0.9",
+    "drizzle-orm": "0.45.4",
+    "fastify": "5.12.7",
+    "livekit-client": "2.23.0",
+    "livekit-server-sdk": "2.19.2",
+    "lucide-react": "1.63.0",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "sharp": "0.35.5",
+    "socket.io": "4.8.4",
+    "socket.io-client": "4.8.4",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "@electric-sql/pglite": "0.5.12",
+    "@electric-sql/pglite-socket": "0.2.15",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.1",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "26.6.5",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "concurrently": "10.0.6",
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
+    "eslint": "10.13.0",
+    "tsup": "9.0.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}
