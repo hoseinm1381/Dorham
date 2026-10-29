@@ -29,6 +29,25 @@ it('upgrades the actual v1 schema without losing existing users, sessions, messa
     expect((await service.bootstrap('legacy-user')).servers[0].ownerId).toBe('legacy-user');
     expect(await db.all('PRAGMA foreign_key_check')).toHaveLength(0);
     await db.close(); db = await openDatabase(config({ dataDir: dir, databaseUrl: '' }));
-    expect((await db.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => Number(r.version))).toEqual([1, 2]);
+    expect((await db.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => Number(r.version))).toEqual([1, 2, 3]);
+  } finally { await db.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+it('adds v3 roles and recovers recent active v2 invite links without changing their codes', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dorham-v2-upgrade-'));
+  let db = await openDatabase(config({ dataDir: dir, databaseUrl: '' }));
+  try {
+    const now = Date.now(), code = 'existing_invitation_code_123';
+    await db.run('INSERT INTO users(id,username,display_name,password_hash,created_at) VALUES(?,?,?,?,?)', ['v2user', 'v2user', 'Keep profile', 'fixture', now]);
+    await db.run('INSERT INTO servers(id,name,owner_id,created_at) VALUES(?,?,?,?)', ['v2server', 'Keep server', 'v2user', now]);
+    await db.run('INSERT INTO invites(hash,server_id,expires_at,remaining,created_by) VALUES(?,?,?,?,?)', [hash(code), 'v2server', now + 86400000, 5, 'v2user']);
+    await db.run('INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)', ['v2user', 'prior-invite-request', 'invite.create', 'prior-fingerprint', JSON.stringify({ code, url: `https://example.test/?invite=${code}` }), now]);
+    await db.run('ALTER TABLE dm_members DROP COLUMN hidden'); await db.run('DROP TABLE user_blocks'); await db.run('DROP TABLE member_roles'); await db.run('DROP TABLE custom_roles'); await db.run('ALTER TABLE invites DROP COLUMN code'); await db.run('DELETE FROM schema_migrations WHERE version=3');
+    await db.close(); db = await openDatabase(config({ dataDir: dir, databaseUrl: '' }));
+    expect(await db.one('SELECT code,remaining FROM invites WHERE hash=?', [hash(code)])).toEqual({ code, remaining: 5 });
+    expect((await db.one('SELECT display_name FROM users WHERE id=?', ['v2user']))!.display_name).toBe('Keep profile');
+    expect(await db.all('PRAGMA foreign_key_check')).toEqual([]);
+    await db.close(); db = await openDatabase(config({ dataDir: dir, databaseUrl: '' }));
+    expect(await db.all('SELECT * FROM custom_roles')).toEqual([]);
   } finally { await db.close(); await rm(dir, { recursive: true, force: true }); }
 });

@@ -4,6 +4,8 @@ HTTP responses return data directly. Errors use `{ error: { code, message } }` w
 
 Use `Authorization: Bearer <access>` on native HTTP calls. Web calls use the session cookie plus `X-CSRF-Token` on unsafe methods and an allowed `Origin`. Native login/register sends `X-Dorham-Native: 1`. Native tokens must never be placed in localStorage or URLs. `/auth/me` returns the current public user and CSRF token.
 
+The v0.3 invitation, custom-role, DM closing/blocking and server-leaving routes are documented in [social update API additions](SOCIAL-UPDATE.md#api-additions).
+
 ## Routes under `/api/v1`
 
 | Method | Route | Input / behavior |

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Database } from './db';
 
 // All DDL is transactional in both supported databases. Never rewrite a v1 table
@@ -34,4 +35,22 @@ export async function migrateExpansion(db: Database) {
     ]) await tx.run(query);
     await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(2,?)', [Date.now()]);
   });
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=3')) return;
+    await tx.run('ALTER TABLE invites ADD COLUMN code TEXT');
+    // v2 stored only invite hashes, but recent idempotency replies still contain
+    // their original code. Recover active links without minting replacement invites.
+    for (const row of await tx.all("SELECT response FROM mutations WHERE operation='invite.create' ORDER BY created_at DESC LIMIT 5000")) {
+      let code: unknown;
+      try { code = JSON.parse(row.response).code; } catch { continue; }
+      if (typeof code === 'string' && /^[a-zA-Z0-9_-]{10,100}$/.test(code)) await tx.run('UPDATE invites SET code=? WHERE hash=? AND expires_at>? AND remaining>0', [code, createHash('sha256').update(code).digest('hex'), Date.now()]);
+    }
+
+    await tx.run('ALTER TABLE dm_members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
+    await tx.run('CREATE TABLE user_blocks (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, blocked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(user_id,blocked_id))');
+    await tx.run('CREATE TABLE custom_roles (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, name TEXT NOT NULL, color TEXT NOT NULL, permissions TEXT NOT NULL, UNIQUE(server_id,name))');
+    await tx.run('CREATE TABLE member_roles (server_id TEXT NOT NULL, user_id TEXT NOT NULL, role_id TEXT NOT NULL REFERENCES custom_roles(id) ON DELETE CASCADE, PRIMARY KEY(server_id,user_id,role_id), FOREIGN KEY(server_id,user_id) REFERENCES members(server_id,user_id) ON DELETE CASCADE)');
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(3,?)', [Date.now()]);
+  });
+
 }

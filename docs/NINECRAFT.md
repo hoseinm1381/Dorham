@@ -6,6 +6,8 @@ Pilot website: **https://dorham.45-135-242-146.nip.io/**. SFU signaling uses `vo
 
 The v0.2 update is deployed with existing accounts retained; see [upgrade capability matrix and new operational gates](UPGRADE-STATUS.md). The private signaling proxy now enforces current admission before every `/rtc` connection, and the backend uses LiveKit's loopback control API. Reset tooling is available but has not been executed on live data.
 
+The subsequent v0.3 social/roles update is deployed; see [SOCIAL-UPDATE.md](SOCIAL-UPDATE.md) for features, current package locations, preserved live data and verification.
+
 ## Services and networking
 
 - Node 24.22.1 under `dorham.service`: `/opt/dorham`, environment `/etc/dorham/pilot.env`, data `/var/lib/dorham`. The API binds only `127.0.0.1:3001`; one process owns SQLite. Systemd uses the direct Node executable, graceful shutdown, automatic failure restart and a 640 MiB hard memory limit.

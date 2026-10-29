@@ -2,6 +2,8 @@
 
 Updated 29 October 2026. The Iranian pilot runs this expansion at https://dorham.45-135-242-146.nip.io/. Existing accounts were kept. No account reset was performed. This report supersedes older v0.1 verification paragraphs for the changed features.
 
+The subsequent v0.3 social/roles update is documented in [SOCIAL-UPDATE.md](SOCIAL-UPDATE.md). Account counts below describe the v0.2 migration checkpoint; later test-account cleanup and owner-requested admin initialization preserved the real accounts.
+
 ## Capability matrix
 
 | Capability | Status and evidence |

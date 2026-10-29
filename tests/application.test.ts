@@ -42,7 +42,10 @@ describe('accounts and access', () => {
     expect((await h.api(a, '/admin/metrics')).statusCode).toBe(403);
     expect((await h.api(a, '/admin/claim', { secret: 'test-bootstrap-secret' })).statusCode).toBe(200);
     expect((await h.api(b, '/admin/claim', { secret: 'test-bootstrap-secret' })).statusCode).toBe(409);
-    await h.db.run('CREATE TABLE pressure (payload BLOB NOT NULL)'); await h.db.run('INSERT INTO pressure(payload) VALUES(zeroblob(700000))');
+    await h.db.run('CREATE TABLE pressure (payload BLOB NOT NULL)');
+    const pages = Number((await h.db.one('PRAGMA page_count'))!.page_count), pageSize = Number((await h.db.one('PRAGMA page_size'))!.page_size);
+    const filler = Math.max(0, Math.floor(1048576 * 0.87) - pages * pageSize);
+    await h.db.run('INSERT INTO pressure(payload) VALUES(zeroblob(?))', [filler]);
     const storage = (await h.api(a, '/admin/metrics')).json().storage; expect(storage.databaseBytes).toBeLessThan(1048576); expect(storage.warnings).toContain('Database is at least 80% of its page budget. Prune data or migrate storage.');
   });
   it('enforces account capacity under concurrent registration', async () => {

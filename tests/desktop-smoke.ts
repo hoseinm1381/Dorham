@@ -46,6 +46,9 @@ try {
   await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill(crypto.randomUUID());
   await page.getByRole('button', { name: 'Create account', exact: true }).click(); await page.getByRole('heading', { name: `Hey, ${displayName.split(' ')[0]}.` }).waitFor();
   await page.locator('.connection-light.connected').waitFor();
+  const version = JSON.parse(await readFile('package.json', 'utf8')).version;
+  await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.locator('.app-version').filter({ hasText: version }).waitFor();
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   const remoteAvatars = page.locator('img[src*="/avatars/"]');
   if (liveServer) {
     assert.ok(await remoteAvatars.count(), 'The hosted fixture has an uploaded avatar.');

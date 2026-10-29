@@ -1,0 +1,28 @@
+.notification-settings { border-bottom:1px solid #ffffff18; padding-bottom:18px; margin-bottom:20px; }
+.notification-settings small { display:block; color:#a4a5b5; margin-top:10px; }
+.app-version { color:#bcb5f5; display:flex; gap:8px; align-items:center; }
+.app-version strong { padding:4px 8px; background:#9b8aff18; border-radius:6px; font-variant-numeric:tabular-nums; }
+.voice-collapsed.voice-stage { padding:5px 18px; max-height:42px; min-height:0; flex:0 0 auto; overflow:hidden; }
+.voice-collapsed .voice-stage-heading { margin:0; min-height:29px; }
+.voice-collapsed .voice-cards { display:none; }
+.voice-collapsed .transport-tag { display:none; }
+.voice-collapsed .voice-stage-heading small { font-size:11px; }
+.message-notice { padding:7px 16px; background:#7770d42b; border-bottom:1px solid #9991ec44; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.message-notice > button:first-child { color:#e6e2ff; text-align:start; flex:1; font-size:13px; }
+.home-logo { position:relative; }
+.home-unread { position:absolute; width:10px; height:10px; background:#ed808f; border:2px solid #171820; border-radius:50%; right:0; top:0; }
+.role-chip { display:inline-flex; align-items:center; gap:5px; border:1px solid; border-radius:12px; padding:2px 7px; font-size:11px; margin:3px 3px 0 0; max-width:100%; color:#e9e7f0; overflow-wrap:anywhere; }
+.role-chip i { flex-shrink:0; width:7px; height:7px; border-radius:50%; }
+.custom-role-manager form { display:flex; flex-direction:column; gap:12px; }
+.role-assignments { padding:10px 0; border-bottom:1px solid #ffffff12; }
+.role-assignments strong { display:block; margin-bottom:7px; }
+.role-assignments label { display:inline-flex; margin:3px 10px 3px 0; }
+.invite-options { display:flex; gap:12px; margin:12px 0; }
+.invite-options label { flex:1; min-width:0; }
+.saved-invite { border:1px solid #ffffff18; border-radius:8px; padding:10px; margin-top:12px; }
+.saved-invite small { display:block; margin:8px 0; color:#b8b6c7; }
+.saved-invite input { min-width:0; }
+@media(max-width:600px) { .voice-collapsed.voice-stage { padding:3px 10px; } .voice-collapsed .voice-stage-heading { gap:5px; } .voice-collapsed .voice-stage-heading > span { gap:6px; } .invite-options { flex-direction:column; } }
+.chat-block-button { border:1px solid #ffffff22; border-radius:6px; padding:6px 8px; font-size:11px; color:#e4bdc7; white-space:nowrap; }
+.blocked-chat-note { margin:0; padding:9px 18px; background:#c66b7a18; color:#e6bbc3; font-size:12px; }
+@media(max-width:600px) { .topbar-actions .chat-block-button { max-width:90px; white-space:normal; font-size:10px; } .topbar:has(.chat-block-button) .connection-pill { display:none; } }

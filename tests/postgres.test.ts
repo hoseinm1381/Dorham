@@ -24,6 +24,8 @@ it('runs the PostgreSQL wire adapter and service transactions against a real Pos
     const retry = await service.send('a', rid, dm.id, 'PostgreSQL persisted this.'); expect(first).toEqual(retry);
     const history = await service.history('b', dm.id); expect((history as any).messages[0].content).toBe('PostgreSQL persisted this.');
     const serverData = await service.createServer('a', randomUUID(), 'Postgres room'); expect((await service.bootstrap('a')).servers[0].id).toBe(serverData.id);
+    const custom = await service.changeCustomRole('a', randomUUID(), serverData.id, { name: 'PG role', color: '#aabbcc', permissions: { speak: false } });
+    expect((await service.customRoles('a', serverData.id)).roles[0].id).toBe(custom.id);
     await expect(service.mutate('a', randomUUID(), 'rollback.test', {}, async tx => { await tx.run('UPDATE users SET bio=? WHERE id=?', ['must rollback', 'a']); throw new Error('rollback'); })).rejects.toThrow('rollback');
     expect((await db.one('SELECT bio FROM users WHERE id=?', ['a']))!.bio).toBe('');
     expect(db.dialect).toBe('postgres');

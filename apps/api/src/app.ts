@@ -167,7 +167,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.get('/bootstrap', async req => service.bootstrap(req.account.id));
     api.patch('/profile', async req => {
       const b = schemas.profile.parse(req.body);
-      const result = await service.mutate(req.account.id, b.requestId, 'profile.change', b, async tx => { await tx.run('UPDATE users SET display_name=?,bio=?,status=?,language=? WHERE id=?', [b.displayName, b.bio, b.status, b.language || req.account.language, req.account.id]); return { success: true }; }); await service.notify('state:changed', {}); return result;
+      const result = await service.mutate(req.account.id, b.requestId, 'profile.change', b, async tx => { await tx.run('UPDATE users SET display_name=?,bio=?,status=?,language=? WHERE id=?', [b.displayName, b.bio, b.status, b.language || req.account.language, req.account.id]); return { success: true }; }); await service.notify('state:changed', {}); await service.notify('voice:changed', {}); return result;
     });
     api.post('/profile/avatar', async req => {
       if (req.account.guest) fail(403, 'GUEST_UPLOAD', 'Guests cannot upload files.');
@@ -176,14 +176,15 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       const bytes = await file!.toBuffer();
       let image: Buffer; try { image = await sharp(bytes, { limitInputPixels: 16000000 }).rotate().resize(128, 128, { fit: 'cover' }).webp({ quality: 80 }).toBuffer(); } catch { fail(400, 'INVALID_IMAGE', 'Image could not be decoded.'); }
       if (image!.length > 96 * 1024) fail(400, 'IMAGE_TOO_LARGE', 'Compressed avatar is too large.');
+      let retiredAvatar: string | null = null;
       const result = await service.mutate(req.account.id, rid, 'avatar.change', { hash: hash(bytes.toString('base64')) }, async tx => {
         let size = 0; for (const f of await readdir(avatarDir)) size += (await stat(path.join(avatarDir, f))).size;
         if (size + image!.length > c.maxAvatarsMiB * 1024 * 1024) fail(507, 'AVATAR_QUOTA', 'Avatar storage is full.');
         const name = `${randomUUID()}.webp`; await writeFile(path.join(avatarDir, name), image!, { flag: 'wx' });
         const old = await tx.one('SELECT avatar FROM users WHERE id=?', [req.account.id]);
         await tx.run('UPDATE users SET avatar=? WHERE id=?', [`/avatars/${name}`, req.account.id]);
-        if (old?.avatar) await unlink(path.join(avatarDir, path.basename(old.avatar))).catch(() => {}); return { avatar: `/avatars/${name}` };
-      }); await service.notify('state:changed', {}); return result;
+        retiredAvatar = old?.avatar || null; return { avatar: `/avatars/${name}` };
+      }); if (retiredAvatar) await unlink(path.join(avatarDir, path.basename(retiredAvatar))).catch(() => {}); await service.notify('state:changed', {}); await service.notify('voice:changed', {}); return result;
     });
     api.get('/channels/:id', async req => service.channel(db, req.account.id, id.parse((req.params as any).id)));
     api.post('/servers', async req => { const b = z.object({ name: schemas.name, requestId }).parse(req.body); return service.createServer(req.account.id, b.requestId, b.name); });
@@ -191,9 +192,16 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.post('/servers/:id/channels', async req => { const b = schemas.channel.parse(req.body); return service.createChannel(req.account.id, b.requestId, id.parse((req.params as any).id), b.name, b.kind); });
     api.patch('/channels/:id', async req => { const b = z.object({ name: schemas.name.optional(), delete: z.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), requestId }).refine(b => b.name || b.delete || (b.role && b.permissions)).parse(req.body); return service.changeChannel(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/servers/:id/invites', async req => { const b = z.object({ hours: z.number().int().min(1).max(168).default(24), uses: z.number().int().min(1).max(100).default(10), requestId }).parse(req.body); return service.invite(req.account.id, b.requestId, id.parse((req.params as any).id), token(), b.hours, b.uses); });
+    api.get('/servers/:id/invites', async req => service.invitations(req.account.id, id.parse((req.params as any).id)));
+    api.delete('/servers/:id/invites/:code', async req => { const b = z.object({ requestId }).parse(req.body), p = req.params as any; return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z.string().min(10).max(100).parse(p.code)); });
+    api.get('/servers/:id/roles', async req => service.customRoles(req.account.id, id.parse((req.params as any).id)));
+    api.post('/servers/:id/roles', async req => { const b = z.object({ roleId: z.string().uuid().optional(), name: z.string().trim().min(1).max(32).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z.boolean().optional(), userId: id.optional(), assigned: z.boolean().optional(), requestId }).strict().parse(req.body); return service.changeCustomRole(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/invites/join', async req => { const b = z.object({ code: z.string().min(10).max(100), requestId }).parse(req.body); return service.joinInvite(req.account.id, b.requestId, b.code); });
     api.get('/servers/:id/members', async req => service.members(req.account.id, id.parse((req.params as any).id)));
     api.patch('/servers/:serverId/members/:userId', async req => { const b = z.object({ role: schemas.role.optional(), remove: z.boolean().optional(), requestId }).refine(b => b.role || b.remove).parse(req.body), p = req.params as any; return service.changeMember(req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b); });
+    api.post('/servers/:id/leave', async req => { const b = z.object({ requestId }).parse(req.body); return service.leaveServer(req.account.id, b.requestId, id.parse((req.params as any).id)); });
+    api.post('/dms/:id/close', async req => { const b = z.object({ requestId }).parse(req.body); return service.closeDirectMessage(req.account.id, b.requestId, id.parse((req.params as any).id)); });
+    api.post('/users/:id/block', async req => { const b = z.object({ blocked: z.boolean(), requestId }).parse(req.body); return service.blockUser(req.account.id, b.requestId, id.parse((req.params as any).id), b.blocked); });
     api.post('/dms', async req => { const b = z.object({ userId: id, requestId }).parse(req.body); const result = await service.dm(req.account.id, b.requestId, b.userId); await service.notify('state:changed', {}); return result; });
     api.get('/conversations/:id/messages', async req => { const b = z.object({ before: z.coerce.number().int().min(1).optional(), after: z.coerce.number().int().min(0).optional() }).parse(req.query); return service.history(req.account.id, id.parse((req.params as any).id), b.before, b.after); });
     api.post('/messages', async req => { const b = messageSchema.parse(req.body); return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds); });
