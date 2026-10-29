@@ -1,0 +1,29 @@
+.composer-wrap .file-composer { margin-block:3px; gap:5px; }
+.file-composer .upload-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px; width:100%; min-height:28px; }
+.file-composer .upload-attach { display:grid; place-items:center; width:28px; height:28px; padding:0; flex-shrink:0; border:1px solid transparent; border-radius:7px; color:#a6acc0; }
+.file-composer .upload-attach:hover,.file-composer .upload-attach:focus-within { border-color:#9184d2; color:#e0daff; background:#ffffff06; }
+.upload-attach .upload-label { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.upload-allowance { display:flex; align-items:center; gap:7px; min-width:0; color:#8f98ad; font-size:10px; line-height:1.4; }
+.upload-allowance progress { appearance:none; border:0; width:clamp(45px,9vw,120px); height:4px; border-radius:4px; overflow:hidden; background:#373a48; accent-color:#9487dc; flex-shrink:1; }
+.upload-allowance progress::-webkit-progress-bar { background:#373a48; border-radius:4px; }
+.upload-allowance progress::-webkit-progress-value { background:#9487dc; border-radius:4px; }
+.upload-allowance progress::-moz-progress-bar { background:#9487dc; border-radius:4px; }
+.upload-full progress { accent-color:#e29a9f; }
+.upload-full progress::-webkit-progress-value { background:#e29a9f; }
+.upload-full progress::-moz-progress-bar { background:#e29a9f; }
+.upload-amount { unicode-bidi:isolate; white-space:nowrap; }
+.upload-restriction { color:#e2b98f; font-size:10px; }
+.upload-limits { position:relative; flex-shrink:0; }
+.upload-limits summary { display:grid; place-items:center; width:25px; height:25px; border-radius:6px; color:#8f98ad; list-style:none; }
+.upload-limits summary::-webkit-details-marker { display:none; }
+.upload-limits summary:hover,.upload-limits[open] summary { color:#d4caff; background:#ffffff08; }
+.upload-limits-panel { position:absolute; inset-inline-start:0; bottom:32px; z-index:15; width:min(340px,calc(100vw - 115px)); max-height:45vh; overflow:auto; padding:12px; border:1px solid #454252; border-radius:10px; background:#191b25; box-shadow:0 8px 24px #0005; color:#b7bdcf; font-size:11px; line-height:1.65; }
+.upload-limits-panel p+p { margin-top:8px; }
+.upload-tools>.secondary { padding:3px 7px; font-size:10px; }
+@media(max-width:600px) {
+  .file-composer .upload-tools { gap:5px; }
+  .upload-allowance { flex:1; gap:5px; flex-wrap:wrap; }
+  .upload-allowance>span:first-child { display:none; }
+  .upload-allowance progress { width:40px; flex:1; max-width:90px; }
+  .upload-limits-panel { inset-inline-start:auto; inset-inline-end:0; }
+}

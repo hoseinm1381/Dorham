@@ -1,3 +1,5 @@
+Current update: **0.4.4** — [compact upload allowance](docs/COMPACT-UPLOAD-0.4.4.md).
+
 Current audio-controls update: **0.4.3**. See [audio fixes](docs/AUDIO-FIX-0.4.3.md).
 
 # Dorham

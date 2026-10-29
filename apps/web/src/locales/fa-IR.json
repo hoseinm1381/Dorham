@@ -589,5 +589,15 @@
   "Overrides apply to the selected role in this channel. Owners retain all permissions. Use role default removes this channel override.": "این تنظیمات فقط برای نقش انتخاب‌شده در همین کانال اعمال می‌شوند. مالک همهٔ دسترسی‌ها را دارد. با انتخاب «استفاده از پیش‌فرض نقش»، تنظیم اختصاصی این کانال حذف می‌شود.",
   "Tip: paste a copied picture into the message box with Ctrl+V.": "نکته: تصویر کپی‌شده را با Ctrl+V در کادر پیام جای‌گذاری کنید.",
   "Finish or cancel the current attachment first.": "ابتدا پیوست فعلی را آماده یا لغو کنید.",
-  "You can attach up to four files to one message.": "هر پیام می‌تواند حداکثر چهار پیوست داشته باشد."
+  "You can attach up to four files to one message.": "هر پیام می‌تواند حداکثر چهار پیوست داشته باشد.",
+  "Daily uploads": "آپلود روزانه",
+  "Daily upload usage": "میزان مصرف سهمیهٔ آپلود روزانه",
+  "Upload usage unavailable": "میزان مصرف در دسترس نیست",
+  "{used} of {limit} uploaded in the last 24 hours": "در ۲۴ ساعت گذشته {used} از {limit} آپلود شده است",
+  "Upload limit reached": "سهمیهٔ آپلود تمام شده",
+  "Small files only": "فقط فایل‌های کوچک",
+  "Upload limits": "محدودیت‌های آپلود",
+  "Your allowance covers the last 24 hours and becomes available gradually as older uploads expire from that window.": "سهمیه مربوط به ۲۴ ساعت گذشته است؛ با خارج شدن آپلودهای قدیمی از این بازه، به‌تدریج آزاد می‌شود.",
+  "Shared usage: {used} of {limit}": "مصرف کل کاربران: {used} از {limit}",
+  "Loading…": "در حال بارگذاری…"
 }

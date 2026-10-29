@@ -71,12 +71,15 @@ try {
   if (!liveServer) {
     await page.addInitScript(() => { navigator.mediaDevices.getDisplayMedia = async () => { const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360; const draw = canvas.getContext('2d')!; let frame = 0; const timer = setInterval(() => { draw.fillStyle = frame++ % 2 ? '#713ce0' : '#34bca5'; draw.fillRect(0, 0, 640, 360); }, 100); const stream = canvas.captureStream(12); (window as any).__desktopCapture = stream.getVideoTracks()[0]; stream.getVideoTracks()[0].addEventListener('ended', () => clearInterval(timer)); return stream; }; });
     await page.reload(); await page.getByRole('button', { name: 'Create a server', exact: true }).click(); await page.getByLabel('Server name', { exact: true }).fill('Desktop media fixture'); await page.getByRole('button', { name: 'Create space', exact: true }).click(); await page.getByRole('button', { name: 'Open Desktop media fixture', exact: true }).click();
+    const uploadBar = page.getByRole('progressbar', { name: 'Daily upload usage', exact: true });
+    await expect(uploadBar).toHaveAttribute('value', '0'); assert.ok((await page.locator('.file-composer').boundingBox())!.height <= 32);
     const image = await sharp({ create: { width: 320, height: 180, channels: 3, background: '#34bca5' } }).png().toBuffer();
     const pasted = await page.getByLabel('Message', { exact: true }).evaluate((input, bytes) => {
       const data = new DataTransfer(); data.items.add(new File([new Uint8Array(bytes)], 'desktop-picture.png', { type: 'image/png' }));
       const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }); input.dispatchEvent(event); return event.defaultPrevented;
     }, [...image]); assert.equal(pasted, true);
     await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await expect(uploadBar).toHaveAttribute('value', String(image.length));
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.attachment-preview img')].some(img => img.naturalWidth === 320));
     await page.getByRole('button', { name: 'Open image: desktop-picture.png', exact: true }).click(); await page.getByRole('dialog', { name: 'Image viewer' }).waitFor(); await page.keyboard.press('Escape');
     const video = await makeVideo(page); await page.locator('.file-composer input[type=file]').setInputFiles({ name: 'desktop-clip.webm', mimeType: 'video/webm', buffer: video }); await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();

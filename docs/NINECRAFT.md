@@ -1,3 +1,5 @@
+Current update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
+
 Current audio-controls update: **0.4.3**. See [AUDIO-FIX-0.4.3.md](AUDIO-FIX-0.4.3.md).
 
 # Ninecraft Iranian SFU pilot — 29 October 2026
