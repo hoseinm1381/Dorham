@@ -15,6 +15,49 @@ async function instrument(page: Page, relayOnly = false) {
 }
 async function stats(page: Page) { return page.evaluate(async () => { const results: any[] = []; for (const pc of (window as any).__pcs || []) { if (pc.connectionState !== 'closed') (await pc.getStats()).forEach((r: any) => results.push({ ...r })); } return results; }); }
 
+test('cookie renewal retries an overlapping member request without logging the user out', async ({ page }) => {
+  await register(page, `Renew${Date.now().toString().slice(-7)}`);
+  const server = await api(page, '/servers', { name: 'Renewal race lab' });
+  const cookie = (await page.context().cookies()).find(c => c.name === 'dorham_session')!;
+  let release!: () => void, intercepted!: () => void, requests = 0, staleStatus = 0, freshStatus = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; }), pending = new Promise<void>(resolve => { intercepted = resolve; });
+  await page.route(`**/api/v1/servers/${server.id}/members`, async route => {
+    requests++;
+    if (requests !== 1) { const response = await route.fetch(); freshStatus = response.status(); await route.fulfill({ response }); return; }
+    intercepted(); await gate;
+    const response = await route.fetch({ headers: { ...await route.request().allHeaders(), cookie: `dorham_session=${cookie.value}` } });
+    staleStatus = response.status(); await route.fulfill({ response });
+  });
+  await page.getByRole('button', { name: 'Open Renewal race lab', exact: true }).click(); await pending;
+  const renewal = page.waitForResponse(r => r.url().endsWith('/api/v1/auth/renew') && r.ok());
+  await page.evaluate(() => window.dispatchEvent(new Event('dorham-native-pulse'))); await renewal;
+  release(); await expect.poll(() => requests).toBeGreaterThanOrEqual(2); await expect.poll(() => freshStatus).toBe(200); expect(staleStatus).toBe(401);
+  await expect(page.locator('.app')).toBeVisible(); await expect(page.locator('.member-row')).toContainText('Renew');
+  await page.unroute(`**/api/v1/servers/${server.id}/members`);
+  await page.route('**/api/v1/servers/*/members', route => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Session revoked.' } }) }));
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Renewal race lab', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Welcome back.', exact: true })).toBeVisible();
+});
+
+test('push-to-talk and toggle bindings gate the actual microphone, persist, and release on focus loss', async ({ browser }) => {
+  const context = await browser.newContext({permissions:['microphone']}), page = await context.newPage();
+  try {
+    await instrument(page); await register(page, `Hotkey${Date.now().toString().slice(-7)}`); await api(page,'/servers',{name:'Hotkey lab'});
+    await page.getByRole('button',{name:'Open Hotkey lab',exact:true}).click(); await page.getByRole('button',{name:'Account settings',exact:true}).click();
+    await page.getByLabel('Voice input mode',{exact:true}).selectOption('push'); await page.getByRole('button',{name:'Record talk hotkey',exact:true}).click(); await page.keyboard.press('F9'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+    await page.getByRole('button',{name:'Lounge',exact:true}).click(); await expect(page.locator('.voice-stage')).toBeVisible();
+    const mic = () => page.evaluate(() => (window as any).__microphones.flatMap((s:MediaStream)=>s.getAudioTracks()).filter((t:MediaStreamTrack)=>t.readyState==='live').map((t:MediaStreamTrack)=>t.enabled));
+    await expect.poll(mic).toEqual([false]); await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.up('F9'); await expect.poll(mic).toEqual([false]);
+    await page.getByRole('button',{name:'Lock microphone',exact:true}).click(); await page.keyboard.down('F9'); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9'); await page.getByRole('button',{name:'Unlock push to talk',exact:true}).click();
+    await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.evaluate(()=>window.dispatchEvent(new Event('blur'))); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9');
+    await page.getByRole('button',{name:'Account settings',exact:true}).click(); await page.getByLabel('Voice input mode',{exact:true}).selectOption('toggle'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+    await page.keyboard.press('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.press('F9'); await expect.poll(mic).toEqual([false]);
+    await page.getByRole('textbox',{name:'Message',exact:true}).focus(); await page.keyboard.press('F9'); await expect.poll(mic).toEqual([false]);
+    await page.reload(); await page.getByRole('button',{name:'Account settings',exact:true}).click(); await expect(page.getByLabel('Voice input mode',{exact:true})).toHaveValue('toggle'); await expect(page.getByRole('button',{name:'Record talk hotkey',exact:true})).toHaveText('F9');
+  } finally { await context.close(); }
+});
+
 test('real accounts, channel chat, reactions, editing, unread state and private messages', async ({ browser }) => {
   const a = await browser.newContext(), b = await browser.newContext(), page = await a.newPage(), other = await b.newPage(); const suffix = Date.now().toString().slice(-7);
   await register(page, `Alice${suffix}`); await register(other, `Robin${suffix}`);

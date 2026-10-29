@@ -18,6 +18,7 @@ import { openDatabase, type Row } from './db';
 import { Service, schemas, publicUser } from './service';
 import { AppError, fail, hash, token, equal, passwordHash, passwordVerify } from './security';
 import { Sfu } from './sfu';
+import { SingleFlight } from './single-flight';
 import { Attachments } from './attachments';
 import { mediaAdmission } from './media-admission';
 import { publicAccountRoutes, protectedAccountRoutes, audit } from './accounts';
@@ -248,22 +249,28 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     if (!session) { socket.disconnect(true); fail(401, 'UNAUTHENTICATED', 'Session expired.'); }
   }
   async function disconnectInvalidSessions() { for (const s of io.sockets.sockets.values()) { try { await validSocket(s); } catch { /* already disconnected */ } } }
+  const voiceRefresh = new SingleFlight(async () => {
+    const sockets = [...io.sockets.sockets.values()];
+    const snapshot = await service.voiceSnapshot(sockets.map(s => ({ socketId: s.id, userId: s.data.userId, channelId: s.data.voiceChannel })));
+    for (const update of snapshot) {
+      const s = io.sockets.sockets.get(update.socketId); if (!s) continue;
+      const directoryKey = JSON.stringify(update.directory);
+      if (s.data.directoryKey !== directoryKey) { s.data.directoryKey = directoryKey; s.emit('voice:directory', update.directory); }
+      if (update.room === null) { s.emit('voice:removed', {}); s.data.voiceChannel = null; s.data.roomKey = null; }
+      else if (update.room) {
+        const roomKey = JSON.stringify({ ...update.room, shares: update.room.shares.map(({ expiresAt: _expiry, ...share }) => share) });
+        if (s.data.roomKey !== roomKey) { s.data.roomKey = roomKey; s.emit('voice:room', update.room); }
+      }
+    }
+    if (sfu.client) try { await sfu.synchronize(); }
+    catch (err) { app.log.error({ err }, 'SFU permission synchronization failed'); fail(503, 'SFU_UNAVAILABLE', 'Control changes were saved, but SFU enforcement could not be confirmed. Retry when the media server is available.'); }
+  });
   service.notify = async (kind, payload) => {
     if (kind === 'conversation:event') {
       for (const s of io.sockets.sockets.values()) { try { await service.conversation(db, s.data.userId, payload.conversationId); s.emit(kind, payload); } catch { /* access denied */ } }
     } else if (kind === 'voice:move') { const target = io.sockets.sockets.get(payload.socketId); if (target) { target.data.voiceChannel = null; target.emit('voice:move', { channelId: payload.channelId }); }
     } else if (kind === 'voice:changed') {
-      for (const s of io.sockets.sockets.values()) {
-        s.emit('voice:directory', await service.voiceDirectory(s.data.userId));
-        if (!s.data.voiceChannel) continue;
-        const vm = await db.one('SELECT channel_id FROM voice_members WHERE user_id=? AND socket_id=?', [s.data.userId, s.id]);
-        if (!vm) { s.emit('voice:removed', {}); s.data.voiceChannel = null; continue; }
-        try { s.emit('voice:room', await service.room(s.data.userId, vm.channel_id)); } catch { s.emit('voice:removed', {}); s.data.voiceChannel = null; }
-      }
-      if (sfu.client) {
-        try { await sfu.synchronize(); }
-        catch (err) { app.log.error({ err }, 'SFU permission synchronization failed'); fail(503, 'SFU_UNAVAILABLE', 'Control changes were saved, but SFU enforcement could not be confirmed. Retry when the media server is available.'); }
-      }
+      await voiceRefresh.run();
     } else io.emit(kind, payload);
   };
   io.on('connection', socket => {
@@ -304,7 +311,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     socket.on('disconnect', async () => {
       try {
         const vm = await db.one('SELECT channel_id FROM voice_members WHERE socket_id=?', [socket.id]);
-        if (vm) { await service.voiceAction(socket.data.userId, socket.id!, 'leave'); await service.notify('voice:changed', {}); }
+        if (vm) await service.voiceAction(socket.data.userId, socket.id!, 'leave');
         if (![...io.sockets.sockets.values()].some(s => s.data.userId === socket.data.userId)) io.emit('presence', { userId: socket.data.userId, online: false });
       } catch (err) { app.log.error({ err }, 'Disconnect cleanup failed'); }
     });

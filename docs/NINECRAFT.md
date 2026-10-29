@@ -1,5 +1,7 @@
 # Ninecraft Iranian SFU pilot — 29 October 2026
 
+The current 0.4.1 voice CPU/hotkey update is deployed; see [optimization, verification and heavy-media limitations](OPTIMIZATION-0.4.1.md). The ten-user/four-share capacity gate remains failed despite reduced control-plane CPU.
+
 The operator authorized one month at **348,000 toman**, with reduced screen bitrate and traffic monitoring. The funded account purchased `dorham`: Ubuntu 24.04, 1 vCPU, 2 GB RAM, 20 GB enterprise HDD, 120 GB incoming traffic. The panel showed 30 days and 120 GB after provisioning. Outgoing traffic is free according to the provider; no extra traffic, renewal or automatic top-up was purchased.
 
 Pilot website: **https://dorham.45-135-242-146.nip.io/**. SFU signaling uses `voice.45-135-242-146.nip.io`; integrated TURN/TLS uses `turn.45-135-242-146.nip.io:443`. These temporary hostnames depend on external authoritative DNS. A domestic-only outage has not been tested; an Iranian host alone does not certify that condition. Replace the temporary names with operator-owned domestic DNS before making that availability claim. HTTPS certificates currently expire 27 January 2027 and have a renewal timer and HAProxy reload hook.

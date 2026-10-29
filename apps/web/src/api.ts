@@ -1,7 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { io, type Socket } from 'socket.io-client';
 import instance from './instance.json';
-declare global { interface Window { desktop?: { getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; version: string } } }
+declare global { interface Window { desktop?: { getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; version: string; configureVoiceHotkey(value: import('../../../packages/contracts/src/voice-hotkeys').VoiceInputPreferences): Promise<{ supported: boolean }>; onVoiceHotkey(listener: (event: { type: 'down' | 'up' | 'release' | 'error'; message?: string }) => void): () => void } } }
 const store = registerPlugin<any>('DorhamSecrets');
 const files = registerPlugin<any>('DorhamFiles');
 export const native = Capacitor.isNativePlatform() || Boolean(window.desktop);
@@ -23,15 +23,22 @@ async function refreshSession(): Promise<boolean> {
   })();
   try { return await refreshPromise; } finally { refreshPromise = null; }
 }
-let lastWebRenewal = 0, webRenewal: Promise<void> | null = null;
-export async function maintainSession() { if (native) { if (Date.now() >= accessExpires - 120000 && !await refreshSession()) throw new Error('Session expired. Sign in again.'); } else if (Date.now() - lastWebRenewal >= 12 * 3600000) { webRenewal ||= request('/auth/renew', {}).then(() => { lastWebRenewal = Date.now(); }).finally(() => { webRenewal = null; }); await webRenewal; } }
+let lastWebRenewal = 0, webCredentialGeneration = 0, webRenewal: Promise<void> | null = null;
+export async function maintainSession() { if (native) { if (Date.now() >= accessExpires - 120000 && !await refreshSession()) throw new Error('Session expired. Sign in again.'); } else if (Date.now() - lastWebRenewal >= 12 * 3600000) { webRenewal ||= request('/auth/renew', {}).then(() => { lastWebRenewal = Date.now(); webCredentialGeneration++; }).finally(() => { webRenewal = null; }); await webRenewal; } }
 export async function request<T = any>(route: string, body?: unknown, method = body === undefined ? 'GET' : 'POST', retry = true): Promise<T> {
   if (native && !base) throw new Error('Enter your server address to connect.');
+  if (!native && route !== '/auth/renew' && webRenewal) await webRenewal;
+  const credentialGeneration = webCredentialGeneration;
   const headers: Record<string, string> = { ...(access ? { Authorization: `Bearer ${access}` } : {}), ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(native ? { 'X-Dorham-Native': '1' } : {}) };
   const payload = body && typeof body === 'object' && !(body instanceof FormData) ? { requestId: crypto.randomUUID(), ...body } : body;
   if (payload && !(payload instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (payload instanceof FormData) headers['X-Request-Id'] = crypto.randomUUID();
   const response = await fetch(`${base}/api/v1${route}`, { method, credentials: 'include', headers, body: payload instanceof FormData ? payload : payload ? JSON.stringify(payload) : undefined });
+  // Requests already in flight can carry the cookie retired by a renewal.
+  // Retry only that race once, retaining the mutation's idempotency identifier.
+  if (!native && response.status === 401 && retry && route !== '/auth/renew' && (webRenewal || credentialGeneration !== webCredentialGeneration)) {
+    await webRenewal; return request<T>(route, payload, method, false);
+  }
   if (response.status === 401 && retry && !route.startsWith('/auth/login') && !route.startsWith('/auth/register') && await refreshSession()) return request<T>(route, payload, method, false);
   const data = await response.json().catch(() => ({ error: { message: 'The server returned an invalid response.' } }));
   if (response.status === 401 && !['/auth/login', '/auth/register', '/auth/guest', '/auth/recover'].some(path => route.startsWith(path))) window.dispatchEvent(new Event('dorham-session-revoked'));

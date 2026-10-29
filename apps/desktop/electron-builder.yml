@@ -6,11 +6,16 @@ directories:
 files:
   - main.cjs
   - preload.cjs
+  - voice-hotkeys.cjs
+  - voice-keys.json
+  - native/VoiceHotkey.exe
   - dist/**/*
   - icon.ico
   - icon.png
   - '!node_modules/**/*'
 npmRebuild: false
+asarUnpack:
+  - native/VoiceHotkey.exe
 toolsets:
   nsis: 1.2.1
 win:

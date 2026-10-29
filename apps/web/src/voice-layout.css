@@ -73,3 +73,7 @@
 }
 
 .screen-focused .voice-stage.voice-collapsed.has-shares { flex:1 1 0; max-height:none; min-height:0; overflow:hidden; }
+.voice-input-settings { padding:12px 0; border-bottom:1px solid #ffffff18; }
+.voice-input-settings h3 { margin:0 0 14px; }
+.voice-input-settings p { color:#a4a8be; line-height:1.5; font-size:12px; }
+.voice-input-settings button[data-hotkey-capture] { min-height:38px; text-align:left; }

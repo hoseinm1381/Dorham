@@ -9,6 +9,9 @@ import assert from 'node:assert/strict';
 import { isIP } from 'node:net';
 import { createApp } from '../apps/api/src/app';
 import { config } from '../apps/api/src/config';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { expect } from '@playwright/test';
 
 // Run after installing into an isolated local directory. Never uses the normal user profile.
 const executablePath = process.argv[2]; if (!executablePath) throw new Error('Pass the installed Dorham.exe path.');
@@ -84,6 +87,31 @@ try {
     await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('.own-screen-preview video'); return v && v.videoWidth === 640 && v.getVideoPlaybackQuality().totalVideoFrames > 1; });
     await page.getByRole('button', { name: 'Hide my screen preview', exact: true }).click(); assert.equal(await page.evaluate(() => (window as any).__desktopCapture.readyState), 'live'); await page.getByRole('button', { name: 'Stop sharing', exact: true }).waitFor(); await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
     console.log('Installed Windows decoded inline image/video and optional own screen preview; hiding preview preserved capture.');
+    if (process.env.DORHAM_TEST_HOTKEY_SENDER) {
+      const sender = path.resolve(process.env.DORHAM_TEST_HOTKEY_SENDER), exec = promisify(execFile);
+      const key = (value: 'down' | 'up') => exec(sender, [value], { windowsHide: true });
+      await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('push'); await page.getByRole('button', { name: 'Record talk hotkey', exact: true }).click(); await page.keyboard.press('F9'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+      await page.getByRole('button', { name: 'Lounge', exact: true }).click();
+      const microphone = async () => backend!.db.one('SELECT muted FROM voice_members WHERE user_id=(SELECT id FROM users WHERE username=?)', [username]);
+      await expect.poll(async () => (await microphone())?.muted).toBe(1);
+      const fixtureId = await desktop.evaluate(({ BrowserWindow }) => { const fixture = new BrowserWindow({ width: 420, height: 220, title: 'Dorham background hotkey test', webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } }); void fixture.loadURL('data:text/html,<title>Hotkey test</title><p>Isolated background input target</p>'); fixture.focus(); return fixture.id; });
+      try {
+        await key('up'); await new Promise(resolve => setTimeout(resolve, 1200)); await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up'); await expect.poll(async () => (await microphone())?.muted).toBe(1);
+        await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0);
+        const parent = await desktop.evaluate(() => process.pid);
+        await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'VoiceHotkey.exe' -and $_.ParentProcessId -eq ${parent} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`], { windowsHide: true });
+        await expect.poll(async () => (await microphone())?.muted).toBe(1); await key('up');
+        await desktop.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id)?.destroy(); BrowserWindow.getAllWindows()[0].show(); }, fixtureId);
+        await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('toggle'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+        await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide()); await new Promise(resolve => setTimeout(resolve, 1200));
+        await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(1); await key('up');
+        await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up');
+        await desktop.evaluate(({ powerMonitor }) => powerMonitor.emit('lock-screen')); await expect.poll(async () => (await microphone())?.muted).toBe(1); await desktop.evaluate(({ powerMonitor }) => powerMonitor.emit('unlock-screen'));
+        await writeFile('artifacts/evidence/windows-background-hotkeys.json', JSON.stringify({ testedAt: new Date().toISOString(), actualWindowsKeyState: true, pushToTalkWhileAnotherWindowFocused: true, releaseMuted: true, helperCrashMuted: true, toggleWhileHidden: true, lockEventMuted: true, syntheticKeyInjection: true, elevatedGamesAndPhysicalKeyboard: 'untested' }, null, 2));
+      } finally { await key('up'); await desktop.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id)?.destroy(); BrowserWindow.getAllWindows()[0].show(); }, fixtureId); }
+      await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
+      console.log('Windows background PTT, release and toggle passed with actual OS key-state transitions.');
+    }
   }
   const encrypted = await readFile(path.join(temporary, 'profile', 'settings.json'), 'utf8');
   const secret = await page.evaluate(() => window.desktop!.getSecret()); assert.ok(secret); assert.ok(!encrypted.includes(secret));
@@ -95,7 +123,8 @@ try {
   await writeFile(`artifacts/evidence/windows-${liveServer ? 'live-' : ''}smoke.json`, JSON.stringify({ testedAt: new Date().toISOString(), executablePath, server: address, defaultServer: instance.defaultServerUrl, username, displayName, dmMessage, remoteAvatarsLoaded: liveServer ? true : undefined, testResolveIp, installed: true, nativeRegistration: true, inlineImageDecoded: !liveServer, inlineVideoDecoded: !liveServer, optionalOwnScreenPreviewDecoded: !liveServer, mediaTransport: backend?.config.mediaTransport, socketConnected: true, wssUpgrade, polling, isolatedProfile: temporary, sandbox: true, contextIsolation: true, nodeIntegration: false, encryptedCredentials: true, trayCloseWhileInCall: 'window hidden, process retained', physicalMedia: 'untested' }, null, 2));
   console.log('Installed Windows app passed rendering, native registration, protected credentials, sandbox and background-close checks.');
 } catch (error) {
-  const page = await desktop.firstWindow(); await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/windows-failure.png' });
+  console.error('Desktop failure:', error);
+  const page = await desktop.firstWindow(); await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/windows-failure.png', timeout: 5000 }).catch(() => {});
   console.error('Desktop failure state:', (await page.locator('body').innerText()).slice(-1800)); throw error;
 } finally {
   await desktop.close();

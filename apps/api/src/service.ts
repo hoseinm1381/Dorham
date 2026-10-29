@@ -6,6 +6,7 @@ import type { Config } from './config';
 import { fail, hash } from './security';
 import { CloudflareTurn, cloudflareTurnTtl } from './turn';
 import { audit } from './accounts';
+import { readSnapshot } from './read-snapshot';
 
 export const publicUser = (u: Row): PublicUser => ({ id: u.id, username: u.username, displayName: u.display_name, bio: u.bio, avatar: u.avatar, status: u.status, instanceAdmin: Boolean(u.instance_admin), guest: Boolean(u.guest), banned: Boolean(u.banned), language: u.language === 'fa-IR' ? 'fa-IR' : u.language === 'en-US' ? 'en-US' : undefined, mustChangePassword: Boolean(u.must_change_password) });
 export class Service {
@@ -394,6 +395,27 @@ export class Service {
   async room(userId: string, channelId: string): Promise<VoiceRoom> {
     return this.db.transaction(async tx => { await this.channel(tx, userId, channelId); await this.maintainRoom(tx, channelId); return this.roomView(tx, channelId); });
   }
+  async voiceSnapshot(viewers: { socketId: string; userId: string; channelId?: string | null }[]) {
+    return this.db.transaction(async connection => {
+      const tx = readSnapshot(connection), rooms = new Map<string, VoiceRoom>();
+      const result = [];
+      for (const viewer of viewers) {
+        const directory = await this.voiceDirectory(viewer.userId, tx);
+        let room: VoiceRoom | null | undefined;
+        if (viewer.channelId) {
+          const vm = await tx.one('SELECT channel_id FROM voice_members WHERE user_id=? AND socket_id=?', [viewer.userId, viewer.socketId]);
+          room = null;
+          if (vm) try {
+            await this.channel(tx, viewer.userId, vm.channel_id);
+            if (!rooms.has(vm.channel_id)) rooms.set(vm.channel_id, await this.roomView(tx, vm.channel_id));
+            room = rooms.get(vm.channel_id)!;
+          } catch { /* Membership and permissions are checked for each viewer. */ }
+        }
+        result.push({ socketId: viewer.socketId, directory, room });
+      }
+      return result;
+    });
+  }
   async roomView(tx: Connection, channelId: string): Promise<VoiceRoom> {
     const members = [];
     for (const vm of await tx.all('SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? ORDER BY v.joined_at', [channelId])) {
@@ -444,7 +466,11 @@ export class Service {
         await tx.run('UPDATE voice_members SET heartbeat=?,muted=?,deafened=?,eligible=? WHERE user_id=?', [Date.now(), body.muted === undefined ? vm!.muted : Number(body.muted), body.deafened === undefined ? vm!.deafened : Number(body.deafened), body.eligible === undefined ? vm!.eligible : Number(body.eligible), userId]);
         await tx.run('UPDATE share_leases SET expires_at=? WHERE user_id=? AND expires_at>=?', [Date.now() + 30000, userId, Date.now()]);
       }
-      await this.maintainRoom(tx, vm!.channel_id); return { room: await this.roomView(tx, vm!.channel_id) };
+      await this.maintainRoom(tx, vm!.channel_id);
+      // SFU heartbeats keep leases alive; topology is published on changes.
+      // Mesh still receives snapshots for its epoch/negotiation recovery path.
+      if (action === 'heartbeat' && this.c.mediaTransport === 'livekit') return { alive: true };
+      return { room: await this.roomView(tx, vm!.channel_id) };
     }); if (action !== 'heartbeat') await this.notify('voice:changed', {}); return result;
   }
   async share(userId: string, socketId: string, requestId: string, stop = false) {

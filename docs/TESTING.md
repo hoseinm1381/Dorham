@@ -1,4 +1,4 @@
-Current v0.2 acceptance and exact remaining gates: [upgrade matrix](UPGRADE-STATUS.md). Run `npm run verify`, `npm run test:expansion`, and separately guarded media scenarios below. Expansion covers guests, conversion, attachments, Persian/RTL, compression preview, in-call quality, recovery and admin UI; 35 unit/integration tests include migration preservation, quota races and negative admission. Never run capacity browsers on the 4 GiB workstation.
+Current 0.4.1 voice/hotkey acceptance, benchmark command and failed heavy-media gate: [optimization report](OPTIMIZATION-0.4.1.md). Earlier v0.2 expansion acceptance: [upgrade matrix](UPGRADE-STATUS.md). Run `npm run verify`, `npm run test:expansion`, and separately guarded media scenarios below. Expansion covers guests, conversion, attachments, Persian/RTL, compression preview, in-call quality, recovery and admin UI. Current unit/API suite: 58 tests. Heavy browser runs require a separately authorized RAM allowance and dedicated memory guard; normal runs retain the 4 GiB limit.
 
 # Verification
 

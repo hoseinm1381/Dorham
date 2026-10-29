@@ -23,3 +23,5 @@ apps/android/android/**/build/
 *.apk
 *.aab
 __pycache__/
+apps/desktop/native/*.exe
+apps/desktop/voice-keys.json

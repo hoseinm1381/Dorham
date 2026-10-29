@@ -125,7 +125,7 @@ test('social update keeps invitations and custom roles visible, and refreshes ch
     await expect(page.getByText('My profile will change', { exact: true })).toBeVisible();
     await page.locator('.members-sidebar .member-row').filter({ hasText: memberName }).click();
     await other.getByRole('button', { name: 'Account settings', exact: true }).click();
-    await expect(other.locator('.app-version')).toHaveText('Dorham · Version 0.4.0');
+    await expect(other.locator('.app-version')).toHaveText('Dorham · Version 0.4.1');
     await other.getByLabel('Display name', { exact: true }).fill('Updated member'); await other.getByLabel('About you', { exact: true }).fill('Updated biography');
     await other.getByRole('button', { name: 'Save your profile', exact: true }).click();
     await expect(page.getByRole('dialog').getByText('Updated member', { exact: true })).toBeVisible();

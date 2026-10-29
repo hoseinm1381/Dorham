@@ -37,6 +37,7 @@ export class MeshTransport implements MediaTransport {
     try {
       const processing = { ...this.audioProcessing };
       this.mic = await navigator.mediaDevices.getUserMedia({ audio: { ...processing, autoGainControl: true }, video: false });
+      for (const track of this.mic.getAudioTracks()) track.enabled = !this.muted && !this.deafened;
       this.captureProcessing = processing;
       this.context = new AudioContext(); await this.context.resume(); this.channelId = channelId;
       await this.rejoin();
