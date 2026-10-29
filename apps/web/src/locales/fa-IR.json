@@ -578,5 +578,16 @@
   "{count} person online": "{count} نفر آنلاین",
   "{count} people online": "{count} نفر آنلاین",
   "text": "متنی",
-  "voice": "صوتی"
+  "voice": "صوتی",
+  "Automatic microphone level": "تنظیم خودکار بلندی میکروفون",
+  "Changes apply during your call and are saved for future calls. These settings affect your microphone only.": "تغییرات در همین تماس اعمال و برای تماس‌های بعدی ذخیره می‌شوند. این تنظیمات فقط روی میکروفون شما اثر دارند.",
+  "Your browser controls noise reduction strength; it offers on/off, not an adjustable strength slider.": "شدت کاهش نویز را مرورگر تعیین می‌کند؛ فقط روشن یا خاموش کردن آن در دسترس است.",
+  "One-time administrator setup code": "کد یک‌بارمصرف فعال‌سازی مدیر کل",
+  "Activate global administration": "فعال‌سازی مدیریت کل",
+  "Only the deployment operator has this code. It appoints the first global administrator once; it is not your password or an invitation.": "این کد فقط در اختیار راه‌انداز برنامه است و یک بار برای تعیین نخستین مدیر کل استفاده می‌شود. این کد، رمز حساب یا لینک دعوت نیست.",
+  "Use role default": "استفاده از پیش‌فرض نقش",
+  "Overrides apply to the selected role in this channel. Owners retain all permissions. Use role default removes this channel override.": "این تنظیمات فقط برای نقش انتخاب‌شده در همین کانال اعمال می‌شوند. مالک همهٔ دسترسی‌ها را دارد. با انتخاب «استفاده از پیش‌فرض نقش»، تنظیم اختصاصی این کانال حذف می‌شود.",
+  "Tip: paste a copied picture into the message box with Ctrl+V.": "نکته: تصویر کپی‌شده را با Ctrl+V در کادر پیام جای‌گذاری کنید.",
+  "Finish or cancel the current attachment first.": "ابتدا پیوست فعلی را آماده یا لغو کنید.",
+  "You can attach up to four files to one message.": "هر پیام می‌تواند حداکثر چهار پیوست داشته باشد."
 }

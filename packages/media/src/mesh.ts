@@ -1,9 +1,9 @@
 import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
 import { ack, type MediaTransport, type MediaOptions } from './index';
-import { defaultAudioProcessing, browserAudioProcessing, type AudioProcessing } from './audio-processing';
+import { defaultAudioProcessing, browserAudioProcessing, processingMismatch, type AudioProcessing } from './audio-processing';
 import { AudioActivityMeter } from './audio-activity';
 import { screenSettings, type ScreenQuality } from './screen-quality';
-type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaElementAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode; meterSource: MediaStreamAudioSourceNode; meter: AudioActivityMeter }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number; connectionTimer?: ReturnType<typeof setTimeout>; timedOut: boolean; iceErrors: number[] };
+type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaStreamAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode; meterSource: MediaStreamAudioSourceNode; meter: AudioActivityMeter }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number; connectionTimer?: ReturnType<typeof setTimeout>; timedOut: boolean; iceErrors: number[] };
 export class MeshTransport implements MediaTransport {
   room: VoiceRoom | null = null;
   getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true }; }
@@ -13,6 +13,7 @@ export class MeshTransport implements MediaTransport {
   protected epoch = ''; protected iceServers: RTCIceServer[] = []; protected muted = false; protected deafened = false;
   private audioProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private captureProcessing: AudioProcessing = { ...defaultAudioProcessing };
+  private microphoneChange: Promise<void> = Promise.resolve();
   private heartbeat?: ReturnType<typeof setInterval>; private meter?: ReturnType<typeof setInterval>; private volumes = new Map<string, number>();
   private joining = false; private destroyed = false; private signalQueue: Promise<unknown> = Promise.resolve();
   private hiddenShares = new Set<string>();
@@ -36,7 +37,7 @@ export class MeshTransport implements MediaTransport {
     this.joining = true;
     try {
       const processing = { ...this.audioProcessing };
-      this.mic = await navigator.mediaDevices.getUserMedia({ audio: { ...processing, autoGainControl: true }, video: false });
+      this.mic = await navigator.mediaDevices.getUserMedia({ audio: { ...processing }, video: false });
       for (const track of this.mic.getAudioTracks()) track.enabled = !this.muted && !this.deafened;
       this.captureProcessing = processing;
       this.context = new AudioContext(); await this.context.resume(); this.channelId = channelId;
@@ -108,8 +109,8 @@ export class MeshTransport implements MediaTransport {
       const metadata = p.streams.find(s => s.streamId === streamId);
       if (!metadata) continue;
       if (metadata.kind === 'audio' && stream.getAudioTracks().length && !p.audio && this.context) {
-        const element = document.createElement('audio'); element.autoplay = true; element.srcObject = stream; element.style.display = 'none'; document.body.appendChild(element);
-        const source = this.context.createMediaElementSource(element), gain = this.context.createGain(), analyser = this.context.createAnalyser();
+        const element = document.createElement('audio'); element.autoplay = true; element.muted = true; element.volume = 0; element.srcObject = stream; element.style.display = 'none'; document.body.appendChild(element);
+        const source = this.context.createMediaStreamSource(stream), gain = this.context.createGain(), analyser = this.context.createAnalyser();
         const meterSource = this.context.createMediaStreamSource(stream), meter = new AudioActivityMeter(analyser);
         meterSource.connect(analyser); source.connect(gain).connect(this.context.destination);
         p.audio = { source, element, gain, analyser, meterSource, meter }; this.applyVolume(userId);
@@ -163,17 +164,56 @@ export class MeshTransport implements MediaTransport {
   private removePeer(userId: string) { const p = this.peers.get(userId); if (p) { clearTimeout(p.connectionTimer); p.pc.onconnectionstatechange = null; p.pc.onicecandidateerror = null; p.pc.onnegotiationneeded = null; p.pc.onicecandidate = null; p.pc.close(); p.audio?.source.disconnect(); p.audio?.gain.disconnect(); p.audio?.meterSource.disconnect(); p.audio?.analyser.disconnect(); this.options.emit('speaking', { userId, speaking: false }); if (p.audio) { p.audio.element.pause(); p.audio.element.srcObject = null; p.audio.element.remove(); } for (const s of p.streams) if (s.leaseId) this.options.emit('screenRemoved', s.leaseId); this.peers.delete(userId); } }
   private async publishState() { if (this.room) await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); }
   async setMuted(value: boolean) { this.muted = value; for (const t of this.mic?.getAudioTracks() || []) t.enabled = !value && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverDeafened; await this.publishState(); }
-  async setDeafened(value: boolean) { this.deafened = value; await this.setMuted(this.muted); for (const userId of this.peers.keys()) this.applyVolume(userId); }
+  async setDeafened(value: boolean) { this.deafened = value; for (const userId of this.peers.keys()) this.applyVolume(userId); await this.setMuted(this.muted); }
   setVolume(userId: string, value: number) { this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolume(userId); }
-  async setDevice(deviceId: string) {
-    const next = await navigator.mediaDevices.getUserMedia({ audio: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), ...this.captureProcessing, autoGainControl: true } });
-    const old = this.mic; this.mic = next;
-    for (const p of this.peers.values()) { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(next.getAudioTracks()[0]); }
-    old?.getTracks().forEach(t => t.stop()); this.attachMicMeter(); await this.setMuted(this.muted);
+  async setDevice(deviceId: string) { await this.replaceMicrophone(deviceId, this.captureProcessing); }
+  private replaceMicrophone(deviceId: string, processing: AudioProcessing): Promise<void> {
+    const epoch = this.epoch;
+    const next = this.microphoneChange.catch(() => {}).then(async () => { if (this.channelId && epoch === this.epoch) await this.replaceMicrophoneNow(deviceId, processing); });
+    this.microphoneChange = next; return next;
+  }
+  private async replaceMicrophoneNow(deviceId: string, processing: AudioProcessing) {
+    const old = this.mic, epoch = this.epoch, previousDevice = old?.getAudioTracks()[0]?.getSettings().deviceId;
+    const acquire = (device: string, settings: AudioProcessing) => navigator.mediaDevices.getUserMedia({ audio: { ...(device ? { deviceId: { exact: device } } : {}), ...settings } });
+    const restorePrevious = async () => {
+      try {
+        const restored = await acquire(previousDevice || '', this.captureProcessing);
+        restored.getAudioTracks()[0].enabled = false;
+        if (epoch !== this.epoch || !this.channelId) restored.getTracks().forEach(t => t.stop());
+        else { this.mic = restored; await Promise.allSettled([...this.peers.values()].map(async p => { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(restored.getAudioTracks()[0]); })); this.attachMicMeter(); await this.setMuted(this.muted); }
+      } catch { /* Original capture error is reported; no unmuted fallback. */ }
+    };
+    // Chromium shares preprocessing with a still-open capture of the same
+    // device. Release it first, as the SFU SDK's restartTrack does as well.
+    old?.getTracks().forEach(t => t.stop());
+    let next: MediaStream;
+    try { next = await acquire(deviceId, processing); }
+    catch (error) {
+      // Attempt to restore the previous device/settings if reacquisition fails.
+      await restorePrevious();
+      throw error;
+    }
+    if (epoch !== this.epoch || !this.channelId) { next.getTracks().forEach(t => t.stop()); return; }
+    const track = next.getAudioTracks()[0];
+    // A released talk key while replaceTrack awaits must not leak the new mic.
+    // Enable only after installation, using the latest mute/deafen state.
+    track.enabled = false;
+    try {
+      for (const p of this.peers.values()) { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(track); }
+    } catch (error) {
+      next.getTracks().forEach(t => t.stop()); await restorePrevious(); throw error;
+    }
+    this.mic = next; old?.getTracks().forEach(t => t.stop()); this.attachMicMeter(); await this.setMuted(this.muted);
   }
   getAudioProcessing() { return browserAudioProcessing(this.audioProcessing, this.mic?.getAudioTracks()[0], this.captureProcessing); }
   async setAudioProcessing(settings: AudioProcessing) {
+    const track = this.mic?.getAudioTracks()[0];
+    if (track?.readyState === 'live') {
+      await track.applyConstraints({ ...track.getConstraints(), ...settings });
+      if (processingMismatch(track, settings)) await this.replaceMicrophone(track.getSettings().deviceId || '', settings);
+    }
     this.audioProcessing = { ...settings };
+    this.captureProcessing = { ...settings };
   }
   async startShare(quality: ScreenQuality = '720p15') {
     if (!this.channelId) throw new Error('Join a voice channel first.');

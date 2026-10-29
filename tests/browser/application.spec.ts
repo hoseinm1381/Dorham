@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { RoomServiceClient } from 'livekit-server-sdk';
 import { mkdir } from 'node:fs/promises';
 async function register(page: Page, username: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('correct-horse-123'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible(); }
 async function api(page: Page, route: string, body?: any, method = body ? 'POST' : 'GET') { return page.evaluate(async ({ route, body, method }) => { const auth = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch(`/api/v1${route}`, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': auth.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(await r.text()); return r.json(); }, { route, body, method }); }
@@ -187,8 +188,9 @@ test('blocked ICE reports missing media and waiting video instead of a successfu
 });
 
 
-test('microphone processing defaults on, persists and applies on rejoin without unmuting', async ({ browser }) => {
+test('microphone processing defaults on, changes live, persists and never unmutes', async ({ browser }) => {
   const context = await browser.newContext({ permissions: ['microphone'] }), page = await context.newPage();
+  let fixtureRoom: string | undefined;
   page.setDefaultTimeout(15000);
   const settings = () => page.evaluate(() => [...new Set(((window as any).__microphones as MediaStream[]).flatMap(stream => stream.getAudioTracks()))].filter(track => track.readyState === 'live').map(track => ({ ...track.getSettings(), enabled: track.enabled, trackId: track.id })));
   const open = () => page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click();
@@ -199,17 +201,21 @@ test('microphone processing defaults on, persists and applies on rejoin without 
     await page.getByRole('button', { name: 'Create a server', exact: true }).click(); await page.getByLabel('Server name', { exact: true }).fill('Microphone lab'); await page.getByRole('button', { name: 'Create space', exact: true }).click();
     await page.getByRole('button', { name: 'Open Microphone lab', exact: true }).click(); await join();
     await expect(page.locator('.voice-card')).toHaveCount(1); await open();
+    fixtureRoom = (await api(page, '/bootstrap')).channels.find((c: any) => c.kind === 'voice').id;
     const initial = await settings(); expect(initial[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true });
     for (const label of ['Noise suppression', 'Echo cancellation']) { await expect(page.getByRole('checkbox', { name: label, exact: true })).toBeChecked(); await page.getByRole('checkbox', { name: label, exact: true }).uncheck(); }
-    await expect(page.getByText('Saved. Leave and rejoin voice to apply these changes.', { exact: true })).toBeVisible();
-    expect((await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true, trackId: initial[0].trackId });
+    await expect(page.getByText('Saved. Leave and rejoin voice to apply these changes.', { exact: true })).toHaveCount(0);
+    await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false });
+    await page.getByRole('checkbox', { name: 'Automatic microphone level', exact: true }).uncheck();
+    await expect.poll(async () => (await settings())[0]).toMatchObject({ autoGainControl: false });
     await page.getByRole('combobox', { name: /^Microphone/ }).selectOption('');
-    await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true });
+    await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false, autoGainControl: false });
     await page.reload(); await page.getByRole('button', { name: 'Open Microphone lab', exact: true }).click(); await join();
     await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false });
     await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await open();
     for (const label of ['Noise suppression', 'Echo cancellation']) { await expect(page.getByRole('checkbox', { name: label, exact: true })).not.toBeChecked(); await page.getByRole('checkbox', { name: label, exact: true }).check(); }
-    const pendingWhileMuted = await settings(); expect(pendingWhileMuted[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false, enabled: false });
+    await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true, enabled: false });
+    const pendingWhileMuted = await settings();
     await close(); await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(page.locator('.voice-panel')).toHaveCount(0); await join();
     await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true, enabled: false });
     await open(); await expect(page.getByText('Saved. Leave and rejoin voice to apply these changes.', { exact: true })).toHaveCount(0);
@@ -217,5 +223,8 @@ test('microphone processing defaults on, persists and applies on rejoin without 
     await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/audio-processing-controls.png' });
     const { writeFile } = await import('node:fs/promises');
     await writeFile('artifacts/evidence/audio-processing.json', JSON.stringify({ measuredAt: new Date().toISOString(), initial, persistedAfterReload: 'both false verified on the new microphone track', pendingWhileMuted, enabledAfterRejoin: await settings(), limitations: 'Actual browser capture/settings; acoustic noise/echo attenuation on physical devices is not measured.' }, null, 2));
-  } finally { await context.close(); }
+  } finally {
+    await context.close();
+    if (fixtureRoom && process.env.DORHAM_SFU_ISOLATED_TEST === '1') { const client = new RoomServiceClient(process.env.LIVEKIT_API_URL!, process.env.LIVEKIT_API_KEY!, process.env.LIVEKIT_API_SECRET!); await client.deleteRoom(fixtureRoom).catch(() => {}); }
+  }
 });

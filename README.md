@@ -1,3 +1,5 @@
+Current audio-controls update: **0.4.3**. See [audio fixes](docs/AUDIO-FIX-0.4.3.md).
+
 # Dorham
 
 A small Discord-style application for a community of up to 100 accounts and 20 online users. React/PWA, Windows/Electron, Android/Capacitor, Fastify, Socket.IO, SQLite/Drizzle, and WebRTC. All branding and application artwork in this repository are original.

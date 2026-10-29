@@ -1,3 +1,5 @@
+Current audio-controls update: **0.4.3**. See [AUDIO-FIX-0.4.3.md](AUDIO-FIX-0.4.3.md).
+
 # Ninecraft Iranian SFU pilot — 29 October 2026
 
 Current release 0.4.2 adds [Persian readability and chat-server ping](PERSIAN-PING-0.4.2.md), preserving the existing database and SFU/network configuration.

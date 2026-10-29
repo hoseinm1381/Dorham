@@ -72,7 +72,11 @@ try {
     await page.addInitScript(() => { navigator.mediaDevices.getDisplayMedia = async () => { const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360; const draw = canvas.getContext('2d')!; let frame = 0; const timer = setInterval(() => { draw.fillStyle = frame++ % 2 ? '#713ce0' : '#34bca5'; draw.fillRect(0, 0, 640, 360); }, 100); const stream = canvas.captureStream(12); (window as any).__desktopCapture = stream.getVideoTracks()[0]; stream.getVideoTracks()[0].addEventListener('ended', () => clearInterval(timer)); return stream; }; });
     await page.reload(); await page.getByRole('button', { name: 'Create a server', exact: true }).click(); await page.getByLabel('Server name', { exact: true }).fill('Desktop media fixture'); await page.getByRole('button', { name: 'Create space', exact: true }).click(); await page.getByRole('button', { name: 'Open Desktop media fixture', exact: true }).click();
     const image = await sharp({ create: { width: 320, height: 180, channels: 3, background: '#34bca5' } }).png().toBuffer();
-    await page.locator('.file-composer input[type=file]').setInputFiles({ name: 'desktop-picture.png', mimeType: 'image/png', buffer: image }); await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    const pasted = await page.getByLabel('Message', { exact: true }).evaluate((input, bytes) => {
+      const data = new DataTransfer(); data.items.add(new File([new Uint8Array(bytes)], 'desktop-picture.png', { type: 'image/png' }));
+      const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }); input.dispatchEvent(event); return event.defaultPrevented;
+    }, [...image]); assert.equal(pasted, true);
+    await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.attachment-preview img')].some(img => img.naturalWidth === 320));
     await page.getByRole('button', { name: 'Open image: desktop-picture.png', exact: true }).click(); await page.getByRole('dialog', { name: 'Image viewer' }).waitFor(); await page.keyboard.press('Escape');
     const video = await makeVideo(page); await page.locator('.file-composer input[type=file]').setInputFiles({ name: 'desktop-clip.webm', mimeType: 'video/webm', buffer: video }); await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -85,7 +89,12 @@ try {
     await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/v04-windows-inline.png' });
     await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await page.getByRole('checkbox', { name: 'Preview my screen', exact: true }).check();
     await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('.own-screen-preview video'); return v && v.videoWidth === 640 && v.getVideoPlaybackQuality().totalVideoFrames > 1; });
-    await page.getByRole('button', { name: 'Hide my screen preview', exact: true }).click(); assert.equal(await page.evaluate(() => (window as any).__desktopCapture.readyState), 'live'); await page.getByRole('button', { name: 'Stop sharing', exact: true }).waitFor(); await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
+    await page.getByRole('button', { name: 'Hide my screen preview', exact: true }).click(); assert.equal(await page.evaluate(() => (window as any).__desktopCapture.readyState), 'live'); await page.getByRole('button', { name: 'Stop sharing', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await page.getByRole('button', { name: 'Account settings', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Noise suppression', exact: true }).uncheck(); await expect(page.locator('.audio-processing div').filter({ hasText: 'Noise suppression' }).getByRole('status')).toHaveText('Microphone: Off');
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await expect(page.locator('.voice-card')).toContainText('Microphone muted');
+    await page.getByRole('button', { name: 'Unmute microphone', exact: true }).click();
+    await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
     console.log('Installed Windows decoded inline image/video and optional own screen preview; hiding preview preserved capture.');
     if (process.env.DORHAM_TEST_HOTKEY_SENDER) {
       const sender = path.resolve(process.env.DORHAM_TEST_HOTKEY_SENDER), exec = promisify(execFile);

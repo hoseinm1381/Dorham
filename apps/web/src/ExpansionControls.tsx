@@ -1,25 +1,41 @@
 import { AttachmentCard } from './AttachmentMedia';
 import { compressPicture } from './image-compression';
 import { t as tr, formatFileSize } from './i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Attachment, Channel, PublicUser, Role, Server, Tag, VoiceRoom } from '@dorham/contracts';
 import { request, uploadAttachment } from './api';
 
-export function FileComposer({ conversationId, files, change, error }: { conversationId: string; files: Attachment[]; change: (files: Attachment[]) => void; error: (e: unknown) => void }) {
+export function FileComposer({ conversationId, files, change, error }: { conversationId: string; files: Attachment[]; change: (files: Attachment[] | ((previous: Attachment[]) => Attachment[])) => void; error: (e: unknown) => void }) {
   const [busy, setBusy] = useState(false), [abort, setAbort] = useState<AbortController | null>(null), [picture, setPicture] = useState<{ original: File; compressed: File; url: string } | null>(null);
+  const element = useRef<HTMLDivElement>(null), locked = useRef(false), mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => () => { abort?.abort(); }, [abort]);
   useEffect(() => () => { if (picture) URL.revokeObjectURL(picture.url); }, [picture]);
+  useEffect(() => {
+    const composer = element.current?.closest('.composer-wrap');
+    const paste = (event: Event) => {
+      const e = event as ClipboardEvent;
+      if (!(e.target instanceof HTMLTextAreaElement) || e.target.disabled) return;
+      const item = [...(e.clipboardData?.items || [])].find(item => item.kind === 'file' && /^image\/(png|jpeg|webp|gif)$/.test(item.type));
+      const file = item?.getAsFile(); if (!file) return;
+      e.preventDefault(); void choose(file);
+    };
+    composer?.addEventListener('paste', paste); return () => composer?.removeEventListener('paste', paste);
+  });
   function transfer(file: File) {
     const controller = new AbortController(); setAbort(controller); setBusy(true); setPicture(null);
-    void uploadAttachment(file, conversationId, controller.signal).then(value => change([...files, value])).catch(error).finally(() => { setBusy(false); setAbort(null); });
+    void uploadAttachment(file, conversationId, controller.signal).then(value => { if (mounted.current) change(previous => [...previous, value]); }).catch(e => { if (mounted.current && !controller.signal.aborted) error(e); }).finally(() => { locked.current = false; if (mounted.current) { setBusy(false); setAbort(null); } });
   }
   async function choose(file: File) {
+    if (locked.current || picture) { error(new Error(tr('Finish or cancel the current attachment first.'))); return; }
+    if (files.length >= 4) { error(new Error(tr('You can attach up to four files to one message.'))); return; }
     if (file.size > 100 * 1048576) { error(new Error('Files must be at most 100 MiB.')); return; }
+    locked.current = true;
     setBusy(true);
-    try { const compressed = await compressPicture(file); if (compressed) { setPicture({ original: file, compressed, url: URL.createObjectURL(compressed) }); setBusy(false); } else transfer(file); }
-    catch { transfer(file); }
+    try { const compressed = await compressPicture(file); if (!mounted.current) return; if (compressed) { setPicture({ original: file, compressed, url: URL.createObjectURL(compressed) }); setBusy(false); } else transfer(file); }
+    catch { if (mounted.current) transfer(file); }
   }
-  return <div className="file-composer"><label className="secondary">{busy ? tr('Uploading…') : tr('Attach file')}<input type="file" disabled={busy || Boolean(picture) || files.length >= 4} accept=".pdf,.txt,.md,.csv,.json,.zip,.7z,.png,.jpg,.jpeg,.webp,.gif,.mp3,.ogg,.wav,.mp4,.webm" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void choose(file); }}/></label>{busy && <button type="button" className="secondary" onClick={() => abort?.abort()}>{tr('Cancel upload')}</button>}<small>{tr('Up to 10 MiB: 7 days · Up to 100 MiB: 24 hours · 300 MiB per 24 hours. Storage pressure may remove files earlier.')}</small><small>{tr('Shared allowance: 512 MiB daily, then files up to 2 MiB until 1 GiB total.')}</small>{picture && <div className="compression-preview"><img src={picture.url} alt={tr('Compressed picture preview')}/><p>{tr('Picture compressed on this device. Review quality before uploading.')}</p><p className="compression-sizes"><span>{tr("Original: {size}", { size: formatFileSize(picture.original.size) })}</span><br/><span>{tr("Compressed: {size}", { size: formatFileSize(picture.compressed.size) })}</span></p><button type="button" className="secondary" onClick={() => transfer(picture.compressed)}>{tr('Upload compressed picture')}</button><button type="button" className="secondary" onClick={() => transfer(picture.original)}>{tr('Upload original')}</button><button type="button" className="secondary" onClick={() => setPicture(null)}>{tr('Cancel upload')}</button></div>}{files.map(a => <span className="attachment-draft" key={a.id}>{a.name}<button type="button" aria-label={tr('Remove attachment')} onClick={() => { void request(`/attachments/${a.id}`, {}, 'DELETE').then(() => change(files.filter(f => f.id !== a.id))).catch(error); }}>×</button></span>)}</div>;
+  return <div className="file-composer" ref={element}><label className="secondary">{busy ? tr('Uploading…') : tr('Attach file')}<input type="file" disabled={busy || Boolean(picture) || files.length >= 4} accept=".pdf,.txt,.md,.csv,.json,.zip,.7z,.png,.jpg,.jpeg,.webp,.gif,.mp3,.ogg,.wav,.mp4,.webm" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void choose(file); }}/></label>{busy && <button type="button" className="secondary" onClick={() => abort?.abort()}>{tr('Cancel upload')}</button>}<small>{tr('Tip: paste a copied picture into the message box with Ctrl+V.')}</small><small>{tr('Up to 10 MiB: 7 days · Up to 100 MiB: 24 hours · 300 MiB per 24 hours. Storage pressure may remove files earlier.')}</small><small>{tr('Shared allowance: 512 MiB daily, then files up to 2 MiB until 1 GiB total.')}</small>{picture && <div className="compression-preview"><img src={picture.url} alt={tr('Compressed picture preview')}/><p>{tr('Picture compressed on this device. Review quality before uploading.')}</p><p className="compression-sizes"><span>{tr("Original: {size}", { size: formatFileSize(picture.original.size) })}</span><br/><span>{tr("Compressed: {size}", { size: formatFileSize(picture.compressed.size) })}</span></p><button type="button" className="secondary" onClick={() => transfer(picture.compressed)}>{tr('Upload compressed picture')}</button><button type="button" className="secondary" onClick={() => transfer(picture.original)}>{tr('Upload original')}</button><button type="button" className="secondary" onClick={() => { locked.current = false; setPicture(null); }}>{tr('Cancel upload')}</button></div>}{files.map(a => <span className="attachment-draft" key={a.id}>{a.name}<button type="button" aria-label={tr('Remove attachment')} onClick={() => { void request(`/attachments/${a.id}`, {}, 'DELETE').then(() => change(previous => previous.filter(f => f.id !== a.id))).catch(error); }}>×</button></span>)}</div>;
 }
 export function MessageAttachments({ files, error }: { files?: Attachment[]; error: (e: unknown) => void }) {
   return <div className="message-attachments">{files?.map(file => <AttachmentCard key={file.id} file={file} error={error}/>)}</div>;

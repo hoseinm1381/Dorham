@@ -4,7 +4,7 @@ import type { AudioProcessing, AudioProcessingState } from './audio-processing';
 import type { ScreenQuality } from './screen-quality';
 export { screenQualities, screenSettings } from './screen-quality';
 export type { ScreenQuality };
-export { defaultAudioProcessing } from './audio-processing';
+export { defaultAudioProcessing, browserAudioProcessing } from './audio-processing';
 export type { AudioProcessing, AudioProcessingState };
 export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream; attach?: (element: HTMLVideoElement) => () => void };
 export type MediaEvents = { room: VoiceRoom | null; localScreen: RemoteScreen | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };

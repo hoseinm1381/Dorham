@@ -1,3 +1,5 @@
+Current audio-controls update: **0.4.3**. See [AUDIO-FIX-0.4.3.md](AUDIO-FIX-0.4.3.md).
+
 # Implementation and verification status
 
 **Current 0.4.2:** Persian typography/translation/RTL improvements and authenticated chat-server RTT badges. The public shell includes its Persian font for offline use. See [scope and verification](PERSIAN-PING-0.4.2.md). The previous heavy SFU capacity failure is unchanged; Android remains deferred.
