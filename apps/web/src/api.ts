@@ -23,8 +23,8 @@ async function refreshSession(): Promise<boolean> {
   })();
   try { return await refreshPromise; } finally { refreshPromise = null; }
 }
-let lastWebRenewal = 0;
-export async function maintainSession() { if (native) { if (Date.now() >= accessExpires - 120000 && !await refreshSession()) throw new Error('Session expired. Sign in again.'); } else if (Date.now() - lastWebRenewal >= 12 * 3600000) { await request('/auth/renew', {}); lastWebRenewal = Date.now(); } }
+let lastWebRenewal = 0, webRenewal: Promise<void> | null = null;
+export async function maintainSession() { if (native) { if (Date.now() >= accessExpires - 120000 && !await refreshSession()) throw new Error('Session expired. Sign in again.'); } else if (Date.now() - lastWebRenewal >= 12 * 3600000) { webRenewal ||= request('/auth/renew', {}).then(() => { lastWebRenewal = Date.now(); }).finally(() => { webRenewal = null; }); await webRenewal; } }
 export async function request<T = any>(route: string, body?: unknown, method = body === undefined ? 'GET' : 'POST', retry = true): Promise<T> {
   if (native && !base) throw new Error('Enter your server address to connect.');
   const headers: Record<string, string> = { ...(access ? { Authorization: `Bearer ${access}` } : {}), ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(native ? { 'X-Dorham-Native': '1' } : {}) };

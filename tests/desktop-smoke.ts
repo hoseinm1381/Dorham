@@ -1,3 +1,6 @@
+import sharp from 'sharp';
+import { RoomServiceClient } from 'livekit-server-sdk';
+import { makeVideo } from './media-fixtures';
 import { _electron as electron } from '@playwright/test';
 import { mkdtemp, readFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,7 +23,7 @@ const backend = liveServer ? null : await createApp(config({ dataDir: path.join(
 if (backend) await backend.app.listen({ host: '127.0.0.1', port: 0 });
 const address = liveServer || `http://127.0.0.1:${(backend!.app.server.address() as any).port}`;
 const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')); delete env.ELECTRON_RUN_AS_NODE;
-const desktop = await electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temporary, 'profile')}`, ...(testResolveIp ? [`--host-resolver-rules=MAP ${new URL(address).hostname} ${testResolveIp}`] : [])], env, timeout: 30000 });
+const desktop = await electron.launch({ executablePath, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', `--user-data-dir=${path.join(temporary, 'profile')}`, ...(testResolveIp ? [`--host-resolver-rules=MAP ${new URL(address).hostname} ${testResolveIp}`] : [])], env, timeout: 30000 });
 try {
   const page = await desktop.firstWindow(); await page.getByRole('heading', { name: 'Welcome back.' }).waitFor();
   page.on('response', response => { const url = new URL(response.url()); if (url.pathname.startsWith('/api/')) console.log('API', url.pathname, response.status()); });
@@ -62,6 +65,26 @@ try {
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await page.getByTestId('message').filter({ hasText: dmMessage }).waitFor();
   }
+  if (!liveServer) {
+    await page.addInitScript(() => { navigator.mediaDevices.getDisplayMedia = async () => { const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360; const draw = canvas.getContext('2d')!; let frame = 0; const timer = setInterval(() => { draw.fillStyle = frame++ % 2 ? '#713ce0' : '#34bca5'; draw.fillRect(0, 0, 640, 360); }, 100); const stream = canvas.captureStream(12); (window as any).__desktopCapture = stream.getVideoTracks()[0]; stream.getVideoTracks()[0].addEventListener('ended', () => clearInterval(timer)); return stream; }; });
+    await page.reload(); await page.getByRole('button', { name: 'Create a server', exact: true }).click(); await page.getByLabel('Server name', { exact: true }).fill('Desktop media fixture'); await page.getByRole('button', { name: 'Create space', exact: true }).click(); await page.getByRole('button', { name: 'Open Desktop media fixture', exact: true }).click();
+    const image = await sharp({ create: { width: 320, height: 180, channels: 3, background: '#34bca5' } }).png().toBuffer();
+    await page.locator('.file-composer input[type=file]').setInputFiles({ name: 'desktop-picture.png', mimeType: 'image/png', buffer: image }); await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.attachment-preview img')].some(img => img.naturalWidth === 320));
+    await page.getByRole('button', { name: 'Open image: desktop-picture.png', exact: true }).click(); await page.getByRole('dialog', { name: 'Image viewer' }).waitFor(); await page.keyboard.press('Escape');
+    const video = await makeVideo(page); await page.locator('.file-composer input[type=file]').setInputFiles({ name: 'desktop-clip.webm', mimeType: 'video/webm', buffer: video }); await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    const player = page.getByLabel('Play video: desktop-clip.webm', { exact: true }); await page.waitForFunction(() => [...document.querySelectorAll<HTMLVideoElement>('.attachment-preview video')].some(v => v.videoWidth === 320)); await player.evaluate((v: HTMLVideoElement) => v.play());
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLVideoElement>('.attachment-preview video')].some(v => v.getVideoPlaybackQuality().totalVideoFrames > 1)); await player.evaluate((v: HTMLVideoElement) => v.pause());
+    const mp4 = await readFile('tests/fixtures/inline-video.mp4'); await page.locator('.file-composer input[type=file]').setInputFiles({ name: 'desktop-movie.mp4', mimeType: 'video/mp4', buffer: mp4 }); await page.locator('.attachment-draft').waitFor(); await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('video[aria-label="Play video: desktop-movie.mp4"]'); return v && v.videoWidth === 320; });
+    await page.getByLabel('Play video: desktop-movie.mp4', { exact: true }).evaluate((v: HTMLVideoElement) => { v.muted = true; return v.play(); });
+    await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('video[aria-label="Play video: desktop-movie.mp4"]'); return v && v.getVideoPlaybackQuality().totalVideoFrames > 1; }); await page.getByLabel('Play video: desktop-movie.mp4', { exact: true }).evaluate((v: HTMLVideoElement) => v.pause());
+    await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/v04-windows-inline.png' });
+    await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await page.getByRole('checkbox', { name: 'Preview my screen', exact: true }).check();
+    await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('.own-screen-preview video'); return v && v.videoWidth === 640 && v.getVideoPlaybackQuality().totalVideoFrames > 1; });
+    await page.getByRole('button', { name: 'Hide my screen preview', exact: true }).click(); assert.equal(await page.evaluate(() => (window as any).__desktopCapture.readyState), 'live'); await page.getByRole('button', { name: 'Stop sharing', exact: true }).waitFor(); await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
+    console.log('Installed Windows decoded inline image/video and optional own screen preview; hiding preview preserved capture.');
+  }
   const encrypted = await readFile(path.join(temporary, 'profile', 'settings.json'), 'utf8');
   const secret = await page.evaluate(() => window.desktop!.getSecret()); assert.ok(secret); assert.ok(!encrypted.includes(secret));
   await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/windows-installed.png' });
@@ -69,9 +92,13 @@ try {
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   const lifecycle = await desktop.evaluate(({ BrowserWindow }) => ({ windows: BrowserWindow.getAllWindows().length, visible: BrowserWindow.getAllWindows()[0].isVisible() }));
   assert.deepEqual(lifecycle, { windows: 1, visible: false });
-  await writeFile(`artifacts/evidence/windows-${liveServer ? 'live-' : ''}smoke.json`, JSON.stringify({ testedAt: new Date().toISOString(), executablePath, server: address, defaultServer: instance.defaultServerUrl, username, displayName, dmMessage, remoteAvatarsLoaded: liveServer ? true : undefined, testResolveIp, installed: true, nativeRegistration: true, socketConnected: true, wssUpgrade, polling, isolatedProfile: temporary, sandbox: true, contextIsolation: true, nodeIntegration: false, encryptedCredentials: true, trayCloseWhileInCall: 'window hidden, process retained', physicalMedia: 'untested' }, null, 2));
+  await writeFile(`artifacts/evidence/windows-${liveServer ? 'live-' : ''}smoke.json`, JSON.stringify({ testedAt: new Date().toISOString(), executablePath, server: address, defaultServer: instance.defaultServerUrl, username, displayName, dmMessage, remoteAvatarsLoaded: liveServer ? true : undefined, testResolveIp, installed: true, nativeRegistration: true, inlineImageDecoded: !liveServer, inlineVideoDecoded: !liveServer, optionalOwnScreenPreviewDecoded: !liveServer, mediaTransport: backend?.config.mediaTransport, socketConnected: true, wssUpgrade, polling, isolatedProfile: temporary, sandbox: true, contextIsolation: true, nodeIntegration: false, encryptedCredentials: true, trayCloseWhileInCall: 'window hidden, process retained', physicalMedia: 'untested' }, null, 2));
   console.log('Installed Windows app passed rendering, native registration, protected credentials, sandbox and background-close checks.');
 } catch (error) {
   const page = await desktop.firstWindow(); await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/windows-failure.png' });
   console.error('Desktop failure state:', (await page.locator('body').innerText()).slice(-1800)); throw error;
-} finally { await desktop.close(); await backend?.app.close(); }
+} finally {
+  await desktop.close();
+  if (backend && process.env.DORHAM_SFU_ISOLATED_TEST === '1' && backend.config.mediaTransport === 'livekit') { const client = new RoomServiceClient(backend.config.livekitApiUrl, backend.config.livekitKey, backend.config.livekitSecret); for (const channel of await backend.db.all("SELECT id FROM channels WHERE kind='voice'")) await client.deleteRoom(channel.id).catch(() => {}); }
+  await backend?.app.close();
+}

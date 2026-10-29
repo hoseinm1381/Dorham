@@ -21,6 +21,7 @@ respond @private_paths 404
 #             request>uri query {
 #                 replace access_token REDACTED
 #                 replace join_request REDACTED
+#                 replace media_ticket REDACTED
 #             }
 #             request>headers>Authorization delete
 #             request>headers>X-Dorham-Media-Gate delete

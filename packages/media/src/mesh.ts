@@ -189,6 +189,7 @@ export class MeshTransport implements MediaTransport {
         const parameters = p.screenSender.getParameters(); if (!parameters.encodings?.length) parameters.encodings = [{}]; parameters.encodings[0].maxBitrate = this.screenTarget.bitrate; parameters.encodings[0].maxFramerate = this.screenTarget.fps;
         await p.screenSender.setParameters(parameters).catch(() => {}); await this.signal(userId, {});
       }
+      this.options.emit('localScreen', { userId: this.options.userId, leaseId: this.lease!.id, stream: screen });
     } catch (e) { screen.getTracks().forEach(t => t.stop()); await this.stopShare(); throw e; }
   }
   async setShareQuality(quality: ScreenQuality) {
@@ -200,6 +201,7 @@ export class MeshTransport implements MediaTransport {
   }
   async stopShare() {
     const screen = this.screen, lease = this.lease; this.screen = null; this.lease = null;
+    this.options.emit('localScreen', null);
     screen?.getTracks().forEach(t => { t.onended = null; t.stop(); });
     for (const p of this.peers.values()) if (p.screenSender) await p.screenSender.replaceTrack(null).catch(() => {});
     if (lease && this.options.socket.connected && this.channelId) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {});

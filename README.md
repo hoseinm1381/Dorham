@@ -8,6 +8,8 @@ The v0.2 expansion adds invited guests, recovery codes, device sessions, safe li
 
 The v0.3 update adds notification sounds, compact voice controls, persistent invitation management, custom roles, and live profile/avatar refresh. See [changes and verification](docs/SOCIAL-UPDATE.md).
 
+The v0.4 update adds inline image/video attachments, a much larger screen-viewing layout, collapsible members, optional own-screen preview and authoritative voice departure cues. See [media update and verification](docs/MEDIA-UPDATE.md). Android builds are deferred until requested.
+
 ## Run locally
 
 Requires patched Node.js 24 LTS (24.22.1 or newer within 24.x), npm, and Windows for Windows packaging. Python 3 is used only to create the deployment ZIP. Java 21 and Android SDK 36 are needed only for APK builds.

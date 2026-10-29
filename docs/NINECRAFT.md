@@ -8,6 +8,8 @@ The v0.2 update is deployed with existing accounts retained; see [upgrade capabi
 
 The subsequent v0.3 social/roles update is deployed; see [SOCIAL-UPDATE.md](SOCIAL-UPDATE.md) for features, current package locations, preserved live data and verification.
 
+The v0.4 inline-media/screen-layout update is covered in [MEDIA-UPDATE.md](MEDIA-UPDATE.md). Its deployment adds preview-grant query redaction while retaining the existing private signaling admission, HTTPS and TURN routes.
+
 ## Services and networking
 
 - Node 24.22.1 under `dorham.service`: `/opt/dorham`, environment `/etc/dorham/pilot.env`, data `/var/lib/dorham`. The API binds only `127.0.0.1:3001`; one process owns SQLite. Systemd uses the direct Node executable, graceful shutdown, automatic failure restart and a 640 MiB hard memory limit.

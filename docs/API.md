@@ -6,6 +6,8 @@ Use `Authorization: Bearer <access>` on native HTTP calls. Web calls use the ses
 
 The v0.3 invitation, custom-role, DM closing/blocking and server-leaving routes are documented in [social update API additions](SOCIAL-UPDATE.md#api-additions).
 
+The v0.4 authenticated inline-media preview and range routes are documented in [MEDIA-UPDATE.md](MEDIA-UPDATE.md).
+
 ## Routes under `/api/v1`
 
 | Method | Route | Input / behavior |

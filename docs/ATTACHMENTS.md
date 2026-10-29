@@ -34,3 +34,7 @@ JPEG/PNG/WebP pictures above 2 MiB and at most 25 MiB can be converted locally t
 ## Backup
 
 Include the database, avatars, **attachments**, and private configuration in a coordinated stopped-service backup. An online SQLite snapshot alone does not capture filesystem attachment state atomically. Preserve a private off-host copy, validate SQLite, verify attachment checksums, and restore into an isolated instance before relying on a backup. Do not put conversations, files, private environment or exported data into Git/deployment ZIPs.
+
+## Inline image and video previews (v0.4)
+
+Chat now renders supported uploaded images and MP4/WebM video using authenticated, streamed preview responses; existing attachment metadata works unchanged. See [MEDIA-UPDATE.md](MEDIA-UPDATE.md) for supported formats, scoped preview grants, byte ranges, resource bounds and verification. The forced-download endpoint and all quotas/retention rules above remain in effect.

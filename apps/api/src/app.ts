@@ -24,7 +24,8 @@ import { publicAccountRoutes, protectedAccountRoutes, audit } from './accounts';
 
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
 export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean } = {}) {
-  const app = Fastify({ logger: options.logger ?? !process.env.VITEST, bodyLimit: 128 * 1024, trustProxy: false, requestTimeout: 900000, connectionTimeout: 30000 });
+  const logging = options.logger ?? !process.env.VITEST;
+  const app = Fastify({ logger: logging ? { serializers: { req: req => ({ method: req.method, url: String(req.url).split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) } } : false, bodyLimit: 128 * 1024, trustProxy: false, requestTimeout: 900000, connectionTimeout: 30000 });
   await mkdir(c.dataDir, { recursive: true });
   const lockPath = path.join(c.dataDir, 'instance.lock');
   if (existsSync(lockPath)) {
@@ -50,7 +51,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }
   await app.register(cookie);
   const allowed = (origin: string | undefined) => !origin || c.origins.includes(origin);
-  await app.register(cors, { origin: (origin, cb) => cb(null, allowed(origin)), credentials: true, methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Request-Id', 'X-Dorham-Native'] });
+  await app.register(cors, { origin: (origin, cb) => cb(null, allowed(origin)), credentials: true, methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Request-Id', 'X-Dorham-Native', 'Range'], exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'] });
   await app.register(helmet, { contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'data:', 'blob:'], connectSrc: ["'self'", 'https:', 'wss:', ...(c.production ? [] : ['http:', 'ws:'])], mediaSrc: ["'self'", 'blob:'], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false });
   await app.register(rateLimit, { global: options.rateLimit !== false, max: 600, timeWindow: '1 minute' });
   await app.register(multipart, { limits: { fileSize: 256 * 1024, files: 1, fields: 0 } });
@@ -74,7 +75,16 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }
   async function authenticate(req: FastifyRequest, _reply: FastifyReply) {
     const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined;
-    const resolved = await resolveSession(bearer || req.cookies.dorham_session);
+    let resolved = await resolveSession(bearer || req.cookies.dorham_session);
+    const mediaPath = /^\/api\/v1\/attachments\/([0-9a-f-]{36})\/media$/.exec(req.url.split('?')[0]);
+    const mediaTicket = (req.query as Record<string, unknown>)?.media_ticket;
+    if (mediaPath && ['GET', 'HEAD'].includes(req.method) && mediaTicket !== undefined) {
+      resolved = undefined;
+      const sessionId = attachments.media.resolveTicket(mediaTicket, mediaPath[1]);
+      const session = sessionId ? await db.one('SELECT * FROM sessions WHERE id=? AND expires_at>?', [sessionId, Date.now()]) : undefined;
+      const account = session ? await db.one('SELECT * FROM users WHERE id=? AND banned=0', [session.user_id]) : undefined;
+      if (session && account) resolved = { session, account };
+    }
     if (!resolved) fail(401, 'UNAUTHENTICATED', 'Please sign in.');
     req.account = resolved!.account; req.session = resolved!.session;
     if (req.account.must_change_password && !['/api/v1/auth/me', '/api/v1/auth/password', '/api/v1/auth/logout'].includes(req.url.split('?')[0])) fail(403, 'PASSWORD_CHANGE_REQUIRED', 'Change your temporary password before continuing.');

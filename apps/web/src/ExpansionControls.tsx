@@ -1,9 +1,9 @@
-import { currentLanguage } from './i18n';
+import { AttachmentCard } from './AttachmentMedia';
 import { compressPicture } from './image-compression';
 import { t as tr } from './i18n';
 import { useEffect, useState } from 'react';
 import type { Attachment, Channel, PublicUser, Role, Server, Tag, VoiceRoom } from '@dorham/contracts';
-import { request, uploadAttachment, downloadAttachment } from './api';
+import { request, uploadAttachment } from './api';
 
 export function FileComposer({ conversationId, files, change, error }: { conversationId: string; files: Attachment[]; change: (files: Attachment[]) => void; error: (e: unknown) => void }) {
   const [busy, setBusy] = useState(false), [abort, setAbort] = useState<AbortController | null>(null), [picture, setPicture] = useState<{ original: File; compressed: File; url: string } | null>(null);
@@ -22,7 +22,7 @@ export function FileComposer({ conversationId, files, change, error }: { convers
   return <div className="file-composer"><label className="secondary">{busy ? tr('Uploading…') : tr('Attach file')}<input type="file" disabled={busy || Boolean(picture) || files.length >= 4} accept=".pdf,.txt,.md,.csv,.json,.zip,.7z,.png,.jpg,.jpeg,.webp,.gif,.mp3,.ogg,.wav,.mp4,.webm" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void choose(file); }}/></label>{busy && <button type="button" className="secondary" onClick={() => abort?.abort()}>{tr('Cancel upload')}</button>}<small>{tr('Up to 10 MiB: 7 days · Up to 100 MiB: 24 hours · 300 MiB per 24 hours. Storage pressure may remove files earlier.')}</small><small>{tr('Shared allowance: 512 MiB daily, then files up to 2 MiB until 1 GiB total.')}</small>{picture && <div className="compression-preview"><img src={picture.url} alt={tr('Compressed picture preview')}/><p>{tr('Picture compressed on this device. Review quality before uploading.')}</p><p dir="ltr">{(picture.original.size / 1048576).toFixed(2)} MiB → {(picture.compressed.size / 1048576).toFixed(2)} MiB</p><button type="button" className="secondary" onClick={() => transfer(picture.compressed)}>{tr('Upload compressed picture')}</button><button type="button" className="secondary" onClick={() => transfer(picture.original)}>{tr('Upload original')}</button><button type="button" className="secondary" onClick={() => setPicture(null)}>{tr('Cancel upload')}</button></div>}{files.map(a => <span className="attachment-draft" key={a.id}>{a.name}<button type="button" aria-label={tr('Remove attachment')} onClick={() => { void request(`/attachments/${a.id}`, {}, 'DELETE').then(() => change(files.filter(f => f.id !== a.id))).catch(error); }}>×</button></span>)}</div>;
 }
 export function MessageAttachments({ files, error }: { files?: Attachment[]; error: (e: unknown) => void }) {
-  return <div className="message-attachments">{files?.map(a => <button className="attachment" key={a.id} disabled={!a.available} onClick={() => { void downloadAttachment(a.id, a.name).catch(error); }}><strong dir="auto">{a.name}</strong><small>{(a.size / 1048576).toFixed(2)} {tr("MiB ·")} {a.available ? tr('Expires: {time}', { time: new Date(a.expiresAt).toLocaleString(currentLanguage()) }) : tr("Expired or unavailable")}</small></button>)}</div>;
+  return <div className="message-attachments">{files?.map(file => <AttachmentCard key={file.id} file={file} error={error}/>)}</div>;
 }
 export function Tags({ tags }: { tags?: Tag[] }) { return <span className="user-tags">{tags?.map(t => <span key={t.id} style={{ borderColor: t.color }} dir="auto">{t.name}</span>)}</span>; }
 export function TagManager({ server, members, refresh, error }: { server: Server; members: { user: PublicUser; role: Role }[]; refresh: () => Promise<void>; error: (e: unknown) => void }) {

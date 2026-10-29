@@ -533,5 +533,17 @@
   "Blocking stops direct messages in both directions. Shared server messages and voice are unaffected.": "مسدود کردن، پیام خصوصی را در هر دو جهت متوقف می‌کند. پیام‌ها و گفتگوی صوتی سرور مشترک تغییری نمی‌کند.",
   "Direct messaging is blocked between these accounts. Existing history is kept.": "پیام خصوصی میان این حساب‌ها مسدود است. تاریخچه قبلی حفظ می‌شود.",
   "Direct messaging is blocked between these accounts.": "پیام خصوصی میان این حساب‌ها مسدود است.",
-  "Owners must delete their server before leaving.": "مالک باید پیش از خروج، سرور خود را حذف کند."
+  "Owners must delete their server before leaving.": "مالک باید پیش از خروج، سرور خود را حذف کند.",
+  "Open image: {name}": "باز کردن تصویر: {name}",
+  "Play video: {name}": "پخش ویدیو: {name}",
+  "Loading preview…": "در حال آماده‌سازی پیش‌نمایش…",
+  "Preview unavailable. Download the file to view it.": "پیش‌نمایش در دسترس نیست. برای مشاهده، فایل را دانلود کنید.",
+  "Image viewer": "نمایشگر تصویر",
+  "Close image": "بستن تصویر",
+  "Download {name}": "دانلود {name}",
+  "Preview my screen": "پیش‌نمایش صفحه من",
+  "Your screen preview": "پیش‌نمایش صفحه شما",
+  "Hide my screen preview": "بستن پیش‌نمایش صفحه من",
+  "Show members panel": "نمایش فهرست اعضا",
+  "Minimize members panel": "کوچک کردن فهرست اعضا"
 }

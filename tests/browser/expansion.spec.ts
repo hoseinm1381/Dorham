@@ -36,8 +36,8 @@ test('restricted network supports guests, persistent conversion, safe links, att
     await message.locator(`a[href*="channel=${channel.id}"]`).click(); await expect(other.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
     const fileBytes = Buffer.from('Private attachment with Persian: سلام'); await page.locator('.file-composer input[type=file]').setInputFiles({ name: 'pilot-notes.txt', mimeType: 'text/plain', buffer: fileBytes });
     await expect(page.locator('.attachment-draft')).toContainText('pilot-notes.txt'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
-    const received = other.locator('.attachment').filter({ hasText: 'pilot-notes.txt' }); await expect(received).toBeVisible();
-    const [download] = await Promise.all([other.waitForEvent('download'), received.click()]); expect(download.suggestedFilename()).toBe('pilot-notes.txt');
+    const received = other.locator('.attachment-card').filter({ hasText: 'pilot-notes.txt' }); await expect(received).toBeVisible();
+    const [download] = await Promise.all([other.waitForEvent('download'), received.getByRole('button', { name: 'Download pilot-notes.txt', exact: true }).click()]); expect(download.suggestedFilename()).toBe('pilot-notes.txt');
     const stream = await download.createReadStream(), parts: Buffer[] = []; for await (const part of stream!) parts.push(Buffer.from(part)); expect(Buffer.concat(parts)).toEqual(fileBytes);
     await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByLabel('Language', { exact: true }).selectOption('fa-IR');
     await expect(other.locator('html')).toHaveAttribute('dir', 'rtl'); await expect(other.getByRole('button', { name: 'ذخیرهٔ نمایه', exact: true })).toBeVisible();
@@ -125,7 +125,7 @@ test('social update keeps invitations and custom roles visible, and refreshes ch
     await expect(page.getByText('My profile will change', { exact: true })).toBeVisible();
     await page.locator('.members-sidebar .member-row').filter({ hasText: memberName }).click();
     await other.getByRole('button', { name: 'Account settings', exact: true }).click();
-    await expect(other.locator('.app-version')).toHaveText('Dorham · Version 0.3.0');
+    await expect(other.locator('.app-version')).toHaveText('Dorham · Version 0.4.0');
     await other.getByLabel('Display name', { exact: true }).fill('Updated member'); await other.getByLabel('About you', { exact: true }).fill('Updated biography');
     await other.getByRole('button', { name: 'Save your profile', exact: true }).click();
     await expect(page.getByRole('dialog').getByText('Updated member', { exact: true })).toBeVisible();

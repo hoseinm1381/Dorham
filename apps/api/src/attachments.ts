@@ -1,3 +1,4 @@
+import { AttachmentMedia } from './attachment-media';
 import { randomUUID, createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, rename, unlink, stat, statfs, opendir } from 'node:fs/promises';
@@ -18,7 +19,8 @@ const uuid = z.string().uuid();
 export class Attachments {
   private writers = new Set<string>(); private readers = new Map<string, number>(); private sweeping = false;
   private scan: Dir | null = null;
-  constructor(private service: Service) {}
+  readonly media: AttachmentMedia;
+  constructor(private service: Service) { this.media = new AttachmentMedia(service, this.readers, id => this.file(id)); }
   private file(id: string, partial = false) { return path.join(this.service.c.attachmentDir, `${uuid.parse(id)}.${partial ? 'part' : 'bin'}`); }
   async initialize() { await mkdir(this.service.c.attachmentDir, { recursive: true, mode: 0o700 }); await this.cleanup(); }
   async close() { await this.scan?.close().catch(() => {}); this.scan = null; }
@@ -27,6 +29,7 @@ export class Attachments {
     return { bytes: Number(rows!.bytes), budget: this.service.c.attachmentBudgetMiB * MiB, freeBytes: disk.bavail * disk.bsize, reserveBytes: this.service.c.uploadReserveMiB * MiB };
   }
   register(api: FastifyInstance) {
+    this.media.register(api);
     const { db, c } = this.service;
     api.addContentTypeParser('application/octet-stream', (_req, stream, done) => done(null, stream));
     api.post('/attachments', async req => {
