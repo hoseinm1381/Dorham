@@ -62,6 +62,8 @@ Handshake auth is `{ csrf }` with the web cookie, or `{ token }` for native clie
 
 Server events: `conversation:event`, `state:changed`, `presence`, `typing`, `voice:room`, `voice:signal`, `voice:removed`, and `capacity`. Conversation events carry conversationId, sequence, kind, and payload. Clients discard duplicates and request replay on gaps. A successful replay may need multiple pages; reset means load a fresh authorized snapshot.
 
+Since 0.4.2, the authenticated `/api/v1/presence` response also includes `latencies`, an array of `{userId, milliseconds: number|null, measuredAt: number|null}`. The same array arrives in `connection:latencies` Socket.IO events. The server sends `connection:probe` with `{version:1}`; clients acknowledge with exactly `{version:1}`. No client timing or mutation identifier is accepted. Server-clock RTT is sampled initially and every 15 seconds, times out at 5 seconds, and expires after 45 seconds. Offline users disappear; missing/legacy responses have null measurements. Multiple sessions use the fastest fresh sample. This is public account-presence telemetry for authenticated users, not voice latency, media quality, or a private conversation subscription. Schemas are in `packages/contracts/src/connection.ts`.
+
 Permission defaults and types are defined in `packages/contracts`. Channel overrides apply to role defaults; server owners retain all rights. Managing a member requires a strictly higher role. Channel access requires both view and the requested capability. DM history and events are limited to its two members.
 
 ## Expansion routes (v0.2, same `/api/v1` version)

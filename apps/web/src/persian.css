@@ -1,0 +1,56 @@
+@font-face {
+  font-family: Vazirmatn;
+  src: url('./assets/Vazirmatn-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* Supply Persian glyphs even when the surrounding interface is English. */
+@font-face {
+  font-family: DorhamPersian;
+  src: url('./assets/Vazirmatn-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0600-06FF,U+0750-077F,U+08A0-08FF,U+200C-200F,U+FB50-FDFF,U+FE70-FEFF;
+}
+:root { font-family: DorhamPersian,Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+[lang="fa-IR"] body { font-family: Vazirmatn,Tahoma,sans-serif; line-height:1.7; }
+[lang="fa-IR"] :is(h1,h2,h3,h4,p,label,button,small,strong,span,input,textarea,select) { letter-spacing:normal; }
+[lang="fa-IR"] .story-copy h1 { font-size:clamp(42px,5.4vw,80px); line-height:1.45; }
+[lang="fa-IR"] .auth-form>h2 { line-height:1.6; }
+[lang="fa-IR"] .brand { direction:ltr; align-self:flex-start; }
+.message-text { line-height:1.9; unicode-bidi:normal; }
+/* Keep native dir=auto paragraph alignment. Do not use :dir() here: the
+   compatibility minifier rewrites it to a language selector, losing per-message
+   direction when Persian and English messages share one interface. */
+.message .message-body>p[dir="auto"] { unicode-bidi:normal; text-align:start; font-size:13px; line-height:1.9; }
+[lang="fa-IR"] .message .message-body>p[dir="auto"] { font-size:14px; }
+[lang="fa-IR"] .message-byline button { font-size:12px; }
+.message-text a { unicode-bidi:isolate; }
+.message-byline { flex-wrap:wrap; row-gap:4px; }
+.message-byline button, .member-row strong, .person-row strong { overflow-wrap:anywhere; text-align:start; }
+.message-body { min-width:0; }
+.composer textarea { text-align:start; }
+[dir="rtl"] .topbar-actions { margin-left:0; margin-inline-start:auto; }
+[dir="rtl"] .member-row { text-align:start; }
+[dir="rtl"] .voice-mini-members>button>svg { margin-left:0; margin-inline-start:auto; }
+[dir="rtl"] .message-actions { right:auto; left:23px; }
+[dir="rtl"] .home-logo.selected:before,[dir="rtl"] .server-icon.selected:before { left:auto; right:-15px; border-radius:3px 0 0 3px; }
+[dir="rtl"] .server-icon i { left:auto; right:-10px; }
+[dir="rtl"] .role-chip { margin:3px 0 0 3px; }
+[dir="rtl"] .sidebar { border-right:0; border-left:1px solid #ffffff04; }
+.connection-ping { display:inline-flex; align-items:center; gap:4px; width:max-content; max-width:100%; font-size:10px; font-weight:500; line-height:1.7; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.connection-ping.good { color:#83daba; }
+.connection-ping.fair { color:#e6bf76; }
+.connection-ping.slow { color:#efa0a8; }
+.connection-ping.unknown { color:#999daf; }
+.message-byline .connection-ping { font-size:9px; }
+@media(max-width:600px) {
+  [dir="rtl"] .server-rail { left:auto; right:-62px; transition:right .2s; }
+  [dir="rtl"] .nav-open .server-rail { left:auto; right:0; }
+  [dir="rtl"] .sidebar { left:auto; right:-257px; transition:right .2s; }
+  [dir="rtl"] .nav-open .sidebar { left:auto; right:62px; }
+  [dir="rtl"] .topbar>.icon-button:first-child { margin-left:0; margin-inline-start:-4px; }
+  [dir="rtl"] .message-actions { left:14px; }
+  [lang="fa-IR"] .home-content h1 { font-size:30px; }
+}

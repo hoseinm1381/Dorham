@@ -4,5 +4,5 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   getSecret: () => ipcRenderer.invoke('secret:get'), setSecret: value => ipcRenderer.invoke('secret:set', value),
   configureVoiceHotkey: value => ipcRenderer.invoke('voice:configure', value),
   onVoiceHotkey: listener => { const handler = (_event, value) => listener(value); ipcRenderer.on('voice:hotkey', handler); return () => ipcRenderer.removeListener('voice:hotkey', handler); },
-  setInCall: value => ipcRenderer.send('call:set', value === true), version: '0.4.1'
+  setInCall: value => ipcRenderer.send('call:set', value === true), version: '0.4.2'
 }));

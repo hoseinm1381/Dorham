@@ -12,6 +12,8 @@ The v0.4 update adds inline image/video attachments, a much larger screen-viewin
 
 Version 0.4.1 reduces voice control-plane work and adds configurable push-to-talk/toggle hotkeys, including background hotkeys in the Windows app. See [measurements, tests and unresolved ten-user/four-screen capacity limits](docs/OPTIMIZATION-0.4.1.md).
 
+Version 0.4.2 improves Persian typography, translations, mixed-language messages and mobile RTL navigation, and shows online users' chat-server ping. The font is bundled locally for offline use. See [features, measurements and tests](docs/PERSIAN-PING-0.4.2.md).
+
 ## Run locally
 
 Requires patched Node.js 24 LTS (24.22.1 or newer within 24.x), npm, and Windows for Windows packaging. Python 3 is used only to create the deployment ZIP. Java 21 and Android SDK 36 are needed only for APK builds.

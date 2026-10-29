@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Attachment } from '@dorham/contracts';
 import { assetUrl, downloadAttachment, request } from './api';
-import { t as tr, currentLanguage } from './i18n';
+import { t as tr, currentLanguage, formatFileSize } from './i18n';
 import './attachment-media.css';
 export function attachmentKind(name: string): 'image' | 'video' | null {
   if (/\.(png|jpe?g|gif|webp)$/i.test(name)) return 'image';
@@ -37,7 +37,7 @@ export function AttachmentCard({ file, error }: { file: Attachment; error: (e: u
     return () => { if (node.open) node.close(); };
   }, [expanded]);
   function unavailable() { if (Date.now() - lastFailure.current > 30000) retry.current = 0; lastFailure.current = Date.now(); if (retry.current++ < 1) { setSource(''); setAttempt(n => n + 1); } else setFailed(true); }
-  const description = <><strong dir="auto">{file.name}</strong><small>{(file.size / 1048576).toFixed(2)} {tr('MiB ·')} {file.available ? tr('Expires: {time}', { time: new Date(file.expiresAt).toLocaleString(currentLanguage()) }) : tr('Expired or unavailable')}</small></>;
+  const description = <><strong dir="auto">{file.name}</strong><small>{formatFileSize(file.size)} · {file.available ? tr('Expires: {time}', { time: new Date(file.expiresAt).toLocaleString(currentLanguage()) }) : tr('Expired or unavailable')}</small></>;
   return <div className={`attachment-card ${kind ? 'media-attachment' : ''}`} ref={host}>
     {file.available && kind && <div className="attachment-preview">
       {source && !failed && (kind === 'image' ? <button className="attachment-image-button" aria-label={tr('Open image: {name}', { name: file.name })} onClick={() => setExpanded(true)}><img src={source} crossOrigin="anonymous" referrerPolicy="no-referrer" alt={file.name} loading="lazy" decoding="async" onError={unavailable}/></button> : <video ref={video} src={source} crossOrigin="anonymous" controls playsInline preload="metadata" aria-label={tr('Play video: {name}', { name: file.name })} onError={unavailable} onPlay={() => window.dispatchEvent(new CustomEvent('dorham-inline-video-play', { detail: file.id }))}/>)}

@@ -1,5 +1,7 @@
 # Ninecraft Iranian SFU pilot — 29 October 2026
 
+Current release 0.4.2 adds [Persian readability and chat-server ping](PERSIAN-PING-0.4.2.md), preserving the existing database and SFU/network configuration.
+
 The current 0.4.1 voice CPU/hotkey update is deployed; see [optimization, verification and heavy-media limitations](OPTIMIZATION-0.4.1.md). The ten-user/four-share capacity gate remains failed despite reduced control-plane CPU.
 
 The operator authorized one month at **348,000 toman**, with reduced screen bitrate and traffic monitoring. The funded account purchased `dorham`: Ubuntu 24.04, 1 vCPU, 2 GB RAM, 20 GB enterprise HDD, 120 GB incoming traffic. The panel showed 30 days and 120 GB after provisioning. Outgoing traffic is free according to the provider; no extra traffic, renewal or automatic top-up was purchased.

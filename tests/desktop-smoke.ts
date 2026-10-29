@@ -89,7 +89,9 @@ try {
     console.log('Installed Windows decoded inline image/video and optional own screen preview; hiding preview preserved capture.');
     if (process.env.DORHAM_TEST_HOTKEY_SENDER) {
       const sender = path.resolve(process.env.DORHAM_TEST_HOTKEY_SENDER), exec = promisify(execFile);
-      const key = (value: 'down' | 'up') => exec(sender, [value], { windowsHide: true });
+      // Keep each injected state observable for several 20 ms native polls.
+      // Back-to-back process injections can otherwise release/repress between polls.
+      const key = async (value: 'down' | 'up') => { await exec(sender, [value], { windowsHide: true }); await new Promise(resolve => setTimeout(resolve, 80)); };
       await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('push'); await page.getByRole('button', { name: 'Record talk hotkey', exact: true }).click(); await page.keyboard.press('F9'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
       await page.getByRole('button', { name: 'Lounge', exact: true }).click();
       const microphone = async () => backend!.db.one('SELECT muted FROM voice_members WHERE user_id=(SELECT id FROM users WHERE username=?)', [username]);
@@ -113,6 +115,17 @@ try {
       console.log('Windows background PTT, release and toggle passed with actual OS key-state transitions.');
     }
   }
+  await expect(page.locator('.connection-pill [data-testid="connection-ping"]')).toHaveAttribute('data-ping-ms', /^\d+$/);
+  await page.getByRole('button', { name: 'Account settings', exact: true }).click();
+  await page.getByLabel('Language', { exact: true }).selectOption('fa-IR');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await page.evaluate(() => document.fonts.load('16px Vazirmatn', 'فارسی در ویندوز'));
+  assert.equal(await page.evaluate(() => document.fonts.check('16px Vazirmatn', 'فارسی در ویندوز')), true);
+  await expect(page.getByRole('heading', { name: 'ورودی صدا و کلیدهای میان‌بر', exact: true })).toBeVisible();
+  await page.screenshot({ path: 'artifacts/evidence/windows-persian-0.4.2.png' });
+  await page.getByLabel('زبان', { exact: true }).selectOption('en-US');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   const encrypted = await readFile(path.join(temporary, 'profile', 'settings.json'), 'utf8');
   const secret = await page.evaluate(() => window.desktop!.getSecret()); assert.ok(secret); assert.ok(!encrypted.includes(secret));
   await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/windows-installed.png' });
@@ -120,7 +133,7 @@ try {
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   const lifecycle = await desktop.evaluate(({ BrowserWindow }) => ({ windows: BrowserWindow.getAllWindows().length, visible: BrowserWindow.getAllWindows()[0].isVisible() }));
   assert.deepEqual(lifecycle, { windows: 1, visible: false });
-  await writeFile(`artifacts/evidence/windows-${liveServer ? 'live-' : ''}smoke.json`, JSON.stringify({ testedAt: new Date().toISOString(), executablePath, server: address, defaultServer: instance.defaultServerUrl, username, displayName, dmMessage, remoteAvatarsLoaded: liveServer ? true : undefined, testResolveIp, installed: true, nativeRegistration: true, inlineImageDecoded: !liveServer, inlineVideoDecoded: !liveServer, optionalOwnScreenPreviewDecoded: !liveServer, mediaTransport: backend?.config.mediaTransport, socketConnected: true, wssUpgrade, polling, isolatedProfile: temporary, sandbox: true, contextIsolation: true, nodeIntegration: false, encryptedCredentials: true, trayCloseWhileInCall: 'window hidden, process retained', physicalMedia: 'untested' }, null, 2));
+  await writeFile(`artifacts/evidence/windows-${liveServer ? 'live-' : ''}smoke.json`, JSON.stringify({ testedAt: new Date().toISOString(), executablePath, server: address, defaultServer: instance.defaultServerUrl, username, displayName, dmMessage, remoteAvatarsLoaded: liveServer ? true : undefined, testResolveIp, installed: true, nativeRegistration: true, persianFontLoaded: true, chatServerPingMeasured: true, inlineImageDecoded: !liveServer, inlineVideoDecoded: !liveServer, optionalOwnScreenPreviewDecoded: !liveServer, mediaTransport: backend?.config.mediaTransport, socketConnected: true, wssUpgrade, polling, isolatedProfile: temporary, sandbox: true, contextIsolation: true, nodeIntegration: false, encryptedCredentials: true, trayCloseWhileInCall: 'window hidden, process retained', physicalMedia: 'untested' }, null, 2));
   console.log('Installed Windows app passed rendering, native registration, protected credentials, sandbox and background-close checks.');
 } catch (error) {
   console.error('Desktop failure:', error);

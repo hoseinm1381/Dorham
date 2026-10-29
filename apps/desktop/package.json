@@ -1,7 +1,7 @@
 {
   "name": "@dorham/desktop",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Dorham \u00e2\u20ac\u201d your people, a little closer",
   "author": "Dorham contributors",
   "type": "module",

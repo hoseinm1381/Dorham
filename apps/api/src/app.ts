@@ -19,6 +19,7 @@ import { Service, schemas, publicUser } from './service';
 import { AppError, fail, hash, token, equal, passwordHash, passwordVerify } from './security';
 import { Sfu } from './sfu';
 import { SingleFlight } from './single-flight';
+import { ConnectionLatencyMonitor } from './connection-latency';
 import { Attachments } from './attachments';
 import { mediaAdmission } from './media-admission';
 import { publicAccountRoutes, protectedAccountRoutes, audit } from './accounts';
@@ -249,6 +250,20 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     if (!session) { socket.disconnect(true); fail(401, 'UNAUTHENTICATED', 'Session expired.'); }
   }
   async function disconnectInvalidSessions() { for (const s of io.sockets.sockets.values()) { try { await validSocket(s); } catch { /* already disconnected */ } } }
+  const connectionLatency = new ConnectionLatencyMonitor();
+  async function measureConnection(s: Socket) {
+    try { await validSocket(s); await connectionLatency.probe(s); }
+    catch { connectionLatency.remove(s.id); }
+  }
+  let samplingConnections = false;
+  const latencyTimer = setInterval(async () => {
+    if (samplingConnections) return; samplingConnections = true;
+    try {
+      await Promise.allSettled([...io.sockets.sockets.values()].map(measureConnection));
+      // Same authenticated audience as the existing public account presence list.
+      io.emit('connection:latencies', connectionLatency.snapshot(io.sockets.sockets.values()));
+    } finally { samplingConnections = false; }
+  }, 15000); latencyTimer.unref();
   const voiceRefresh = new SingleFlight(async () => {
     const sockets = [...io.sockets.sockets.values()];
     const snapshot = await service.voiceSnapshot(sockets.map(s => ({ socketId: s.id, userId: s.data.userId, channelId: s.data.voiceChannel })));
@@ -278,6 +293,9 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     const connected = new Set([...io.sockets.sockets.values()].map(s => s.data.userId));
     if (connected.size > c.maxOnline) { socket.emit('capacity', { message: 'Online capacity reached.' }); socket.disconnect(true); return; }
     io.emit('presence', { userId: socket.data.userId, online: true });
+    void measureConnection(socket).then(() => {
+      if (socket.connected) socket.emit('connection:latencies', connectionLatency.snapshot(io.sockets.sockets.values()));
+    });
     let windowStart = Date.now(), eventCount = 0;
     const handle = (event: string, fn: (body: any) => Promise<any>) => socket.on(event, async (body, ack) => {
       if (typeof ack !== 'function') return;
@@ -309,6 +327,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       io.to(target!.socket_id).emit('voice:signal', { ...v, from: socket.data.userId }); return {};
     });
     socket.on('disconnect', async () => {
+      connectionLatency.remove(socket.id);
       try {
         const vm = await db.one('SELECT channel_id FROM voice_members WHERE socket_id=?', [socket.id]);
         if (vm) await service.voiceAction(socket.data.userId, socket.id!, 'leave');
@@ -316,7 +335,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       } catch (err) { app.log.error({ err }, 'Disconnect cleanup failed'); }
     });
   });
-  app.get('/api/v1/presence', { preHandler: authenticate }, async () => ({ online: [...new Set([...io.sockets.sockets.values()].map(s => s.data.userId))] }));
+  app.get('/api/v1/presence', { preHandler: authenticate }, async () => ({ online: [...new Set([...io.sockets.sockets.values()].map(s => s.data.userId))], latencies: connectionLatency.snapshot(io.sockets.sockets.values()) }));
   await app.register(staticPlugin, { root: avatarDir, prefix: '/avatars/', decorateReply: false, maxAge: 3600000, immutable: true });
   const webRoot = path.resolve('apps/web/dist');
   if (existsSync(webRoot)) {
@@ -337,7 +356,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }, 5000); maintenance.unref();
   // Upgraded sockets must close before Fastify starts draining the HTTP server.
   // Waiting until onClose deadlocks a restart while any chat client stays online.
-  app.addHook('preClose', async () => { clearInterval(maintenance); io.engine.close(); });
+  app.addHook('preClose', async () => { clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
   app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); await attachments.close(); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
   return { app, db, service, io, attachments, config: c };
 }

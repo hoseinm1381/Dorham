@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
+import project from '../../package.json' with { type: 'json' };
 test.use({ trace: 'off', video: 'off' });
 async function api(page: Page, route: string, body?: any, method = body ? 'POST' : 'GET') {
   return page.evaluate(async ({ route, body, method }) => { const me = await (await fetch('/api/v1/auth/me')).json(); const result = await fetch(`/api/v1${route}`, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!result.ok) throw new Error(await result.text()); return result.json(); }, { route, body, method });
@@ -125,7 +126,7 @@ test('social update keeps invitations and custom roles visible, and refreshes ch
     await expect(page.getByText('My profile will change', { exact: true })).toBeVisible();
     await page.locator('.members-sidebar .member-row').filter({ hasText: memberName }).click();
     await other.getByRole('button', { name: 'Account settings', exact: true }).click();
-    await expect(other.locator('.app-version')).toHaveText('Dorham · Version 0.4.1');
+    await expect(other.locator('.app-version')).toHaveText(`Dorham · Version ${project.version}`);
     await other.getByLabel('Display name', { exact: true }).fill('Updated member'); await other.getByLabel('About you', { exact: true }).fill('Updated biography');
     await other.getByRole('button', { name: 'Save your profile', exact: true }).click();
     await expect(page.getByRole('dialog').getByText('Updated member', { exact: true })).toBeVisible();

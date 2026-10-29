@@ -1,5 +1,7 @@
 # Implementation and verification status
 
+**Current 0.4.2:** Persian typography/translation/RTL improvements and authenticated chat-server RTT badges. The public shell includes its Persian font for offline use. See [scope and verification](PERSIAN-PING-0.4.2.md). The previous heavy SFU capacity failure is unchanged; Android remains deferred.
+
 **Current 0.4.1:** deployed voice control-plane optimizations and configurable push/toggle hotkeys, including tested Windows background input. Lint, types, 58 unit/API tests, production builds, nine expansion browser checks, focused SFU screen/hotkey checks and installed Windows checks pass. The ten-user/four-share media capacity gate still fails with packet loss/timeouts; see [measurements and limitations](OPTIMIZATION-0.4.1.md). Android is deferred. Paragraphs below are historical checkpoints.
 
 **Current v0.2.0 expansion:** deployed to the Iranian pilot with accounts/history preserved. Guests, recovery/device controls, attachments with the approved 512 MiB/1 GiB policy, Persian/RTL, tags/moderation and screen modes are implemented. See [current capability matrix, tests and remaining gates](UPGRADE-STATUS.md). All paragraphs below are historical checkpoints.

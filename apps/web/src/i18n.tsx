@@ -8,6 +8,10 @@ function detect(): Language {
 }
 let language = detect();
 export const currentLanguage = () => language;
+const numbers = { 'en-US': new Intl.NumberFormat('en-US'), 'fa-IR': new Intl.NumberFormat('fa-IR') };
+export const formatNumber = (value: number) => numbers[language].format(value);
+const sizes = { 'en-US': new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }), 'fa-IR': new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 2 }) };
+export const formatFileSize = (bytes: number) => `${sizes[language].format(bytes / 1048576)} ${t('MiB')}`;
 export function setLanguage(next: Language) {
   if (next !== 'fa-IR' && next !== 'en-US') return;
   try { localStorage.setItem('dorham.language', next); } catch { /* Session switching still works. */ }
