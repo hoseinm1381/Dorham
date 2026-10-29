@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 const exec = promisify(execFile);
 const capacity = process.argv.includes('--capacity');
+const expansion = process.argv.includes('--expansion');
 const hostedRelay = process.argv.includes('--hosted-relay');
 const hostedSfu = process.argv.includes('--hosted-sfu');
 const relay = process.argv.includes('--relay') || hostedRelay;
@@ -21,12 +22,12 @@ if (process.platform !== 'win32') { console.error('This guarded launcher current
 async function usage(pid = 0) { const { stdout } = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', path.resolve('scripts/browser-usage.ps1'), '-RootPid', String(pid)], { windowsHide: true }); return JSON.parse(stdout.trim()); }
 const baseline = await usage();
 if (baseline.totalMiB > 2800) { console.error(`Browser tests were not started: existing Chrome/Edge uses ${baseline.totalMiB} MiB. Keeping headroom below the user's 4 GiB limit.`); process.exit(2); }
-const child = spawn(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', hostedSfu ? 'tests/browser/sfu.spec.ts' : relay ? 'tests/browser/relay.spec.ts' : capacity ? 'tests/browser/capacity.spec.ts' : 'tests/browser/application.spec.ts', ...filter], { stdio: 'inherit', windowsHide: true, env: { ...process.env, DORHAM_SFU_BASE_URL: hostedSfu ? process.env.DORHAM_SFU_BASE_URL : '', DORHAM_RELAY_TEST: relay ? '1' : '0', DORHAM_RELAY_BASE_URL: hostedRelay ? process.env.DORHAM_RELAY_BASE_URL : '' } });
+const child = spawn(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', hostedSfu ? 'tests/browser/sfu.spec.ts' : relay ? 'tests/browser/relay.spec.ts' : capacity ? 'tests/browser/capacity.spec.ts' : expansion ? 'tests/browser/expansion.spec.ts' : 'tests/browser/application.spec.ts', ...filter], { stdio: 'inherit', windowsHide: true, env: { ...process.env, DORHAM_SFU_BASE_URL: hostedSfu ? process.env.DORHAM_SFU_BASE_URL : '', DORHAM_RELAY_TEST: relay ? '1' : '0', DORHAM_RELAY_BASE_URL: hostedRelay ? process.env.DORHAM_RELAY_BASE_URL : '' } });
 const known = new Set(); const samples = [baseline]; let polling = false, limited = false;
 async function stopOwnBrowsers() {
   // End the entire test tree, including the fixture API, before its parent exits.
   // Otherwise a RAM-limited run can leave the local backend/port behind.
-  try { await exec('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }); return; } catch { /* already exited; stop any sampled browser descendants below */ }
+  try { await exec('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch { /* already exited; stop sampled browser descendants below */ }
   for (const pid of known) { try { process.kill(pid); } catch { /* exited */ } }
   try { child.kill(); } catch { /* exited */ }
 }

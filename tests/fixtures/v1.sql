@@ -1,0 +1,27 @@
+-- Immutable schema fixture from source commit 6fcb324, before the expansion.
+CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, password_hash TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', avatar TEXT, status TEXT NOT NULL DEFAULT 'online', instance_admin INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, access_hash TEXT NOT NULL UNIQUE, refresh_hash TEXT UNIQUE, csrf TEXT NOT NULL, native INTEGER NOT NULL DEFAULT 0, access_expires BIGINT NOT NULL, expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS used_refresh (hash TEXT PRIMARY KEY, session_id TEXT NOT NULL, expires_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL REFERENCES users(id), created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS members (server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, role TEXT NOT NULL, joined_at BIGINT NOT NULL, PRIMARY KEY(server_id,user_id));
+CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, sequence BIGINT NOT NULL DEFAULT 0, created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, name TEXT NOT NULL, kind TEXT NOT NULL, conversation_id TEXT UNIQUE REFERENCES conversations(id), created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS channel_overrides (channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, role TEXT NOT NULL, permissions TEXT NOT NULL, PRIMARY KEY(channel_id,role));
+CREATE TABLE IF NOT EXISTS dm_members (conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(conversation_id,user_id));
+CREATE TABLE IF NOT EXISTS dm_pairs (pair_key TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, sequence BIGINT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), content TEXT NOT NULL, reply_to TEXT REFERENCES messages(id) ON DELETE SET NULL, created_at BIGINT NOT NULL, edited_at BIGINT, deleted INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS messages_page ON messages(conversation_id,sequence);
+CREATE INDEX IF NOT EXISTS messages_age ON messages(created_at);
+CREATE TABLE IF NOT EXISTS reactions (message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id), emoji TEXT NOT NULL, PRIMARY KEY(message_id,user_id,emoji));
+CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, sequence BIGINT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, created_at BIGINT NOT NULL, UNIQUE(conversation_id,sequence));
+CREATE INDEX IF NOT EXISTS events_age ON events(created_at);
+CREATE TABLE IF NOT EXISTS read_cursors (conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id), sequence BIGINT NOT NULL, PRIMARY KEY(conversation_id,user_id));
+CREATE TABLE IF NOT EXISTS invites (hash TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, expires_at BIGINT NOT NULL, remaining INTEGER NOT NULL, created_by TEXT NOT NULL REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS voice_members (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, socket_id TEXT NOT NULL, epoch TEXT NOT NULL, muted INTEGER NOT NULL DEFAULT 0, deafened INTEGER NOT NULL DEFAULT 0, server_muted INTEGER NOT NULL DEFAULT 0, eligible INTEGER NOT NULL DEFAULT 0, heartbeat BIGINT NOT NULL, joined_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS share_leases (id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE REFERENCES voice_members(user_id) ON DELETE CASCADE, channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, expires_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS coordinators (channel_id TEXT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE, user_id TEXT, epoch BIGINT NOT NULL DEFAULT 0, expires_at BIGINT NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS mutations (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, request_id TEXT NOT NULL, operation TEXT NOT NULL, fingerprint TEXT NOT NULL, response TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(user_id,request_id));
+CREATE TABLE IF NOT EXISTS global_locks (id INTEGER PRIMARY KEY);
+INSERT INTO global_locks(id) VALUES(1) ON CONFLICT(id) DO NOTHING;

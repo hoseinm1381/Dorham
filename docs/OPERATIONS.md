@@ -4,7 +4,7 @@
 
 Default limits: 100 users, 20 online users and 16 voice members per channel. Fixed room/global publisher caps default to zero (disabled), retaining one publication per account and expiring leases. Existing installations must update old environment values to remove their caps. Retention defaults to 90 days and 50,000 stored messages; reaching the message ceiling prunes a bounded batch of the oldest messages. Replay events retain seven days with a global 50,000-event ceiling; mutation receipts retain one day. Pruning runs in bounded maintenance transactions. Deletion leaves replayable tombstones until normal retention removes them. The [Iranian pilot](NINECRAFT.md) also has incoming-traffic monitoring and reduced publishing settings.
 
-SQLite uses a 256 MiB page ceiling and a bounded WAL journal policy; avatars have a separate 16 MiB quota. Uploads are decoded with pixel limits and re-encoded to 128px WebP, at most 96 KiB each. No general file attachment storage exists. Logs go to stdout/stderr; configure provider log rotation/retention. Keep the production deployment plus data below 80% of the actual disk allocation and include temporary backup space in that calculation. SQLite disk-full errors return a storage-specific 507 response.
+SQLite uses a 256 MiB page ceiling and a bounded WAL journal policy; avatars have a separate 16 MiB quota. Uploads are decoded with pixel limits and re-encoded to 128px WebP, at most 96 KiB each. General attachments use a separate 2 GiB budget and 2 GiB free-space reserve; see [attachment limits and expiry](ATTACHMENTS.md). Logs go to stdout/stderr; configure provider log rotation/retention. Keep the production deployment plus data below 80% of the actual disk allocation and include temporary backup space in that calculation. SQLite disk-full errors return a storage-specific 507 response.
 
 `GET /api/v1/admin/metrics` requires instance administration and reports process RSS, CPU time, uptime, connected users, messages, share leases, database-file bytes, and storage warnings. Maintenance checks SQLite and avatar budgets every minute and logs a warning when either crosses 80%. CPU is cumulative; compare two samples over an interval. These are application budgets, not a provider resource meter; monitor actual disk allocation and backup space separately. PostgreSQL storage remains an operator-managed external budget.
 
@@ -16,7 +16,7 @@ From the source repository, with `.env` pointing at the intended data directory:
 npm run db:backup -- D:\Backups\dorham-2026-10-28.sqlite
 ```
 
-The SQLite online backup API creates a consistent committed database snapshot while the application is running. It does **not** copy avatars; copy the `avatars` directory as well. Keep independent backups outside the hosting account and outside the public web directory. Treat backups as private user data. The deployment bundle exposes the same backup command through the compiled database CLI.
+The SQLite online backup API creates a consistent committed database snapshot while the application is running. It does **not** copy avatars or attachments. Stop the application for a coordinated snapshot and copy `avatars`, `attachments`, and private configuration with the database. Keep independent backups outside the hosting account and outside the public web directory. Treat backups as private user data. The deployment bundle exposes the same backup command through the compiled database CLI.
 
 For provider-level backups, follow Botkeep's documented requirement to stop databases before backing them up and stop workloads before restore. A panel operation is not a recovery point until it reports completed success. Do not keep enough local copies to exhaust the 1 GiB account pool.
 
@@ -27,7 +27,7 @@ For PostgreSQL use `pg_dump` with connection credentials supplied securely throu
 1. Stop the server and confirm it is offline. Keep an independent copy of its current data first.
 2. Run `npm run db:restore -- <verified-backup.sqlite>`.
 3. The restore command checks database integrity and schema identity. It refuses a live instance lock, creates a new database from the backup, and preserves existing database/WAL/SHM files with timestamped names.
-4. Restore the corresponding avatar directory, retaining the prior avatar copy separately.
+4. Restore the corresponding avatar and attachment directories, retaining the prior avatar copy separately.
 5. Start the application and verify credentials, server/channel membership, message history, and images. Voice rooms begin empty after a restart.
 
 Restore supports SQLite snapshots created by this application. It does not import arbitrary SQL, raw files copied while WAL writes were active, or an unrelated schema. Restored databases include session records; rotate/revoke sessions before reopening a restored instance if the backup may have been exposed.

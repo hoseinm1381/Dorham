@@ -24,6 +24,11 @@ import com.getcapacitor.annotation.*
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
+import io.livekit.android.room.participant.VideoTrackPublishOptions
+import io.livekit.android.room.track.LocalVideoTrackOptions
+import io.livekit.android.room.track.LocalScreencastVideoTrack
+import io.livekit.android.room.track.VideoCaptureParameter
+import io.livekit.android.room.track.VideoEncoding
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.RemoteAudioTrack
 import io.livekit.android.room.track.RemoteTrackPublication
@@ -57,6 +62,8 @@ class DorhamMediaPlugin : Plugin() {
     private var screenLease: String? = null
     private var screenBitrate = 1200000
     private var screenFps = 15
+    private var screenWidth = 1280
+    private var screenHeight = 720
     private var nextAdaptation = 0L
     private var micStream = UUID.randomUUID().toString()
     private var screenStream = UUID.randomUUID().toString()
@@ -90,12 +97,12 @@ class DorhamMediaPlugin : Plugin() {
                 try {
                     launch { live.events.collect { event ->
                         when (event) {
-                            is RoomEvent.TrackSubscribed -> { val id = event.participant.identity?.value?.substringBefore(":") ?: ""; when (val track = event.track) { is LiveVideoTrack -> { sfuVideos[id] = track; emit("video", JSONObject().put("userId", id)) }; is RemoteAudioTrack -> track.setVolume(if (deafened) 0.0 else volumes[id] ?: 1.0) } }
+                            is RoomEvent.TrackSubscribed -> { val id = event.participant.identity?.value?.substringBefore(":") ?: ""; when (val track = event.track) { is LiveVideoTrack -> { sfuVideos[id] = track; emit("video", JSONObject().put("userId", id)) }; is RemoteAudioTrack -> track.setVolume(if (deafened || selfDeafened()) 0.0 else volumes[id] ?: 1.0) } }
                             is RoomEvent.TrackUnsubscribed -> { val id = event.participant.identity?.value?.substringBefore(":") ?: ""; if (event.track is LiveVideoTrack) sfuVideos.remove(id) }
                             else -> {}
                         }
                     } }
-                    live.connect(requireNotNull(credentials.getString("url")), requireNotNull(credentials.getString("token"))); live.localParticipant.setMicrophoneEnabled(!muted && !deafened && !selfMuted()); call.resolve()
+                    live.connect(requireNotNull(credentials.getString("url")), requireNotNull(credentials.getString("token"))); live.localParticipant.setMicrophoneEnabled(!muted && !deafened && !selfMuted() && !selfDeafened()); call.resolve()
                 } catch (e: Exception) { release(); call.reject("SFU connection failed: ${e.message}") }
             }
         } else {
@@ -111,6 +118,7 @@ class DorhamMediaPlugin : Plugin() {
         context.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(callback); networkCallback = callback
     }
     private fun members(): List<JSONObject> { val list = room.optJSONArray("members") ?: JSONArray(); return (0 until list.length()).map { list.getJSONObject(it) } }
+    private fun selfDeafened() = members().firstOrNull { it.optJSONObject("user")?.optString("id") == selfId }?.optBoolean("serverDeafened") == true
     private fun selfMuted() = members().firstOrNull { it.optJSONObject("user")?.optString("id") == selfId }?.optBoolean("serverMuted") == true
     private fun descriptions(): JSONArray = JSONArray().apply { put(JSONObject().put("streamId", micStream).put("kind", "audio")); if (screenLease != null) put(JSONObject().put("streamId", screenStream).put("kind", "screen").put("leaseId", screenLease)) }
     private fun signal(peer: String, payload: JSONObject) { payload.put("to", peer).put("streams", descriptions()); emit("signal", payload) }
@@ -170,12 +178,12 @@ class DorhamMediaPlugin : Plugin() {
         val ids = members().filter { it.getJSONObject("user").getString("id") != selfId }.associateBy { it.getJSONObject("user").getString("id") }
         peers.keys.toList().forEach { id -> val p = peers[id]!!; if (ids[id]?.optString("epoch") != p.epoch) { p.pc.close(); p.pc.dispose(); peers.remove(id) } }
         if (factory != null) ids.forEach { (id, member) -> if (!peers.containsKey(id)) newPeer(id, member.getString("epoch")) }
-        microphone?.setEnabled(!muted && !deafened && !selfMuted()); peers.values.forEach { applyVolume(it) }
-        sfu?.let { live -> scope.launch { live.localParticipant.setMicrophoneEnabled(!muted && !deafened && !selfMuted()) } }
+        microphone?.setEnabled(!muted && !deafened && !selfMuted() && !selfDeafened()); peers.values.forEach { applyVolume(it) }
+        sfu?.let { live -> scope.launch { live.localParticipant.setMicrophoneEnabled(!muted && !deafened && !selfMuted() && !selfDeafened()); live.remoteParticipants.values.forEach { p -> p.trackPublications.values.forEach { pub -> (pub.track as? RemoteAudioTrack)?.setVolume(if (deafened || selfDeafened()) 0.0 else volumes[p.identity?.value?.substringBefore(":")] ?: 1.0) } } } }
     }
-    private fun applyVolume(p: Peer) { val m = members().firstOrNull { it.getJSONObject("user").getString("id") == p.id }; p.audio?.setVolume(if (deafened || m?.optBoolean("serverMuted") == true || m?.optBoolean("muted") == true || m?.optBoolean("deafened") == true) 0.0 else volumes[p.id] ?: 1.0) }
-    @PluginMethod fun setState(call: PluginCall) = ui(call) { muted = call.getBoolean("muted") ?: false; deafened = call.getBoolean("deafened") ?: false; updatePeers(); sfu?.remoteParticipants?.values?.forEach { p -> p.trackPublications.values.forEach { pub -> (pub.track as? RemoteAudioTrack)?.setVolume(if (deafened) 0.0 else volumes[p.identity?.value?.substringBefore(":")] ?: 1.0) } }; call.resolve() }
-    @PluginMethod fun setVolume(call: PluginCall) = ui(call) { val id = call.getString("userId")!!; val volume = (call.getDouble("volume") ?: 1.0).coerceIn(0.0, 2.0); volumes[id] = volume; peers[id]?.let { applyVolume(it) }; sfu?.remoteParticipants?.values?.filter { it.identity?.value?.substringBefore(":") == id }?.forEach { p -> p.trackPublications.values.forEach { (it.track as? RemoteAudioTrack)?.setVolume(if (deafened) 0.0 else volume) } }; call.resolve() }
+    private fun applyVolume(p: Peer) { val m = members().firstOrNull { it.getJSONObject("user").getString("id") == p.id }; p.audio?.setVolume(if (deafened || selfDeafened() || m?.optBoolean("serverMuted") == true || m?.optBoolean("muted") == true || m?.optBoolean("deafened") == true) 0.0 else volumes[p.id] ?: 1.0) }
+    @PluginMethod fun setState(call: PluginCall) = ui(call) { muted = call.getBoolean("muted") ?: false; deafened = call.getBoolean("deafened") ?: false; updatePeers(); sfu?.remoteParticipants?.values?.forEach { p -> p.trackPublications.values.forEach { pub -> (pub.track as? RemoteAudioTrack)?.setVolume(if (deafened || selfDeafened()) 0.0 else volumes[p.identity?.value?.substringBefore(":")] ?: 1.0) } }; call.resolve() }
+    @PluginMethod fun setVolume(call: PluginCall) = ui(call) { val id = call.getString("userId")!!; val volume = (call.getDouble("volume") ?: 1.0).coerceIn(0.0, 2.0); volumes[id] = volume; peers[id]?.let { applyVolume(it) }; sfu?.remoteParticipants?.values?.filter { it.identity?.value?.substringBefore(":") == id }?.forEach { p -> p.trackPublications.values.forEach { (it.track as? RemoteAudioTrack)?.setVolume(if (deafened || selfDeafened()) 0.0 else volume) } }; call.resolve() }
     @Suppress("DEPRECATION")
     @PluginMethod fun setDevice(call: PluginCall) = ui(call) {
         val audio = context.getSystemService(AudioManager::class.java); val name = call.getString("deviceId") ?: "speaker"
@@ -183,20 +191,47 @@ class DorhamMediaPlugin : Plugin() {
         if (Build.VERSION.SDK_INT >= 31) { val types = when (name) { "bluetooth" -> listOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET); "earpiece" -> listOf(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE); else -> listOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) }; val target = audio.availableCommunicationDevices.firstOrNull { it.type in types } ?: throw IllegalStateException("Selected audio route is unavailable"); if (!audio.setCommunicationDevice(target)) throw IllegalStateException("Could not change audio route") }
         else { audio.isSpeakerphoneOn = name == "speaker"; if (name == "bluetooth") audio.startBluetoothSco() }; call.resolve()
     }
+    private fun shareSettings(call: PluginCall) {
+        val quality = call.getString("quality") ?: "720p15"
+        require(quality in listOf("480p15", "480p30", "720p15", "720p30")) { "Unsupported screen quality" }
+        screenWidth = (call.getInt("width") ?: if (quality.startsWith("480")) 854 else 1280).coerceIn(160, 1280)
+        screenHeight = (call.getInt("height") ?: if (quality.startsWith("480")) 480 else 720).coerceIn(90, 720)
+        screenFps = (call.getInt("fps") ?: if (quality.endsWith("15")) 15 else 30).coerceIn(1, 30)
+        screenBitrate = (call.getInt("bitrate") ?: 800000).coerceIn(64000, 1200000)
+        sfu?.localParticipant?.let { p -> p.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(isScreencast = true, captureParams = VideoCaptureParameter(screenWidth, screenHeight, screenFps)); p.screenShareTrackPublishDefaults = p.screenShareTrackPublishDefaults.copy(videoEncoding = VideoEncoding(screenBitrate, screenFps), simulcast = false, videoCodec = "vp8") }
+    }
+    @PluginMethod fun setShareQuality(call: PluginCall) = ui(call) {
+        shareSettings(call)
+        val live = sfu
+        if (live != null && screenLease != null) {
+            val track = live.localParticipant.trackPublications.values.mapNotNull { it.track as? LocalScreencastVideoTrack }.firstOrNull()
+            if (track == null) { call.reject("Screen capture is not active"); return@ui }
+            scope.launch { try {
+                track.options = track.options.copy(captureParams = VideoCaptureParameter(screenWidth, screenHeight, screenFps))
+                track.capturer.changeCaptureFormat(screenWidth, screenHeight, screenFps)
+                live.localParticipant.unpublishTrack(track, stopOnUnpublish = false)
+                if (!live.localParticipant.publishVideoTrack(track, VideoTrackPublishOptions(videoEncoding = VideoEncoding(screenBitrate, screenFps), simulcast = false, videoCodec = "vp8", source = io.livekit.android.room.track.Track.Source.SCREEN_SHARE))) throw IllegalStateException("Screen quality change could not be published")
+                call.resolve()
+            } catch (e: Exception) { stopCapture(); emit("captureStopped", JSONObject()); call.reject(e.message) } }
+        } else {
+            capturer?.changeCaptureFormat(screenWidth, screenHeight, screenFps)
+            peers.values.forEach { p -> p.screenSender?.let { sender -> val params = sender.parameters; params.encodings.forEach { it.maxBitrateBps = screenBitrate; it.maxFramerate = screenFps }; sender.parameters = params } }
+            call.resolve()
+        }
+    }
     @PluginMethod fun startShare(call: PluginCall) = ui(call) { if (screenLease != null) { call.resolve(); return@ui }; val manager = context.getSystemService(MediaProjectionManager::class.java); startActivityForResult(call, manager.createScreenCaptureIntent(), "projectionResult") }
     @ActivityCallback private fun projectionResult(call: PluginCall, result: ActivityResult) = ui(call) {
         val data = result.data; if (result.resultCode != Activity.RESULT_OK || data == null) { call.reject("Screen capture was cancelled"); return@ui }
-        screenLease = call.getString("leaseId"); screenStream = UUID.randomUUID().toString(); VoiceService.instance?.projection(true)
+        shareSettings(call); screenLease = call.getString("leaseId"); screenStream = UUID.randomUUID().toString(); VoiceService.instance?.projection(true)
         val live = sfu
         if (live != null) { scope.launch { try { live.localParticipant.setScreenShareEnabled(true, ScreenCaptureParams(data, onStop = { main.post { stopCapture(); emit("captureStopped", JSONObject()) } })); call.resolve() } catch (e: Exception) { stopCapture(); call.reject(e.message) } }; return@ui }
         val shared = egl ?: throw IllegalStateException("Join voice first"); val fac = factory ?: throw IllegalStateException("Join voice first")
         val videoSource = fac.createVideoSource(true); screenSource = videoSource
         val capture = ScreenCapturerAndroid(data, object : MediaProjection.Callback() { override fun onStop() { main.post { stopCapture(); emit("captureStopped", JSONObject()) } } }); capturer = capture
         val helper = SurfaceTextureHelper.create("DorhamScreen", shared.eglBaseContext); texture = helper; capture.initialize(helper, context, videoSource.capturerObserver)
-        val quality = call.getString("quality"); screenBitrate = if (quality == "1080p30") 2500000 else 1200000; screenFps = if (quality == "720p15") 15 else 30
-        capture.startCapture(if (quality == "1080p30") 1920 else 1280, if (quality == "1080p30") 1080 else 720, screenFps)
+        capture.startCapture(screenWidth, screenHeight, screenFps)
         val track = fac.createVideoTrack(UUID.randomUUID().toString(), videoSource); screenTrack = track
-        peers.values.forEach { p -> p.subscribed = true; if (p.screenSender == null) p.screenSender = p.pc.addTrack(track, listOf(screenStream)) else { p.screenSender!!.setStreams(listOf(screenStream)); p.screenSender!!.setTrack(track, false) }; val params = p.screenSender!!.parameters; params.encodings.forEach { it.maxBitrateBps = if (quality == "1080p30") 2500000 else 1200000; it.maxFramerate = if (quality == "720p15") 15 else 30 }; p.screenSender!!.parameters = params; signal(p.id, JSONObject()) }
+        peers.values.forEach { p -> p.subscribed = true; if (p.screenSender == null) p.screenSender = p.pc.addTrack(track, listOf(screenStream)) else { p.screenSender!!.setStreams(listOf(screenStream)); p.screenSender!!.setTrack(track, false) }; val params = p.screenSender!!.parameters; params.encodings.forEach { it.maxBitrateBps = screenBitrate; it.maxFramerate = screenFps }; p.screenSender!!.parameters = params; signal(p.id, JSONObject()) }
         call.resolve()
     }
     @PluginMethod fun stopShare(call: PluginCall) = ui(call) { stopCapture(); call.resolve() }
@@ -239,7 +274,7 @@ class DorhamMediaPlugin : Plugin() {
                     emit("speaking", JSONObject().put("userId", p.id).put("speaking", speaking && !deafened))
                     if (adapt) p.screenSender?.let { sender ->
                         val params = sender.parameters
-                        params.encodings.forEach { it.maxBitrateBps = if (congested) 450000 else screenBitrate; it.maxFramerate = if (congested) 10 else screenFps }
+                        params.encodings.forEach { it.maxBitrateBps = if (congested) minOf(450000, screenBitrate) else screenBitrate; it.maxFramerate = if (congested) minOf(10, screenFps) else screenFps }
                         sender.parameters = params
                     }
                 }

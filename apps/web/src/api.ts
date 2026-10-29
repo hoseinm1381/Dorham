@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import instance from './instance.json';
 declare global { interface Window { desktop?: { getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; version: string } } }
 const store = registerPlugin<any>('DorhamSecrets');
+const files = registerPlugin<any>('DorhamFiles');
 export const native = Capacitor.isNativePlatform() || Boolean(window.desktop);
 let base = '', csrf = '', access = '', accessExpires = 0, refreshPromise: Promise<boolean> | null = null;
 export async function initialize() { const defaultServer = import.meta.env.VITE_DEFAULT_SERVER_URL || instance.defaultServerUrl; if (window.desktop) base = await window.desktop.getServer() || defaultServer; else if (native) base = localStorage.getItem('dorham.server') || defaultServer; }
@@ -22,7 +23,8 @@ async function refreshSession(): Promise<boolean> {
   })();
   try { return await refreshPromise; } finally { refreshPromise = null; }
 }
-export async function maintainSession() { if (native && Date.now() >= accessExpires - 120000 && !await refreshSession()) throw new Error('Session expired. Sign in again.'); }
+let lastWebRenewal = 0;
+export async function maintainSession() { if (native) { if (Date.now() >= accessExpires - 120000 && !await refreshSession()) throw new Error('Session expired. Sign in again.'); } else if (Date.now() - lastWebRenewal >= 12 * 3600000) { await request('/auth/renew', {}); lastWebRenewal = Date.now(); } }
 export async function request<T = any>(route: string, body?: unknown, method = body === undefined ? 'GET' : 'POST', retry = true): Promise<T> {
   if (native && !base) throw new Error('Enter your server address to connect.');
   const headers: Record<string, string> = { ...(access ? { Authorization: `Bearer ${access}` } : {}), ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(native ? { 'X-Dorham-Native': '1' } : {}) };
@@ -32,10 +34,28 @@ export async function request<T = any>(route: string, body?: unknown, method = b
   const response = await fetch(`${base}/api/v1${route}`, { method, credentials: 'include', headers, body: payload instanceof FormData ? payload : payload ? JSON.stringify(payload) : undefined });
   if (response.status === 401 && retry && !route.startsWith('/auth/login') && !route.startsWith('/auth/register') && await refreshSession()) return request<T>(route, payload, method, false);
   const data = await response.json().catch(() => ({ error: { message: 'The server returned an invalid response.' } }));
-  if (!response.ok) { const error = new Error(data.error?.message || 'Request failed.'); Object.assign(error, { status: response.status }); throw error; }
+  if (response.status === 401 && !['/auth/login', '/auth/register', '/auth/guest', '/auth/recover'].some(path => route.startsWith(path))) window.dispatchEvent(new Event('dorham-session-revoked'));
+  if (!response.ok) { const error = new Error(data.error?.message || 'Request failed.'); Object.assign(error, { status: response.status, code: data.error?.code }); throw error; }
   if (data.csrf) csrf = data.csrf;
   if (data.accessToken) { access = data.accessToken; accessExpires = Date.now() + 15 * 60000; await setSecret(data.refreshToken); }
   return data;
 }
-export async function signOut() { try { await request('/auth/logout', {}); } finally { access = ''; csrf = ''; await setSecret(null); if ('caches' in window) { for (const key of await caches.keys()) await caches.delete(key); } } }
+export async function signOut() { try { await request('/auth/logout', {}); } catch (e: any) { if (e.status !== 401) throw e; } finally { access = ''; csrf = ''; await setSecret(null); if ('caches' in window) { for (const key of await caches.keys()) await caches.delete(key); } } }
+export async function forgetSession() { access = ''; csrf = ''; await setSecret(null); }
 export function connectSocket(): Socket { return io(base || window.location.origin, { withCredentials: true, auth: callback => callback({ token: access || undefined, csrf }), reconnectionDelay: 500, reconnectionDelayMax: 5000, transports: ['websocket', 'polling'], tryAllTransports: true }); }
+
+export async function uploadAttachment(file: File, conversationId: string, signal?: AbortSignal) {
+  const reserved = await request('/attachments', { name: file.name, size: file.size, conversationId });
+  try {
+    const response = await fetch(`${base}/api/v1/attachments/${reserved.id}/content`, { method: 'POST', credentials: 'include', signal, headers: { 'Content-Type': 'application/octet-stream', 'X-CSRF-Token': csrf, ...(access ? { Authorization: `Bearer ${access}` } : {}) }, body: file });
+    const data = await response.json(); if (!response.ok) throw Object.assign(new Error(data.error?.message || 'File upload failed.'), { code: data.error?.code });
+    return { id: reserved.id, name: file.name, size: file.size, expiresAt: reserved.expiresAt, available: true };
+  } catch (e) { await request(`/attachments/${reserved.id}`, {}, 'DELETE').catch(() => {}); throw e; }
+}
+export async function downloadAttachment(id: string, name: string) {
+  await maintainSession();
+  if (Capacitor.getPlatform() === 'android') { await files.download({ url: `${base}/api/v1/attachments/${encodeURIComponent(id)}/download`, name, accessToken: access }); return; }
+  const response = await fetch(`${base}/api/v1/attachments/${encodeURIComponent(id)}/download`, { credentials: 'include', headers: access ? { Authorization: `Bearer ${access}` } : {} });
+  if (!response.ok) { const data = await response.json(); throw Object.assign(new Error(data.error?.message || 'File download failed.'), { code: data.error?.code }); }
+  const blob = await response.blob(), url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+}

@@ -1,1 +1,9 @@
-{ "name": "@dorham/desktop", "private": true, "version": "0.1.0", "description": "Dorham — your people, a little closer", "author": "Dorham contributors", "type": "module", "main": "main.cjs" }
+{
+  "name": "@dorham/desktop",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Dorham — your people, a little closer",
+  "author": "Dorham contributors",
+  "type": "module",
+  "main": "main.cjs"
+}

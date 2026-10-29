@@ -18,12 +18,12 @@ if (action === 'restore') {
   await backup.backup(temp); backup.close();
   if (existsSync(target)) await rename(target, `${target}.before-${Date.now()}`);
   for (const suffix of ['-wal', '-shm']) if (existsSync(`${target}${suffix}`)) await rename(`${target}${suffix}`, `${target}${suffix}.before-${Date.now()}`);
-  await rename(temp, target); console.log('Database restored. Previous files preserved beside it. Restore avatars separately.');
+  await rename(temp, target); console.log('Database restored. Previous files preserved beside it. Restore matching avatars and attachments separately.');
 } else {
   const db = await openDatabase(c);
   try {
     if (action === 'migrate') console.log(`Schema ready (${db.dialect}).`);
-    else if (action === 'backup') { const destination = path.resolve(process.argv[3] || `artifacts/backups/dorham-${Date.now()}.sqlite`); await mkdir(path.dirname(destination), { recursive: true }); if (existsSync(destination)) throw new Error('Backup destination already exists.'); await db.backup(destination); console.log(`Verified online database snapshot created: ${destination}. Copy avatars separately and keep the backup off-host.`); }
+    else if (action === 'backup') { const destination = path.resolve(process.argv[3] || `artifacts/backups/dorham-${Date.now()}.sqlite`); await mkdir(path.dirname(destination), { recursive: true }); if (existsSync(destination)) throw new Error('Backup destination already exists.'); await db.backup(destination); console.log(`Verified online database snapshot created: ${destination}. Copy matching avatars and attachments separately and keep the backup off-host.`); }
     else throw new Error('Expected migrate, backup, or restore');
   } finally { await db.close(); }
 }

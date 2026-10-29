@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, cp } from 'node:fs/promises';
+import { mkdir, readdir, cp, readFile } from 'node:fs/promises';
 import path from 'node:path';
-const root = process.cwd();
+const root = process.cwd(), version = JSON.parse(await readFile('package.json', 'utf8')).version, output = process.env.DORHAM_ANDROID_OUTPUT || `artifacts/android-${version}`;
 if (!existsSync('apps/web/dist/index.html')) throw new Error('Run npm run build:web first.');
 const env = { ...process.env };
 if (existsSync('.tools/jdk')) { const local = (await readdir('.tools/jdk')).find(n => n.startsWith('jdk-21')); if (local) env.JAVA_HOME = path.resolve('.tools/jdk', local); }
@@ -17,6 +17,6 @@ const gradle = existsSync(localGradle) ? localGradle : process.platform === 'win
 for (const target of ['assembleRelease', 'assembleDebug']) {
   result = spawnSync(process.platform === 'win32' ? 'cmd.exe' : gradle, process.platform === 'win32' ? ['/d', '/s', '/c', gradle, ...args, target] : [...args, target], { cwd: path.join(root, 'apps/android/android'), env, stdio: 'inherit' }); if (result.status) process.exit(result.status);
 }
-await mkdir('artifacts/android', { recursive: true });
-for (const kind of ['release', 'debug']) { const dir = `apps/android/android/app/build/outputs/apk/${kind}`; if (existsSync(dir)) for (const file of await readdir(dir)) if (file.endsWith('.apk')) await cp(path.join(dir, file), `artifacts/android/Dorham-0.1.0-${file}`); }
-console.log('APK outputs copied to artifacts/android. A debug APK is installable; a release APK needs DORHAM_KEYSTORE signing credentials.');
+await mkdir(output, { recursive: true });
+for (const kind of ['release', 'debug']) { const dir = `apps/android/android/app/build/outputs/apk/${kind}`; if (existsSync(dir)) for (const file of await readdir(dir)) if (file.endsWith('.apk')) await cp(path.join(dir, file), path.join(output, `Dorham-${version}-${file}`)); }
+console.log('APK outputs copied to the configured versioned output directory. A debug APK is installable; a release APK needs DORHAM_KEYSTORE signing credentials.');

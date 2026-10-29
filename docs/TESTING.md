@@ -1,3 +1,5 @@
+Current v0.2 acceptance and exact remaining gates: [upgrade matrix](UPGRADE-STATUS.md). Run `npm run verify`, `npm run test:expansion`, and separately guarded media scenarios below. Expansion covers guests, conversion, attachments, Persian/RTL, compression preview, in-call quality, recovery and admin UI; 35 unit/integration tests include migration preservation, quota races and negative admission. Never run capacity browsers on the 4 GiB workstation.
+
 # Verification
 
 Run `npm run verify` for ESLint, TypeScript, unit/integration tests, and production builds. `npm run test:load` runs a real SQLite/Socket.IO control-plane load scenario without spawning browsers. `npm run test:e2e` runs the chat and two-peer WebRTC suite through the browser memory guard.

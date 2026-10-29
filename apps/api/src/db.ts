@@ -6,6 +6,7 @@ import { drizzle as pgDrizzle } from 'drizzle-orm/node-postgres';
 import { sql, type SQL } from 'drizzle-orm';
 import pg from 'pg';
 import type { Config } from './config';
+import { migrateExpansion } from './migrations';
 
 export type Row = Record<string, any>;
 export interface Connection {
@@ -79,7 +80,7 @@ export async function openDatabase(c: Config): Promise<Database> {
     // Initialization precedes transactional locking; PostgreSQL deploys use one migrator.
     for (const query of schema) await db.run(query);
     await db.run('INSERT INTO schema_migrations(version,applied_at) VALUES(1,?) ON CONFLICT(version) DO NOTHING', [Date.now()]);
-    return db;
+    await migrateExpansion(db); return db;
   }
   const raw = new Sqlite(path.join(c.dataDir, 'dorham.sqlite'));
   raw.pragma('journal_mode = WAL'); raw.pragma('foreign_keys = ON'); raw.pragma('busy_timeout = 5000'); raw.pragma('auto_vacuum = INCREMENTAL'); raw.pragma('journal_size_limit = 16777216'); raw.pragma('wal_autocheckpoint = 1000');
@@ -97,5 +98,5 @@ export async function openDatabase(c: Config): Promise<Database> {
     backup: dest => exclusive(async () => { await raw.backup(dest); })
   };
   await db.transaction(async tx => { for (const query of schema) await tx.run(query); await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(1,?) ON CONFLICT(version) DO NOTHING', [Date.now()]); });
-  return db;
+  await migrateExpansion(db); return db;
 }

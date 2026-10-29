@@ -1,21 +1,22 @@
 import { mkdir, cp, readFile, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-const root = process.cwd(), destination = path.resolve('artifacts/botkeep');
+const root = process.cwd(), source = JSON.parse(await readFile('package.json', 'utf8'));
+if (!/^\d+\.\d+\.\d+$/.test(source.version)) throw new Error('Use a numeric build version.');
+const output = `artifacts/server-${source.version}`, destination = path.resolve(output);
 await mkdir(destination, { recursive: true });
 // cp merges directories; discard only generated compilation outputs so stale
 // hashed assets/chunks cannot accumulate across deployment bundle builds.
 for (const entry of ['apps/api/dist', 'apps/web/dist']) {
   const generated = path.resolve(destination, entry);
-  if (path.relative(root, generated).split(path.sep).join('/') !== `artifacts/botkeep/${entry}`) throw new Error('Unexpected generated bundle path');
+  if (path.relative(root, generated).split(path.sep).join('/') !== `${output}/${entry}`) throw new Error('Unexpected generated bundle path');
   await rm(generated, { recursive: true, force: true });
 }
 for (const entry of ['apps/api/dist', 'apps/web/dist', 'docs', 'deployment', '.env.example', '.dockerignore']) await cp(entry, path.join(destination, entry), { recursive: true });
-await writeFile(path.join(destination, 'README.txt'), 'Dorham compiled server bundle\nRequires patched Node 24.22.1 or newer within Node 24.\nRun npm ci --omit=dev, configure environment, then npm start.\nSee docs/DEPLOYMENT.md and docs/STATUS.md before exposing registration.\nSource, Windows and Android applications are separate deliverables.\n');
-const source = JSON.parse(await readFile('package.json', 'utf8'));
+await writeFile(path.join(destination, 'README.txt'), 'Dorham compiled server bundle\nRequires patched Node 24.22.1 or newer within Node 24.\nRun npm ci --omit=dev --ignore-scripts, configure environment, then npm start.\nSee docs/DEPLOYMENT.md and docs/STATUS.md before exposing registration.\nSource, Windows and Android applications are separate deliverables.\n');
 const runtime = ['fastify', '@fastify/cookie', '@fastify/cors', '@fastify/helmet', '@fastify/rate-limit', '@fastify/static', '@fastify/multipart', 'argon2', 'better-sqlite3', 'drizzle-orm', 'pg', 'socket.io', 'zod', 'dotenv', 'livekit-server-sdk', 'sharp'];
-await writeFile(path.join(destination, 'package.json'), JSON.stringify({ name: 'dorham-server', version: source.version, private: true, type: 'module', engines: source.engines, scripts: { start: source.scripts.start, 'db:migrate': 'node --env-file-if-exists=.env apps/api/dist/database.js migrate', 'db:backup': 'node --env-file-if-exists=.env apps/api/dist/database.js backup', 'db:restore': 'node --env-file-if-exists=.env apps/api/dist/database.js restore' }, dependencies: Object.fromEntries(runtime.map(name => [name, source.dependencies[name]])) }, null, 2));
+await writeFile(path.join(destination, 'package.json'), JSON.stringify({ name: 'dorham-server', version: source.version, private: true, type: 'module', engines: source.engines, scripts: { start: source.scripts.start, 'db:migrate': 'node --env-file-if-exists=.env apps/api/dist/database.js migrate', 'db:backup': 'node --env-file-if-exists=.env apps/api/dist/database.js backup', 'db:restore': 'node --env-file-if-exists=.env apps/api/dist/database.js restore', admin: 'node --env-file-if-exists=.env apps/api/dist/admin.js' }, dependencies: Object.fromEntries(runtime.map(name => [name, source.dependencies[name]])) }, null, 2));
 const result = spawnSync(process.execPath, [process.env.npm_execpath, 'install', '--package-lock-only', '--ignore-scripts', '--fetch-timeout=20000', '--fetch-retries=1'], { cwd: destination, env: process.env, stdio: 'inherit' }); if (result.status) process.exit(result.status);
-const archiveScript = 'import pathlib,sys,zipfile;root=pathlib.Path(sys.argv[1]);out=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED);[(out.write(p,p.relative_to(root))) for p in root.rglob("*") if p.is_file()];out.close()';
-const archive = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', archiveScript, destination, path.join(root, 'artifacts/Dorham-0.1.0-Botkeep.zip')], { stdio: 'inherit' }); if (archive.status) process.exit(archive.status);
+const archiveScript = 'import pathlib,sys,zipfile;root=pathlib.Path(sys.argv[1]);out=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED);[(out.write(p,p.relative_to(root))) for p in root.rglob("*") if p.is_file() and "node_modules" not in p.relative_to(root).parts];out.close()';
+const archive = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', archiveScript, destination, path.join(root, `artifacts/Dorham-${source.version}-Server.zip`)], { stdio: 'inherit' }); if (archive.status) process.exit(archive.status);
 console.log('Deployment directory and ZIP prepared without secrets, data, native applications, or development dependencies.');

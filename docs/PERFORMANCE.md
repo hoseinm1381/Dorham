@@ -1,5 +1,7 @@
 # Local performance evidence
 
+Current v0.2 workload: p95 183.99 ms, peak 405.46 MiB and final 365.45 MiB RSS with 20 sockets/200 messages. See [complete v0.2 measurements and limits](UPGRADE-STATUS.md). Tables below preserve the previous release baseline.
+
 Measured on Windows x64 with patched Node 24.22.1, one backend process, real SQLite/WAL and real Socket.IO clients. These numbers describe the local workstation, with other applications running, and do not establish Botkeep capacity.
 
 | Workload or measurement | Observed result |

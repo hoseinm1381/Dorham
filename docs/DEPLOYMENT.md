@@ -1,6 +1,6 @@
 # Deployment
 
-For this account's actual deployment and measured results, see [hosted verification](HOSTED-VERIFICATION.md). The procedure below is the reproducible setup, not a claim that all live gates passed.
+For the current Iranian VPS see [Ninecraft operations](NINECRAFT.md) and [v0.2 upgrade status](UPGRADE-STATUS.md). Historical Botkeep results are in [hosted verification](HOSTED-VERIFICATION.md). The procedure below is the reproducible setup, not a claim that all live gates passed.
 
 ## Botkeep preparation
 
@@ -9,8 +9,8 @@ The public Botkeep documentation describes GitHub/ZIP import, runtime environmen
 The Halloween plan is a shared account pool: 1 vCore, 1 GiB RAM, 1 GiB storage, three slots. Use **one slot** for this application; reserve the pool for it while measuring. Builds, desktop/Android packages, `node_modules` from Windows, test data, logs, signing keys, and `.tools` must not be uploaded.
 
 1. Run `npm run verify`, the browser tests, and `npm run deploy:bundle` locally.
-2. Import `artifacts/Dorham-0.1.0-Botkeep.zip`, or use a private deployment repository containing the contents of `artifacts/botkeep`. Connecting/importing a repository is an operator action; this project does not push or publish automatically.
-3. Select a patched supported Node 24 runtime. Install with `npm ci --omit=dev` and use `npm start`. Do not upload Windows-native dependencies.
+2. Import `artifacts/Dorham-0.2.0-Server.zip`, or use a private deployment repository containing the contents of `artifacts/server-0.2.0`. Connecting/importing a repository is an operator action; this project does not push or publish automatically.
+3. Select a patched supported Node 24 runtime. Install with `npm ci --omit=dev --ignore-scripts` and use `npm start`. Do not upload Windows-native dependencies.
 4. In Environment, configure `NODE_ENV=production`, `HOST=0.0.0.0`, `PUBLIC_URL=https://<assigned-domain>`, `COOKIE_SECURE=true`, and `ALLOWED_ORIGINS=https://<assigned-domain>,https://localhost,dorham://app`. Keep Botkeep's assigned `SERVER_PORT`.
 5. Set `DATA_DIR` to the **actual persistent-volume path shown in your panel**. Do not assume `/tmp`, the import directory, or a particular container path survives redeployment.
 6. Configure Domains/HTTPS and verify `/health` and `/ready` from outside the hosting network.
@@ -18,9 +18,9 @@ The Halloween plan is a shared account pool: 1 vCore, 1 GiB RAM, 1 GiB storage, 
 
 The application loads `.env` where provided. Environment values override `.env`. Do not include real secrets in source, ZIPs, screenshots, or support logs.
 
-`npm start` runs `deployment/start.mjs`. On an older Linux Node 24 runtime, it downloads the official Node 24.22.1 binary archive, verifies its pinned SHA256, and caches only the executable and a binary-hash receipt under `.cache`. It uses `process.execve` so there is one backend process and shutdown signals reach it directly. First boot requires HTTPS access to nodejs.org and `tar`; subsequent cached boots need no runtime download. Preserve this cache across imports. A current Node 24 runtime starts the API directly. Inspect the private `data/runtime-status.json` for the actual Node version after successful listen; `/ready` remains the live-health check.
+`npm start` runs `deployment/start.mjs` using a preinstalled patched Node 24.22.1 or later within 24.x. It never downloads a runtime on startup. Provision the runtime and native dependencies before restricting international access. Inspect private `data/runtime-status.json` for the actual runtime; `/ready` is the live-health check.
 
-If the panel GitHub sync reports busy/unreachable, an existing clean deployment checkout can update through a one-time startup command: `git fetch origin codex/botkeep && git merge --ff-only <reviewed-deployment-sha> && npm start`. Push that exact compiled branch first, preserve `.env`, `data` and `.cache`, and let conflicts abort safely. After verifying the update, restore the startup command to `npm start`. Do not use destructive reset/clean commands or assume Redeploy fetches GitHub. Versions before the active-socket shutdown fix must have app chat clients disconnected before restarting.
+If the panel GitHub sync reports busy/unreachable, an existing clean deployment checkout can update through a one-time startup command: `git fetch origin codex/server-bundle && git merge --ff-only <reviewed-deployment-sha> && npm start`. Push that exact compiled branch first, preserve `.env`, `data` and `.cache`, and let conflicts abort safely. After verifying the update, restore the startup command to `npm start`. Do not use destructive reset/clean commands or assume Redeploy fetches GitHub. Versions before the active-socket shutdown fix must have app chat clients disconnected before restarting.
 
 ## Mandatory live gates
 
@@ -49,7 +49,7 @@ For LiveKit, set `MEDIA_TRANSPORT=livekit`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, an
 Use the same deployment directory, Node 24, a persistent data directory owned by the service user, and one application process under systemd or a container. Terminate HTTPS at Caddy/Nginx and forward HTTP **and WebSocket upgrades** to port 3001. Keep that backend port private. The supplied Dockerfile uses the deployment bundle as its build context:
 
 ```sh
-docker build -f deployment/Dockerfile -t dorham artifacts/botkeep
+docker build -f deployment/Dockerfile -t dorham artifacts/server-0.2.0
 docker run --name dorham --restart unless-stopped -p 127.0.0.1:3001:3001 \
   --env-file /secure/dorham.env -v dorham-data:/data dorham
 ```

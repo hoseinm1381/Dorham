@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, protocol, net, session, desktopCapturer, dialog, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, protocol, net, session, desktopCapturer, dialog, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -40,7 +40,7 @@ app.whenReady().then(() => {
   ipcMain.handle('secret:set', (event, value) => { trusted(event); if (value && !safeStorage.isEncryptionAvailable()) throw new Error('Windows credential protection is unavailable'); saveSettings({ ...readSettings(), secret: value ? safeStorage.encryptString(value).toString('base64') : undefined }); });
   ipcMain.on('call:set', (event, value) => { trusted(event); inCall = value === true; if (tray) tray.setToolTip(inCall ? 'Dorham — in voice' : 'Dorham'); });
   win = new BrowserWindow({ width: 1370, height: 880, minWidth: 720, minHeight: 540, backgroundColor: '#101218', title: 'Dorham', icon: path.join(__dirname, 'icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } });
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.setWindowOpenHandler(({ url }) => { try { const target = new URL(url); if (target.protocol === 'https:' && !target.username && !target.password) void shell.openExternal(target.href); } catch { /* Invalid links stay closed. */ } return { action: 'deny' }; });
   win.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('dorham://app/')) event.preventDefault(); });
   win.on('close', event => { if (inCall && !quitting) { event.preventDefault(); win.hide(); } else { quitting = true; app.quit(); } });
   win.loadURL('dorham://app/index.html');

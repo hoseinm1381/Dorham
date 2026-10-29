@@ -9,8 +9,11 @@ export function config(overrides: Partial<{
   retentionDays: number; maxMessages: number; maxDatabaseMiB: number; maxAvatarsMiB: number;
   stunUrls: string[]; turnUrls: string[]; turnUsername: string; turnPassword: string; turnSecret: string;
   cloudflareTurnKeyId: string; cloudflareTurnApiToken: string;
-  mediaTransport: 'mesh' | 'livekit'; livekitUrl: string; livekitKey: string; livekitSecret: string;
+  mediaTransport: 'mesh' | 'livekit'; livekitUrl: string; livekitApiUrl: string; livekitKey: string; livekitSecret: string;
   screenMaxBitrate: number; screenMaxFrameRate: number;
+  guestsEnabled: boolean; maxGuests: number; attachmentDir: string; attachmentBudgetMiB: number; uploadReserveMiB: number; uploadConcurrency: number;
+  uploadSoftMiB: number; uploadHardMiB: number; uploadSmallMiB: number;
+  mediaAdmissionSecret: string;
 }> = {}) {
   const num = (key: string, fallback: number, allowZero = false) => { const n = Number(process.env[key] || fallback); if (!Number.isSafeInteger(n) || n < (allowZero ? 0 : 1)) throw new Error(`Invalid ${key}`); return n; };
   const list = (key: string, fallback = '') => (process.env[key] ?? fallback).split(',').map(s => s.trim()).filter(Boolean);
@@ -26,18 +29,28 @@ export function config(overrides: Partial<{
     roomShares: num('MAX_ROOM_SHARES', 0, true), globalShares: num('MAX_GLOBAL_SHARES', 0, true),
     retentionDays: num('MESSAGE_RETENTION_DAYS', 90), maxMessages: num('MAX_MESSAGES', 50000),
     maxDatabaseMiB: num('MAX_DATABASE_MIB', 256), maxAvatarsMiB: num('MAX_AVATARS_MIB', 16),
-    stunUrls: list('STUN_URLS', 'stun:stun.l.google.com:19302'), turnUrls: list('TURN_URLS'),
+    stunUrls: list('STUN_URLS'), turnUrls: list('TURN_URLS'),
     turnUsername: process.env.TURN_USERNAME || '', turnPassword: process.env.TURN_PASSWORD || '', turnSecret: process.env.TURN_SECRET || '',
     cloudflareTurnKeyId: process.env.CLOUDFLARE_TURN_KEY_ID || '', cloudflareTurnApiToken: process.env.CLOUDFLARE_TURN_API_TOKEN || '',
     mediaTransport: (process.env.MEDIA_TRANSPORT === 'livekit' ? 'livekit' : 'mesh') as 'mesh' | 'livekit',
     screenMaxBitrate: num('SCREEN_MAX_BITRATE', 2500000), screenMaxFrameRate: num('SCREEN_MAX_FRAME_RATE', 30),
+    guestsEnabled: process.env.GUESTS_ENABLED !== 'false', maxGuests: num('MAX_GUESTS', 100),
+    attachmentDir: path.resolve(process.env.ATTACHMENT_DIR || path.join(process.env.DATA_DIR || './data', 'attachments')),
+    attachmentBudgetMiB: num('ATTACHMENT_BUDGET_MIB', 2048), uploadReserveMiB: num('UPLOAD_FREE_RESERVE_MIB', 2048), uploadConcurrency: num('UPLOAD_CONCURRENCY', 2),
+    uploadSoftMiB: num('UPLOAD_DAILY_SOFT_MIB', 512), uploadHardMiB: num('UPLOAD_DAILY_HARD_MIB', 1024), uploadSmallMiB: num('UPLOAD_SMALL_FILE_MIB', 2),
     livekitUrl: process.env.LIVEKIT_URL || '', livekitKey: process.env.LIVEKIT_API_KEY || '', livekitSecret: process.env.LIVEKIT_API_SECRET || '',
+    livekitApiUrl: process.env.LIVEKIT_API_URL || '',
+    mediaAdmissionSecret: process.env.MEDIA_ADMISSION_SECRET || '',
     ...overrides
   };
   if (Boolean(c.cloudflareTurnKeyId) !== Boolean(c.cloudflareTurnApiToken)) throw new Error('Both Cloudflare TURN key ID and API token are required');
   if (c.cloudflareTurnKeyId && (!/^[a-zA-Z0-9_-]{1,128}$/.test(c.cloudflareTurnKeyId) || c.turnUrls.length)) throw new Error('Use one TURN provider and a valid Cloudflare TURN key ID');
   if (c.mediaTransport === 'livekit' && (!c.livekitUrl || !c.livekitKey || !c.livekitSecret)) throw new Error('LiveKit credentials required');
   if (c.screenMaxBitrate < 64000 || c.screenMaxBitrate > 10000000 || c.screenMaxFrameRate > 30) throw new Error('Invalid screen publishing policy');
+  if (!process.env.ATTACHMENT_DIR && overrides.dataDir && !overrides.attachmentDir) c.attachmentDir = path.join(c.dataDir, 'attachments');
+  if (c.attachmentDir === c.dataDir || c.attachmentDir === path.parse(c.attachmentDir).root) throw new Error('ATTACHMENT_DIR must be a dedicated attachment directory.');
+  if (c.uploadHardMiB < c.uploadSoftMiB || c.uploadSmallMiB > 100) throw new Error('Invalid shared upload policy.');
+  if (c.mediaAdmissionSecret && c.mediaAdmissionSecret.length < 32) throw new Error('MEDIA_ADMISSION_SECRET must contain at least 32 characters.');
   if (c.production && !c.publicUrl.startsWith('https://')) throw new Error('Production PUBLIC_URL must use HTTPS');
   return c;
 }

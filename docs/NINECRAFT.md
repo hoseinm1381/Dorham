@@ -4,6 +4,8 @@ The operator authorized one month at **348,000 toman**, with reduced screen bitr
 
 Pilot website: **https://dorham.45-135-242-146.nip.io/**. SFU signaling uses `voice.45-135-242-146.nip.io`; integrated TURN/TLS uses `turn.45-135-242-146.nip.io:443`. These temporary hostnames depend on external authoritative DNS. A domestic-only outage has not been tested; an Iranian host alone does not certify that condition. Replace the temporary names with operator-owned domestic DNS before making that availability claim. HTTPS certificates currently expire 27 January 2027 and have a renewal timer and HAProxy reload hook.
 
+The v0.2 update is deployed with existing accounts retained; see [upgrade capability matrix and new operational gates](UPGRADE-STATUS.md). The private signaling proxy now enforces current admission before every `/rtc` connection, and the backend uses LiveKit's loopback control API. Reset tooling is available but has not been executed on live data.
+
 ## Services and networking
 
 - Node 24.22.1 under `dorham.service`: `/opt/dorham`, environment `/etc/dorham/pilot.env`, data `/var/lib/dorham`. The API binds only `127.0.0.1:3001`; one process owns SQLite. Systemd uses the direct Node executable, graceful shutdown, automatic failure restart and a 640 MiB hard memory limit.

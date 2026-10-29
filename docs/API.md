@@ -59,3 +59,29 @@ Handshake auth is `{ csrf }` with the web cookie, or `{ token }` for native clie
 Server events: `conversation:event`, `state:changed`, `presence`, `typing`, `voice:room`, `voice:signal`, `voice:removed`, and `capacity`. Conversation events carry conversationId, sequence, kind, and payload. Clients discard duplicates and request replay on gaps. A successful replay may need multiple pages; reset means load a fresh authorized snapshot.
 
 Permission defaults and types are defined in `packages/contracts`. Channel overrides apply to role defaults; server owners retain all rights. Managing a member requires a strictly higher role. Channel access requires both view and the requested capability. DM history and events are limited to its two members.
+
+## Expansion routes (v0.2, same `/api/v1` version)
+
+All unsafe JSON requests carry `requestId`; cookie requests also require allowed Origin and CSRF proof. Binary content uses its previously authorized reservation ID.
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| POST | `/auth/guest` | displayName, invite code, optional language; shared account cap |
+| POST | `/auth/upgrade` | convert the existing guest ID using registration fields |
+| POST | `/auth/renew` | rotate/extend a web session, CSRF required |
+| GET / POST | `/auth/sessions`, `/auth/sessions/revoke` | own device list; revoke sessionId or all |
+| GET / POST | `/auth/recovery`, `/auth/recovery-codes`, `/auth/recovery-question` | settings, one-time code issuance, optional supporting question |
+| POST | `/auth/recover` | username, code, password; no question-only recovery |
+| GET | `/admin/users`, `/admin/audit` | global administrator only |
+| POST | `/admin/users/:id` | ban/unban/revoke/resetPassword; hierarchy/audit |
+| GET | `/channels/:id` | authorized internal link resolution |
+| POST / PATCH | `/servers/:id/tags`, `/voice/:id/policy` | scoped tags and ANY/ALL gates, lock and limit |
+| POST | `/voice/:id/moderate`, `/voice/:id/move` | persistent mute/deafen/sharing restriction, kick/stopShare, room move |
+| POST | `/attachments` | conversationId, name, size; reserve rolling quota atomically |
+| POST | `/attachments/:id/content` | raw octet stream, exact reserved byte count |
+| DELETE | `/attachments/:id` | cancel an unpublished reservation; quota not refunded |
+| GET | `/attachments/:id/download`, `/uploads/usage` | authorized forced download; rolling usage |
+
+Message mutations may include `attachmentIds`; files must be ready, owned by the sender, in the same conversation, and not previously attached. Message/event views include metadata and availability, never direct public filesystem paths.
+
+`voice:move` asks the target media adapter to leave and join the authorized destination. `voice:changed` refreshes server deafening, restrictions and share state. Session invalidation disconnects sockets. The private `/internal/media/admission` endpoint is available only to the trusted signaling proxy; block `/internal/*` at every public origin. Its credentials must never be sent to a client.

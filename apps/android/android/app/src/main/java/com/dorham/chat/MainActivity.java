@@ -5,6 +5,7 @@ public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle state) {
         registerPlugin(DorhamMediaPlugin.class);
         registerPlugin(DorhamSecretsPlugin.class);
+        registerPlugin(DorhamFilesPlugin.class);
         super.onCreate(state);
     }
 }

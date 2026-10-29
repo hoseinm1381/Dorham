@@ -4,6 +4,8 @@ A small Discord-style application for a community of up to 100 accounts and 20 o
 
 The Iranian SFU pilot is running at **https://dorham.45-135-242-146.nip.io/**. Its Windows pilot installer defaults to this address; saved custom server addresses remain available. Public API/socket checks, decoded SFU audio/video in Chrome and installed Windows, and separately forced local TURN/TLS pass with synthetic sources. The older Botkeep instance and its production data remain separate. See [pilot operations, packages and limitations](docs/NINECRAFT.md) and [verification status](docs/STATUS.md). Physical calls, domestic-only outage behavior and Android device tests remain open.
 
+The v0.2 expansion adds invited guests, recovery codes, device sessions, safe links, expiring file attachments, Persian/RTL, tags and voice moderation. The reset tool is offline and explicit; upgrades preserve accounts. See [upgrade verification](docs/UPGRADE-STATUS.md), [account operations](docs/ACCOUNT-RESET.md), [upload policy](docs/ATTACHMENTS.md) and [domestic infrastructure](docs/DOMESTIC.md).
+
 ## Run locally
 
 Requires patched Node.js 24 LTS (24.22.1 or newer within 24.x), npm, and Windows for Windows packaging. Python 3 is used only to create the deployment ZIP. Java 21 and Android SDK 36 are needed only for APK builds.
@@ -26,7 +28,7 @@ For development, `npm run dev` starts the API on port 3001 and Vite on 5173. Set
 - Profiles, avatars, persistent login, presence, server ownership, role hierarchy, invitations, channel permissions, and moderation controls.
 - Channel chat and private DMs with history, edits, tombstones, replies, reactions, typing, unread cursors, request deduplication, and durable reconnect replay.
 - Direct Opus voice, microphone/deafen controls, speaking indicators, per-participant volume, local mute, screen subscriptions, and connection diagnostics.
-- Transactional limits: 16 voice members per room, 20 online users and 100 registered accounts by default. Fixed room/global screen publisher caps default to disabled (`MAX_ROOM_SHARES=0`, `MAX_GLOBAL_SHARES=0`); one publication per account and expiring leases remain enforced. Existing deployments must update those environment values to remove their old caps.
+- Transactional limits: 16 voice members per room, 20 online users and 100 identities (guests plus registered accounts) by default. Fixed room/global screen publisher caps default to disabled (`MAX_ROOM_SHARES=0`, `MAX_GLOBAL_SHARES=0`); one publication per account and expiring leases remain enforced. Existing deployments must update those environment values to remove their old caps.
 - A separate external LiveKit transport, native Android media bridge, protected native credential storage, and Windows tray/capture integration.
 
 Direct media needs working peer connectivity. Configure TURN for restrictive networks. Mesh moderation controls the official clients and signaling; it cannot stop modified clients from independently exchanging media. An external SFU provides the stronger enforcement path. See [media architecture](docs/ARCHITECTURE.md).
