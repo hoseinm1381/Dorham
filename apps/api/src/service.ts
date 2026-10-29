@@ -67,7 +67,7 @@ export class Service {
         const read = await tx.one('SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?', [conversationId, userId]);
         unread[conversationId] = { sequence: Number(cv?.sequence || 0), readSequence: Number(read?.sequence || 0) };
       }
-      return { me: publicUser(me!), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map(d => ({ id: d.conversation_id, user: publicUser(d) })), users: (await tx.all('SELECT * FROM users ORDER BY username LIMIT 100')).map(publicUser), unread, mediaTransport: this.c.mediaTransport, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
+      return { me: publicUser(me!), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map(d => ({ id: d.conversation_id, user: publicUser(d) })), users: (await tx.all('SELECT * FROM users ORDER BY username LIMIT 100')).map(publicUser), unread, mediaTransport: this.c.mediaTransport, screenPolicy: { maxBitrate: this.c.screenMaxBitrate, maxFrameRate: this.c.screenMaxFrameRate }, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
     });
   }
   async createServer(userId: string, requestId: string, name: string) {
@@ -332,7 +332,7 @@ export class Service {
       const old = await tx.one('SELECT * FROM share_leases WHERE user_id=?', [userId]);
       if (old) return { lease: { id: old.id, channelId: old.channel_id, userId, expiresAt: Number(old.expires_at) } };
       const global = await tx.one('SELECT COUNT(*) AS count FROM share_leases'), room = await tx.one('SELECT COUNT(*) AS count FROM share_leases WHERE channel_id=?', [vm!.channel_id]);
-      if (global!.count >= this.c.globalShares || room!.count >= this.c.roomShares) fail(409, 'SHARE_LIMIT', 'Screen-sharing capacity is full.');
+      if ((this.c.globalShares > 0 && global!.count >= this.c.globalShares) || (this.c.roomShares > 0 && room!.count >= this.c.roomShares)) fail(409, 'SHARE_LIMIT', 'Screen-sharing capacity is full.');
       const lease = { id: randomUUID(), channelId: vm!.channel_id, userId, expiresAt: Date.now() + 30000 };
       await tx.run('INSERT INTO share_leases(id,user_id,channel_id,expires_at) VALUES(?,?,?,?)', [lease.id, userId, lease.channelId, lease.expiresAt]); return { lease };
     }); await this.notify('voice:changed', {}); return result;

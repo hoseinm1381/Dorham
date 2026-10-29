@@ -72,6 +72,54 @@ test('actual WebRTC decodes audio/video, applies volume and mute, unsubscribes a
 });
 
 
+test('quiet decoded audio lights the avatar independently of volume and shared screens take priority', async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ['microphone'], viewport: { width: 1440, height: 900 } }), b = await browser.newContext({ permissions: ['microphone'], viewport: { width: 1440, height: 900 } });
+  const page = await a.newPage(), other = await b.newPage(), suffix = Date.now().toString().slice(-7);
+  try {
+    await instrument(page); await instrument(other);
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = async () => {
+        const context = new AudioContext(); await context.resume();
+        const oscillator = context.createOscillator(), gain = context.createGain(), output = context.createMediaStreamDestination();
+        oscillator.frequency.value = 440; gain.gain.value = 0.02;
+        oscillator.connect(gain).connect(output); oscillator.start();
+        (window as any).__quietTone = gain;
+        output.stream.getAudioTracks()[0].addEventListener('ended', () => { oscillator.stop(); void context.close(); });
+        return output.stream;
+      };
+    });
+    await register(page, `QuietA${suffix}`); await register(other, `QuietB${suffix}`);
+    const server = await api(page, '/servers', { name: 'Speaking and screens' }), invite = await api(page, `/servers/${server.id}/invites`, {});
+    await api(other, '/invites/join', { code: invite.code });
+    for (const p of [page, other]) { await p.getByRole('button', { name: 'Open Speaking and screens', exact: true }).click(); await p.getByRole('button', { name: 'Lounge', exact: true }).click(); }
+    const speaker = other.locator('.voice-card').filter({ hasText: `QuietA${suffix}` });
+    await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'audio' && r.totalAudioEnergy > 0), { timeout: 30000 }).toBe(true);
+    await expect(speaker).toHaveClass(/speaking/);
+    await expect(speaker.locator('.avatar')).toHaveCSS('outline-color', 'rgb(131, 218, 186)');
+    await other.getByRole('slider').fill('10'); await expect(speaker).toHaveClass(/speaking/);
+    await page.evaluate(() => { (window as any).__quietTone.gain.value = 0; });
+    await expect(speaker).not.toHaveClass(/speaking/);
+    await page.evaluate(() => { (window as any).__quietTone.gain.value = 0.02; }); await expect(speaker).toHaveClass(/speaking/);
+    await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect(speaker).not.toHaveClass(/speaking/);
+    await page.getByRole('button', { name: 'Unmute microphone', exact: true }).click(); await expect(speaker).toHaveClass(/speaking/);
+    await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+    await expect(other.locator('main')).toHaveClass(/screen-focused/); await expect(other.locator('.screen video')).toBeVisible();
+    await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'video' && r.framesDecoded > 5)).toBe(true);
+    await expect(other.locator('.screen-status')).toHaveCount(0);
+    const video = await other.locator('.screen video').boundingBox(), chat = await other.locator('.message-scroll').boundingBox();
+    expect(video!.height).toBeGreaterThan(chat!.height * 1.5);
+    await mkdir('artifacts/evidence', { recursive: true }); await other.screenshot({ path: 'artifacts/evidence/speaking-screen-focus.png' });
+    await other.getByRole('button', { name: 'Show more chat', exact: true }).click(); await expect(other.locator('main')).not.toHaveClass(/screen-focused/);
+    await other.reload(); await other.getByRole('button', { name: 'Open Speaking and screens', exact: true }).click(); await other.getByRole('button', { name: 'Lounge', exact: true }).click();
+    await expect(other.locator('.screen video')).toBeVisible(); await expect(other.locator('main')).not.toHaveClass(/screen-focused/);
+    await other.getByRole('button', { name: 'Enlarge screens', exact: true }).click(); await expect(other.locator('main')).toHaveClass(/screen-focused/);
+    await other.setViewportSize({ width: 390, height: 844 }); await expect(other.locator('.screen video')).toBeVisible();
+    const mobileVideo = await other.locator('.screen video').boundingBox(), mobileChat = await other.locator('.message-scroll').boundingBox(); expect(mobileVideo!.height).toBeGreaterThan(mobileChat!.height);
+    await other.screenshot({ path: 'artifacts/evidence/screen-focus-mobile.png' });
+    await page.getByRole('button', { name: 'Stop sharing', exact: true }).click(); await expect(other.locator('main')).not.toHaveClass(/screen-focused/);
+  } finally { await a.close(); await b.close(); }
+});
+
 test('blocked ICE reports missing media and waiting video instead of a successful call', async ({ browser }) => {
   const a = await browser.newContext({ permissions: ['microphone'] }), b = await browser.newContext({ permissions: ['microphone'] }), page = await a.newPage(), other = await b.newPage();
   await instrument(page, true); await instrument(other, true); const suffix = Date.now().toString().slice(-7);

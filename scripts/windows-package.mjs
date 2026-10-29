@@ -4,6 +4,7 @@ import path from 'node:path';
 if (process.platform !== 'win32') throw new Error('Build the Windows installer on Windows.');
 const env = { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY || 'false' };
 const args = ['node_modules/electron-builder/cli.js', '--config', 'apps/desktop/electron-builder.yml', '--win', 'nsis', '--x64'];
+if (process.env.DORHAM_PACKAGE_OUTPUT) args.push(`--config.directories.output=${path.resolve(process.env.DORHAM_PACKAGE_OUTPUT)}`);
 if (existsSync('.tools/electron/electron.exe')) args.push(`--config.electronDist=${path.resolve('.tools/electron')}`);
 if (existsSync('.tools/nsis/nsis-bundle/makensis.cmd')) {
   env.ELECTRON_BUILDER_NSIS_DIR = path.resolve('.tools/nsis/nsis-bundle');

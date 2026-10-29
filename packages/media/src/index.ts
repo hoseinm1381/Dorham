@@ -5,7 +5,8 @@ export { defaultAudioProcessing } from './audio-processing';
 export type { AudioProcessing, AudioProcessingState };
 export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream };
 export type MediaEvents = { room: VoiceRoom | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };
-export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
+export type ScreenPolicy = { maxBitrate: number; maxFrameRate: number };
+export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; screenPolicy?: ScreenPolicy; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
 export type MediaCapabilities = { audio: boolean; screenCapture: boolean; nativeVideo: boolean; amplification: boolean };
 export interface MediaTransport {
   room: VoiceRoom | null;

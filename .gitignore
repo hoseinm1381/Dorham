@@ -22,3 +22,4 @@ apps/android/android/**/build/
 *.keystore
 *.apk
 *.aab
+__pycache__/

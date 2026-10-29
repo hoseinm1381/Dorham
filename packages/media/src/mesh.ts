@@ -1,7 +1,8 @@
 import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
 import { ack, type MediaTransport, type MediaOptions } from './index';
 import { defaultAudioProcessing, browserAudioProcessing, type AudioProcessing } from './audio-processing';
-type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaElementAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number; connectionTimer?: ReturnType<typeof setTimeout>; timedOut: boolean; iceErrors: number[] };
+import { AudioActivityMeter } from './audio-activity';
+type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaElementAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode; meterSource: MediaStreamAudioSourceNode; meter: AudioActivityMeter }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number; connectionTimer?: ReturnType<typeof setTimeout>; timedOut: boolean; iceErrors: number[] };
 export class MeshTransport implements MediaTransport {
   room: VoiceRoom | null = null;
   getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true }; }
@@ -16,6 +17,7 @@ export class MeshTransport implements MediaTransport {
   private hiddenShares = new Set<string>();
   private screenTarget = { bitrate: 1200000, fps: 15 };
   private micAnalyser: AnalyserNode | null = null; private micSource: MediaStreamAudioSourceNode | null = null;
+  private micMeter: AudioActivityMeter | null = null;
   private onRoom = (room: VoiceRoom) => { void this.updateRoom(room).catch(e => this.error(e)); };
   private onSignal = (signal: Signal) => { this.signalQueue = this.signalQueue.then(() => this.receive(signal)).catch(e => this.error(e)); };
   private onRemoved = () => { void this.leave(); this.options.emit('error', 'You were disconnected from the voice channel.'); };
@@ -39,9 +41,11 @@ export class MeshTransport implements MediaTransport {
       this.heartbeat = setInterval(() => { if (this.options.socket.connected && this.room) void ack(this.options.socket, 'voice:heartbeat', { eligible: this.peers.size === 0 || [...this.peers.values()].some(p => p.pc.connectionState === 'connected') }).catch(e => this.error(e)); }, 5000);
       this.attachMicMeter();
       this.meter = setInterval(() => {
-        const amplitude = (a: AnalyserNode) => { const b = new Float32Array(a.fftSize); a.getFloatTimeDomainData(b); return Math.sqrt(b.reduce((sum, x) => sum + x * x, 0) / b.length) > 0.018; };
-        this.options.emit('speaking', { userId: this.options.userId, speaking: Boolean(this.micAnalyser) && !this.muted && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted && amplitude(this.micAnalyser!) });
-        for (const [userId, p] of this.peers) if (p.audio) this.options.emit('speaking', { userId, speaking: p.audio.gain.gain.value > 0 && amplitude(p.audio.analyser) });
+        this.options.emit('speaking', { userId: this.options.userId, speaking: this.micMeter?.speaking(!this.muted && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted) ?? false });
+        for (const [userId, p] of this.peers) if (p.audio) {
+          const member = this.room?.members.find(m => m.user.id === userId);
+          this.options.emit('speaking', { userId, speaking: p.audio.meter.speaking(Boolean(member && !member.muted && !member.serverMuted && !member.deafened)) });
+        }
       }, 150);
     } catch (e) { await this.leave(); throw e; } finally { this.joining = false; }
   }
@@ -102,8 +106,10 @@ export class MeshTransport implements MediaTransport {
       if (!metadata) continue;
       if (metadata.kind === 'audio' && stream.getAudioTracks().length && !p.audio && this.context) {
         const element = document.createElement('audio'); element.autoplay = true; element.srcObject = stream; element.style.display = 'none'; document.body.appendChild(element);
-        const source = this.context.createMediaElementSource(element), gain = this.context.createGain(), analyser = this.context.createAnalyser(); analyser.fftSize = 512;
-        source.connect(gain).connect(analyser).connect(this.context.destination); p.audio = { source, element, gain, analyser }; this.applyVolume(userId);
+        const source = this.context.createMediaElementSource(element), gain = this.context.createGain(), analyser = this.context.createAnalyser();
+        const meterSource = this.context.createMediaStreamSource(stream), meter = new AudioActivityMeter(analyser);
+        meterSource.connect(analyser); source.connect(gain).connect(this.context.destination);
+        p.audio = { source, element, gain, analyser, meterSource, meter }; this.applyVolume(userId);
         void element.play().catch(() => this.error(new Error('Audio playback was blocked. Rejoin voice to enable audio.')));
       }
       if (metadata.kind === 'screen' && metadata.leaseId && !this.hiddenShares.has(metadata.leaseId) && this.room?.shares.some(s => s.id === metadata.leaseId && s.userId === userId)) this.options.emit('screen', { userId, leaseId: metadata.leaseId, stream });
@@ -150,8 +156,8 @@ export class MeshTransport implements MediaTransport {
     const member = this.room?.members.find(m => m.user.id === userId);
     p.audio.gain.gain.value = this.deafened || member?.serverMuted || member?.muted || member?.deafened ? 0 : (this.volumes.get(userId) ?? 1);
   }
-  private attachMicMeter() { this.micSource?.disconnect(); if (!this.context || !this.mic) return; this.micSource = this.context.createMediaStreamSource(this.mic); this.micAnalyser = this.context.createAnalyser(); this.micAnalyser.fftSize = 512; this.micSource.connect(this.micAnalyser); }
-  private removePeer(userId: string) { const p = this.peers.get(userId); if (p) { clearTimeout(p.connectionTimer); p.pc.onconnectionstatechange = null; p.pc.onicecandidateerror = null; p.pc.onnegotiationneeded = null; p.pc.onicecandidate = null; p.pc.close(); p.audio?.source.disconnect(); p.audio?.gain.disconnect(); if (p.audio) { p.audio.element.pause(); p.audio.element.srcObject = null; p.audio.element.remove(); } for (const s of p.streams) if (s.leaseId) this.options.emit('screenRemoved', s.leaseId); this.peers.delete(userId); } }
+  private attachMicMeter() { this.micSource?.disconnect(); if (!this.context || !this.mic) return; this.micSource = this.context.createMediaStreamSource(this.mic); this.micAnalyser = this.context.createAnalyser(); this.micAnalyser.fftSize = 512; this.micSource.connect(this.micAnalyser); this.micMeter = new AudioActivityMeter(this.micAnalyser); }
+  private removePeer(userId: string) { const p = this.peers.get(userId); if (p) { clearTimeout(p.connectionTimer); p.pc.onconnectionstatechange = null; p.pc.onicecandidateerror = null; p.pc.onnegotiationneeded = null; p.pc.onicecandidate = null; p.pc.close(); p.audio?.source.disconnect(); p.audio?.gain.disconnect(); p.audio?.meterSource.disconnect(); p.audio?.analyser.disconnect(); this.options.emit('speaking', { userId, speaking: false }); if (p.audio) { p.audio.element.pause(); p.audio.element.srcObject = null; p.audio.element.remove(); } for (const s of p.streams) if (s.leaseId) this.options.emit('screenRemoved', s.leaseId); this.peers.delete(userId); } }
   private async publishState() { if (this.room) await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); }
   async setMuted(value: boolean) { this.muted = value; for (const t of this.mic?.getAudioTracks() || []) t.enabled = !value && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted; await this.publishState(); }
   async setDeafened(value: boolean) { this.deafened = value; await this.setMuted(this.muted); for (const userId of this.peers.keys()) this.applyVolume(userId); }
@@ -169,8 +175,8 @@ export class MeshTransport implements MediaTransport {
   async startShare(quality: '720p15' | '720p30' | '1080p30' = '720p15') {
     if (!this.channelId) throw new Error('Join a voice channel first.');
     if (this.screen) return;
-    this.screenTarget = { bitrate: quality === '1080p30' ? 2500000 : 1200000, fps: quality === '720p15' ? 15 : 30 };
-    const constraints = { width: { ideal: quality === '1080p30' ? 1920 : 1280 }, height: { ideal: quality === '1080p30' ? 1080 : 720 }, frameRate: { ideal: quality === '720p15' ? 15 : 30, max: 30 } };
+    this.screenTarget = { bitrate: Math.min(quality === '1080p30' ? 2500000 : 1200000, this.options.screenPolicy?.maxBitrate ?? 2500000), fps: Math.min(quality === '720p15' ? 15 : 30, this.options.screenPolicy?.maxFrameRate ?? 30) };
+    const constraints = { width: { ideal: quality === '1080p30' ? 1920 : 1280 }, height: { ideal: quality === '1080p30' ? 1080 : 720 }, frameRate: { ideal: this.screenTarget.fps, max: this.screenTarget.fps } };
     const screen = await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: false });
     try {
       const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID() }); this.lease = result.lease; this.screen = screen;
@@ -178,7 +184,7 @@ export class MeshTransport implements MediaTransport {
       for (const [userId, p] of this.peers) {
         p.screenSubscribed = true;
         if (p.screenSender) { p.screenSender.setStreams(screen); await p.screenSender.replaceTrack(screen.getVideoTracks()[0]); } else p.screenSender = p.pc.addTrack(screen.getVideoTracks()[0], screen);
-        const parameters = p.screenSender.getParameters(); if (!parameters.encodings?.length) parameters.encodings = [{}]; parameters.encodings[0].maxBitrate = quality === '1080p30' ? 2500000 : 1200000; parameters.encodings[0].maxFramerate = quality === '720p15' ? 15 : 30;
+        const parameters = p.screenSender.getParameters(); if (!parameters.encodings?.length) parameters.encodings = [{}]; parameters.encodings[0].maxBitrate = this.screenTarget.bitrate; parameters.encodings[0].maxFramerate = this.screenTarget.fps;
         await p.screenSender.setParameters(parameters).catch(() => {}); await this.signal(userId, {});
       }
     } catch (e) { screen.getTracks().forEach(t => t.stop()); await this.stopShare(); throw e; }
@@ -211,7 +217,7 @@ export class MeshTransport implements MediaTransport {
   async leave() {
     const previous = this.channelId; this.channelId = null; clearInterval(this.heartbeat); clearInterval(this.meter);
     await this.stopShare(); for (const userId of [...this.peers.keys()]) this.removePeer(userId);
-    this.mic?.getTracks().forEach(t => t.stop()); this.mic = null; this.micSource?.disconnect(); this.micSource = null; this.micAnalyser = null; await this.context?.close().catch(() => {}); this.context = null; this.room = null; this.epoch = '';
+    this.mic?.getTracks().forEach(t => t.stop()); this.mic = null; this.micSource?.disconnect(); this.micSource = null; this.micAnalyser = null; this.micMeter = null; await this.context?.close().catch(() => {}); this.context = null; this.room = null; this.epoch = '';
     if (previous && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {});
     this.options.emit('room', null); this.options.emit('status', '');
   }

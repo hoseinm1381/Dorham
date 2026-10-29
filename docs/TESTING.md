@@ -14,7 +14,19 @@ Use `node scripts/browser-tests.mjs --grep 'microphone processing'` for the one-
 
 ## Evidence
 
-`artifacts/evidence/control-plane-load.json` records the measured Node version, actual message timings, RSS, CPU time, event-loop delay, disk files, and enforced capacity outcomes. That scenario uses 20 real Socket.IO clients, 16 primary-room voice memberships, and five screen leases, but does not generate media. It is not a one-vCPU container or Botkeep certification.
+`artifacts/evidence/control-plane-load.json` records the measured Node version, actual message timings, RSS, CPU time, event-loop delay, disk files, and enforced capacity outcomes. The current scenario uses 20 real Socket.IO clients, 16 primary-room voice memberships, and 20 screen leases with fixed publisher caps disabled, but does not generate media. It is not a one-vCPU container or hosted SFU certification.
+
+The [Ninecraft pilot](NINECRAFT.md) adds a separate guarded hosted SFU test:
+
+```powershell
+$env:DORHAM_SFU_BASE_URL='https://dorham.45-135-242-146.nip.io'
+node scripts/browser-tests.mjs --hosted-sfu
+# Optional separate relay-only run; also constrains SDK ICE reconfiguration.
+$env:DORHAM_SFU_TLS_ONLY='1'
+node scripts/browser-tests.mjs --hosted-sfu
+```
+
+Unset `DORHAM_SFU_TLS_ONLY` for ordinary connectivity. Set `DORHAM_RELAY_ELECTRON_EXE` to the installed pilot executable for the Windows/Chrome scenario; it uses an isolated profile and verifies the new default endpoint. Set `DORHAM_SFU_MODERATION=1` for owner mute/unmute, stream subscriptions, share termination and voice-kick checks on the test's own room. These runs create clearly named fixture accounts/rooms in the pilot, disable traces containing credentials, and remain under the same memory guard. Never target an unrelated production instance.
 
 `tests/browser/application.spec.ts` exercises actual browser accounts, server/channel chat, direct messages, edit/reaction propagation, unread state, and XSS-safe plain-text rendering. Its WebRTC scenario feeds synthetic microphone and canvas screen inputs into the actual product implementation and checks decoded audio samples and decoded video frames. It also exercises volume controls, mute, individual stream unsubscribe/resubscribe, two simultaneous publishers, and coordinator migration. Synthetic devices do not prove physical microphone quality, monitor capture permissions, cross-network NAT traversal, or native mobile behavior.
 

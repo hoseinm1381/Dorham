@@ -6,13 +6,13 @@ Measured on Windows x64 with patched Node 24.22.1, one backend process, real SQL
 | --- | --- |
 | Connected accounts | 20; account 21 denied |
 | Primary voice-room membership | 16; participant 17 denied |
-| Screen leases in three rooms | 2 + 2 + 1; sixth publisher denied |
+| Screen leases in three rooms | 16 + 2 + 2; fixed caps disabled; duplicate publication prevented |
 | Messages | 200, sent by 20 concurrent sockets |
-| Message acknowledgement | p50 77.23 ms; p95 93.08 ms; max 93.95 ms |
-| Process memory | peak 325.88 MiB; final 303.12 MiB |
-| CPU during measurement | 2297 ms; mean 77.22% of one core over 2.97 seconds |
-| Event-loop delay | p95 69.40 ms |
-| Database and WAL files | 4,673,261 bytes |
+| Message acknowledgement | p50 92.52 ms; p95 110.49 ms; max 111.03 ms |
+| Process memory | peak 348.86 MiB; final 348.80 MiB |
+| CPU during measurement | 3578 ms; mean 82.75% of one core over 4.32 seconds |
+| Event-loop delay | p95 82.51 ms |
+| Database and WAL files | 4,665,045 bytes |
 
 The short control-plane sample passes the initial 384 MiB RSS and 500 ms p95 goals. It does not establish long-duration steady state, a 640 MiB peak under every operation, native client memory use, or server media throughput. Mesh media travels between clients; the capacity scenario above reserves memberships and leases without generating media. See `artifacts/evidence/control-plane-load.json` for exact measurements.
 
@@ -20,7 +20,11 @@ The separate browser suite uses two actual Chrome contexts with synthetic microp
 
 The browser memory guard records every sample in `artifacts/evidence/browser-memory.json`. In the completed run, combined Chrome/Edge usage peaked at 3211.3 MiB, including unrelated existing tabs, and task-owned browser usage peaked at 1835.3 MiB. No unrelated browser process was closed. The revised budget is 4096 MiB with an early stop at 3500 MiB combined usage.
 
-Before a capacity claim, run the opt-in 16-person media test on a machine with an explicitly approved memory budget or distribute clients across machines. Record elapsed sustained workload, aggregate client CPU/RSS, per-peer bitrate and loss, speech intelligibility, two shared screens in one room and five globally, ICE restarts, and physical Android/cross-network results. Never substitute a successful signaling connection for decoded media.
+Latest control-plane measurement: 29 October 2026, 20 concurrent publisher leases. The previous five-lease measurement is preserved as `artifacts/evidence/control-plane-load-before-uncapped-20261029.json`. No media was generated in either load measurement.
+
+The initial quiet-audio/screen-layout browser regression passed at 1908.3 MiB combined browser usage. A later three-scenario run passed the existing decoded WebRTC test, then stopped at 3539.9 MiB combined usage (1711.3 MiB owned) before completing the remaining tests. Its report is `artifacts/evidence/browser-memory-guard-stop-20261029.json`. A stopped suite is not a pass; the early guard preserved the 4 GiB budget.
+
+Before a capacity claim, run the opt-in 16-person media test on a machine with an explicitly approved memory budget or distribute clients across machines. Record sustained workload, aggregate client CPU/RSS, bitrate and loss, speech intelligibility, the typical 1–2 screens, higher publisher counts with selective subscriptions, ICE restarts, and physical Android/cross-network results. The updated opt-in six-publisher browser scenario remains unrun. Never substitute a successful signaling connection for decoded media.
 
 ## External relay functional measurements
 

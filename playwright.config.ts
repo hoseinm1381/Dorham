@@ -1,3 +1,3 @@
 import { defineConfig } from '@playwright/test';
-const hostedRelay = process.env.DORHAM_RELAY_TEST === '1' && process.env.DORHAM_RELAY_BASE_URL;
+const hostedRelay = process.env.DORHAM_SFU_BASE_URL || (process.env.DORHAM_RELAY_TEST === '1' && process.env.DORHAM_RELAY_BASE_URL);
 export default defineConfig({ testDir: './tests/browser', fullyParallel: false, workers: 1, timeout: 90000, expect: { timeout: 15000 }, reporter: [['list'], ['html', { open: 'never' }]], use: { baseURL: hostedRelay || 'http://127.0.0.1:3101', channel: 'chrome', headless: true, screenshot: 'only-on-failure', trace: 'retain-on-failure', launchOptions: { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] } }, webServer: hostedRelay ? undefined : { command: 'node node_modules/tsx/dist/cli.mjs tests/e2e-server.ts', url: 'http://127.0.0.1:3101/ready', reuseExistingServer: false, timeout: 30000 } });

@@ -1,6 +1,6 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
-test('20 browsers, 16 real mesh participants, five actual screen publishers and capacity rejection', async ({ browser }) => {
+test('20 browsers, 16 real mesh participants and six actual screen publishers without fixed caps', async ({ browser }) => {
   test.skip(process.env.DORHAM_LARGE_MEDIA_TEST !== '1', 'Explicit opt-in required; the default workflow stays within the user browser RAM budget.');
   test.setTimeout(240000);
   const base = 'http://127.0.0.1:3101', contexts: BrowserContext[] = [], pages: Page[] = [], credentials: { csrf: string; id: string }[] = [], suffix = Date.now().toString().slice(-6);
@@ -19,10 +19,9 @@ test('20 browsers, 16 real mesh participants, five actual screen publishers and 
     for (let i = 0; i < 20; i++) await pages[i].getByRole('button', { name: i < 16 ? 'Lounge' : i < 18 ? 'Studio' : 'Workshop', exact: true }).click();
     await expect(pages[0].locator('.voice-card')).toHaveCount(16);
     await expect.poll(async () => { const results = await Promise.all(pages.slice(0, 16).map(report)); return results.every(rows => rows.filter(r => r.kind === 'audio' && r.totalSamplesReceived > 0 && r.totalAudioEnergy > 0).length === 15); }, { timeout: 90000, intervals: [1000, 3000] }).toBe(true);
-    for (const i of [0, 1, 16, 17, 18]) await pages[i].getByRole('button', { name: 'Share screen', exact: true }).click();
-    await expect.poll(async () => { const results = await Promise.all([report(pages[2]), report(pages[16]), report(pages[19])]); return results[0].filter(r => r.kind === 'video' && r.framesDecoded > 0).length === 2 && results[1].some(r => r.kind === 'video' && r.framesDecoded > 0) && results[2].some(r => r.kind === 'video' && r.framesDecoded > 0); }, { timeout: 60000, intervals: [1000, 3000] }).toBe(true);
-    await pages[19].getByRole('button', { name: 'Share screen', exact: true }).click(); await expect(pages[19].getByRole('alert')).toContainText('capacity is full');
+    for (const i of [0, 1, 2, 16, 17, 18]) await pages[i].getByRole('button', { name: 'Share screen', exact: true }).click();
+    await expect.poll(async () => { const results = await Promise.all([report(pages[3]), report(pages[16]), report(pages[19])]); return results[0].filter(r => r.kind === 'video' && r.framesDecoded > 0).length === 3 && results[1].some(r => r.kind === 'video' && r.framesDecoded > 0) && results[2].some(r => r.kind === 'video' && r.framesDecoded > 0); }, { timeout: 60000, intervals: [1000, 3000] }).toBe(true);
     const results = await Promise.all(pages.map(report)); await mkdir('artifacts/evidence', { recursive: true });
-    await writeFile('artifacts/evidence/media-capacity.json', JSON.stringify({ measuredAt: new Date().toISOString(), scenario: '20 Chrome browser contexts, 16-person full audio mesh, five synthetic screen publishers over actual WebRTC in three rooms, sixth share rejected', platform: process.platform, results, limitations: 'Same-machine synthetic devices and LAN ICE, not cross-network or physical mobile validation.' }, null, 2)); await pages[2].screenshot({ path: 'artifacts/evidence/16-person-voice.png', fullPage: true });
+    await writeFile('artifacts/evidence/media-capacity.json', JSON.stringify({ measuredAt: new Date().toISOString(), scenario: '20 Chrome browser contexts, 16-person full audio mesh, six synthetic screen publishers over actual WebRTC in three rooms; fixed publisher caps disabled', platform: process.platform, results, limitations: 'Same-machine synthetic devices and LAN ICE, not cross-network or physical mobile validation.' }, null, 2)); await pages[3].screenshot({ path: 'artifacts/evidence/16-person-voice.png', fullPage: true });
   } finally { for (const c of contexts) await c.close(); }
 });

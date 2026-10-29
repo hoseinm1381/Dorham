@@ -6,7 +6,7 @@ import { defaultAudioProcessing, browserAudioProcessing, type AudioProcessing } 
 export class LiveKitTransport implements MediaTransport {
   getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true }; }
   async reconnect() { const channel = this.channelId; if (channel) { await this.leave(); await this.join(channel); } }
-  room: VoiceRoom | null = null; private media = new Room({ adaptiveStream: true, dynacast: true });
+  room: VoiceRoom | null = null; private media = new Room({ adaptiveStream: true, dynacast: true, publishDefaults: { audioPreset: { maxBitrate: 24000 }, dtx: true, forceStereo: false } });
   private heartbeat?: ReturnType<typeof setInterval>; private channelId: string | null = null; private muted = false; private deafened = false;
   private volumes = new Map<string, number>(); private elements = new Map<string, HTMLMediaElement>(); private lease: Share | null = null;
   private context: AudioContext | null = null; private audio = new Map<string, { source: MediaElementAudioSourceNode; gain: GainNode }>();
@@ -63,7 +63,9 @@ export class LiveKitTransport implements MediaTransport {
   }
   async startShare(quality: '720p15' | '720p30' | '1080p30' = '720p15') {
     const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID() }); this.lease = result.lease;
-    try { await this.media.localParticipant.setScreenShareEnabled(true, { audio: false, resolution: { width: quality === '1080p30' ? 1920 : 1280, height: quality === '1080p30' ? 1080 : 720, frameRate: quality === '720p15' ? 15 : 30 } }); } catch (e) { await this.stopShare(); throw e; }
+    const maxFramerate = Math.min(quality === '720p15' ? 15 : 30, this.options.screenPolicy?.maxFrameRate ?? 30);
+    const maxBitrate = Math.min(quality === '1080p30' ? 2500000 : 1200000, this.options.screenPolicy?.maxBitrate ?? 2500000);
+    try { await this.media.localParticipant.setScreenShareEnabled(true, { audio: false, resolution: { width: quality === '1080p30' ? 1920 : 1280, height: quality === '1080p30' ? 1080 : 720, frameRate: maxFramerate } }, { videoCodec: 'vp8', simulcast: false, screenShareEncoding: { maxBitrate, maxFramerate } }); } catch (e) { await this.stopShare(); throw e; }
   }
   async stopShare() { const lease = this.lease; this.lease = null; await this.media.localParticipant.setScreenShareEnabled(false); if (lease) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {}); }
   async subscribe(share: Share, enabled: boolean) { for (const p of this.media.remoteParticipants.values()) if (p.identity.split(':')[0] === share.userId) for (const publication of p.videoTrackPublications.values()) if (publication.source === Track.Source.ScreenShare) publication.setSubscribed(enabled); if (!enabled) this.options.emit('screenRemoved', share.id); }

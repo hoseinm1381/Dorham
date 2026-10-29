@@ -123,6 +123,26 @@ describe('messages and membership', () => {
   });
 });
 describe('real-time voice control', () => {
+  it('allows six concurrent publishers across rooms with fixed caps disabled, retaining lease ownership', async () => {
+    h = await harness({ roomShares: 0, globalShares: 0 });
+    const users = [];
+    for (let i = 0; i < 6; i++) users.push(await h.register(`publisher${i}`));
+    const server = (await h.api(users[0], '/servers', { name: 'Uncapped publishers' })).json();
+    const invite = (await h.api(users[0], `/servers/${server.id}/invites`, {})).json();
+    for (const user of users.slice(1)) await h.api(user, '/invites/join', { code: invite.code });
+    const first = (await h.api(users[0], '/bootstrap')).json().channels.find((c: any) => c.kind === 'voice');
+    const second = (await h.api(users[0], `/servers/${server.id}/channels`, { name: 'Second voice', kind: 'voice' })).json();
+    const sockets = [];
+    for (let i = 0; i < users.length; i++) { const socket = await h.connect(users[i]); sockets.push(socket); await event(socket, 'voice:join', { channelId: i < 3 ? first.id : second.id, eligible: true }); }
+    const publications = await Promise.all(sockets.map(socket => event(socket, 'share:start', { requestId: randomUUID() })));
+    expect(new Set(publications.map(p => p.lease.id)).size).toBe(6);
+    expect((await h.service.room(users[0].id, first.id)).shares).toHaveLength(3);
+    expect((await h.service.room(users[0].id, second.id)).shares).toHaveLength(3);
+    await event(sockets[0], 'share:start', { requestId: randomUUID() });
+    expect((await h.db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count).toBe(6);
+    await event(sockets[0], 'voice:leave', { requestId: randomUUID() });
+    expect((await h.db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count).toBe(5);
+  });
   it('shows authorized voice membership to observers before they join and hides private rooms', async () => {
     h = await harness(); const owner = await h.register('owner'), observer = await h.register('observer'), outsider = await h.register('outsider');
     const server = (await h.api(owner, '/servers', { name: 'Visible voice' })).json();

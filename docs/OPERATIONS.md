@@ -2,7 +2,7 @@
 
 ## Storage and retention
 
-Default limits: 100 users, 20 online users, 16 voice members per channel, two publishers per channel, five globally. Retention defaults to 90 days and 50,000 stored messages; reaching the message ceiling prunes a bounded batch of the oldest messages. Replay events retain seven days with a global 50,000-event ceiling; mutation receipts retain one day. Pruning runs in bounded maintenance transactions. Deletion leaves replayable tombstones until normal retention removes them.
+Default limits: 100 users, 20 online users and 16 voice members per channel. Fixed room/global publisher caps default to zero (disabled), retaining one publication per account and expiring leases. Existing installations must update old environment values to remove their caps. Retention defaults to 90 days and 50,000 stored messages; reaching the message ceiling prunes a bounded batch of the oldest messages. Replay events retain seven days with a global 50,000-event ceiling; mutation receipts retain one day. Pruning runs in bounded maintenance transactions. Deletion leaves replayable tombstones until normal retention removes them. The [Iranian pilot](NINECRAFT.md) also has incoming-traffic monitoring and reduced publishing settings.
 
 SQLite uses a 256 MiB page ceiling and a bounded WAL journal policy; avatars have a separate 16 MiB quota. Uploads are decoded with pixel limits and re-encoded to 128px WebP, at most 96 KiB each. No general file attachment storage exists. Logs go to stdout/stderr; configure provider log rotation/retention. Keep the production deployment plus data below 80% of the actual disk allocation and include temporary backup space in that calculation. SQLite disk-full errors return a storage-specific 507 response.
 
