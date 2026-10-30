@@ -1,6 +1,6 @@
-**Current release: 0.5.2** — members can create invite links by default, with an owner-only switch to disable it. Browser voice volume recovers suspended playback and verifies real 0–200% gain, including saved levels after rejoin/reload. The pilot and Windows installer are updated. All 87 unit/API tests and production builds pass. See [release verification and limitations](docs/RELEASE-0.5.2.md). The earlier failed ten-user media capacity gate remains unresolved.
+**Current release: 0.5.3** — adjust your outgoing microphone gain from 50% to 250% in **Account settings → Audio**. The setting applies live and survives rejoin/reload. Chrome, SFU relay and installed Windows checks verify the audio received by another user; all 89 unit/API tests and seven core browser scenarios pass. The website and Windows installer are updated. See [release verification and limitations](docs/RELEASE-0.5.3.md). The earlier failed ten-user media capacity gate remains unresolved.
 
-Previous release: **0.5.1** — [server efficiency and talk controls](docs/RELEASE-0.5.1.md), [matched measurements](docs/PERFORMANCE-0.5.1.md).
+Previous release: **0.5.2** — [member invitations and browser voice volume](docs/RELEASE-0.5.2.md).
 
 Earlier release: **0.5.0** — [gaming voice/viewer and reliability](docs/RELEASE-0.5.0.md).
 
