@@ -816,6 +816,10 @@ function shuffle(values) {
   return a;
 }
 var freshPicture = () => ({ strokes: [], points: 0 });
+function undoStroke(picture) {
+  const last = picture.strokes.pop();
+  if (last) picture.points -= last.points.length;
+}
 var colors = ["#20232b", "#ffffff", "#e45b63", "#4a86e8", "#43a477", "#ecc64c", "#9a69d5", "#e78e48"];
 function stroke(picture, value) {
   insist(value && colors.includes(value.color) && [3, 7, 14].includes(value.width), "Choose a drawing tool.");
@@ -846,17 +850,19 @@ function fourAction(s, seat, a, now) {
   const index = row * 7 + col;
   s.board[index] = seat;
   s.moves++;
+  s.last = index;
   for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
-    let count = 1;
+    const line = [index];
     for (const sign of [-1, 1]) for (let d = 1; d < 4; d++) {
       const x = col + dx * d * sign, y = row + dy * d * sign;
       if (x < 0 || x > 6 || y < 0 || y > 5 || s.board[y * 7 + x] !== seat) break;
-      count++;
+      line.push(y * 7 + x);
     }
-    if (count >= 4) {
+    if (line.length >= 4) {
       s.result = `Player ${seat + 1} wins`;
       s.phase = "ended";
       s.winner = seat;
+      s.winning = line;
     }
   }
   if (!s.result && s.moves === 42) {
@@ -876,18 +882,26 @@ function dominoRound(s, n, now) {
   s.phase = "turn";
   s.roundResult = null;
   s.opening = -1;
-  let best = -1, leader = 0;
-  s.hands.forEach((hand, p) => hand.forEach((t) => {
-    const [a, b] = dominoTiles[t], weight = a === b ? 100 + a : a + b;
-    if (weight > best) {
-      best = weight;
-      leader = p;
-      s.opening = t;
-    }
-  }));
-  s.turn = leader;
+  dominoOpening(s);
   s.deadline = now + 6e4;
   s.round = (s.round || 0) + 1;
+}
+function dominoOpening(s) {
+  let best = -1, leader = 0;
+  s.opening = -1;
+  s.hands.forEach((hand, p) => {
+    if (s.active?.[p] === false) return;
+    hand.forEach((t) => {
+      const [a, b] = dominoTiles[t], weight = a === b ? 100 + a : a + b;
+      if (weight > best) {
+        best = weight;
+        leader = p;
+        s.opening = t;
+      }
+    });
+  });
+  s.turn = leader;
+  s.passes = 0;
 }
 function dominoStart(n, settings, now) {
   const s = { phase: "turn", deadline: 0, result: null, scores: Array(n).fill(0), mode: settings.domino };
@@ -1235,6 +1249,7 @@ function pokerView(s, seat) {
     departed: s.departed,
     board: s.board,
     holes: s.holes.map((h, i) => i === seat || s.showdown && !s.folded[i] ? h : h.map(() => -1)),
+    handRanks: s.holes.map((h, i) => h.length === 2 && s.board.length >= 3 && (i === seat || s.showdown && !s.folded[i]) ? rankHand([...h, ...s.board])[0] : null),
     folded: s.folded,
     street: s.street,
     committed: s.committed,
@@ -1293,11 +1308,15 @@ function drawingReveal(s, now) {
   s.token = `reveal-${s.round}`;
   s.deadline = now + 5e3;
 }
+function drawingEveryoneGuessed(s, now) {
+  if (s.phase === "drawing" && s.scores.every((_, i) => i === s.drawer || s.active?.[i] === false || s.guessed.includes(i))) drawingReveal(s, now);
+}
 function drawingAction(s, seat, a, settings, now) {
   insist(s.phase === "drawing" && a.token === s.token, "The drawing round has changed.");
-  if (a.type === "stroke" || a.type === "clear") {
+  if (["stroke", "clear", "undo"].includes(a.type)) {
     insist(seat === s.drawer, "Only the drawer can draw.");
     if (a.type === "clear") s.picture = freshPicture();
+    else if (a.type === "undo") undoStroke(s.picture);
     else stroke(s.picture, a.stroke);
   } else {
     insist(a.type === "guess" && seat !== s.drawer && !s.guessed.includes(seat), "Wait for the next drawing.");
@@ -1307,7 +1326,7 @@ function drawingAction(s, seat, a, settings, now) {
       s.scores[seat] += Math.max(20, 100 - Math.floor((now - s.started) / 1e3));
       s.scores[s.drawer] += 10;
       s.guesses.push({ seat, correct: true });
-      if (s.guessed.length === (s.active?.filter(Boolean).length || s.scores.length) - 1) drawingReveal(s, now);
+      drawingEveryoneGuessed(s, now);
     } else s.guesses.push({ seat, text: answer, correct: false });
     s.guesses = s.guesses.slice(-30);
   }
@@ -1349,9 +1368,10 @@ function phoneStart(n, settings, now) {
 }
 function phoneAction(s, seat, a, settings, now) {
   insist(s.phase !== "reveal" && a.token === s.token && !s.done.includes(seat), "This page has already been submitted.");
-  if (a.type === "stroke" || a.type === "clear") {
+  if (["stroke", "clear", "undo"].includes(a.type)) {
     insist(s.phase === "draw");
     if (a.type === "clear") s.pictures[seat] = freshPicture();
+    else if (a.type === "undo") undoStroke(s.pictures[seat]);
     else stroke(s.pictures[seat], a.stroke);
   } else {
     insist(a.type === "submit");
@@ -1459,7 +1479,7 @@ function project(kind, s, seat) {
   if (kind === "drawing") return drawingView(s, seat);
   if (kind === "telephone") return phoneView(s, seat);
   if (kind === "words") return wordsView(s, seat);
-  if (kind === "four") return { phase: s.phase, board: s.board, turn: s.turn, winner: s.winner };
+  if (kind === "four") return { phase: s.phase, board: s.board, turn: s.turn, winner: s.winner, last: s.last, winning: s.winning || [] };
   return { phase: s.phase, tokens: s.tokens, turn: s.turn, die: s.die, offsets: s.tokens.map((_, i) => ludoOffset(s, i)), legal: seat === s.turn && s.phase === "move" ? ludoLegal(s) : [] };
 }
 function timeout(kind, s, settings, now) {
@@ -1488,6 +1508,7 @@ function depart(kind, s, seat, settings, now) {
   }
   if (kind === "drawing") {
     if (s.drawer === seat && s.phase === "drawing") drawingTick(s, settings, now);
+    else drawingEveryoneGuessed(s, now);
   } else if (kind === "telephone") {
     if (!s.done.includes(seat)) s.done.push(seat);
     if (s.done.length === s.albums.length) phoneTick(s, settings, now);
@@ -1501,7 +1522,11 @@ function depart(kind, s, seat, settings, now) {
   } else if (kind === "domino") {
     s.boneyard.push(...s.hands[seat]);
     s.hands[seat] = [];
-    if (s.turn === seat) {
+    s.passes = 0;
+    if (!s.chain.length) {
+      dominoOpening(s);
+      s.deadline = now + 6e4;
+    } else if (s.turn === seat) {
       s.turn = remaining.find((i) => i > seat) ?? remaining[0];
       s.deadline = now + 6e4;
     }
@@ -1520,7 +1545,7 @@ function depart(kind, s, seat, settings, now) {
 var kinds = ["poker", "domino", "telephone", "drawing", "words", "ludo", "four"];
 var settingsSchema = z4.object({ maxPlayers: z4.number().int().min(2).max(8), seconds: z4.union([z4.literal(45), z4.literal(60), z4.literal(90)]).default(60), rounds: z4.number().int().min(1).max(3).default(1), language: z4.enum(["en", "fa"]).default("en"), domino: z4.enum(["draw", "block"]).default("draw"), chips: z4.union([z4.literal(1e3), z4.literal(2e3)]).default(1e3), blind: z4.union([z4.literal(10), z4.literal(20), z4.literal(50)]).default(20) }).strict();
 var gameCreate = z4.object({ requestId: z4.string().uuid(), channelId: z4.string().min(1).max(100), kind: z4.enum(kinds), settings: settingsSchema }).strict().refine((b) => b.settings.maxPlayers >= definition(b.kind).min && b.settings.maxPlayers <= definition(b.kind).max, "Choose a valid player limit.");
-var action = z4.object({ type: z4.enum(["drop", "tile", "draw", "pass", "next", "roll", "token", "fold", "check", "call", "raise", "stroke", "clear", "guess", "submit", "clue", "word"]), token: z4.string().max(40).optional(), piece: z4.number().int().min(0).max(3).optional(), column: z4.number().int().min(0).max(6).optional(), tile: z4.number().int().min(0).max(27).optional(), end: z4.enum(["left", "right"]).optional(), to: z4.number().int().min(0).max(1e6).optional(), index: z4.number().int().min(0).max(24).optional(), count: z4.number().int().min(1).max(9).optional(), text: z4.string().max(180).optional(), stroke: z4.object({ color: z4.string().max(7), width: z4.number().int(), points: z4.array(z4.tuple([z4.number().int().min(0).max(1e3), z4.number().int().min(0).max(1e3)])).min(1).max(100) }).strict().optional() }).strict();
+var action = z4.object({ type: z4.enum(["drop", "tile", "draw", "pass", "next", "roll", "token", "fold", "check", "call", "raise", "stroke", "clear", "undo", "guess", "submit", "clue", "word"]), token: z4.string().max(40).optional(), piece: z4.number().int().min(0).max(3).optional(), column: z4.number().int().min(0).max(6).optional(), tile: z4.number().int().min(0).max(27).optional(), end: z4.enum(["left", "right"]).optional(), to: z4.number().int().min(0).max(1e6).optional(), index: z4.number().int().min(0).max(24).optional(), count: z4.number().int().min(1).max(9).optional(), text: z4.string().max(180).optional(), stroke: z4.object({ color: z4.string().max(7), width: z4.number().int(), points: z4.array(z4.tuple([z4.number().int().min(0).max(1e3), z4.number().int().min(0).max(1e3)])).min(1).max(100) }).strict().optional() }).strict();
 var gameCommand = z4.object({ requestId: z4.string().uuid(), revision: z4.number().int().positive(), kind: z4.enum(["join", "start", "leave", "close", "action"]), action: action.optional() }).strict();
 var activeSeats = (g) => g.seats.filter((s) => !s.left);
 async function arcadeBusy(tx, uid, except = "") {

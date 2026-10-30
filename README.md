@@ -1,4 +1,6 @@
-**Current release: 0.7.1** — Microphone-gain processor recovery, synchronized gain controls, dB/clipping feedback and a private five-second recording/playback test under Account settings > Audio. See [behavior, measurements and verification](docs/RELEASE-0.7.1.md).
+**Current release: 0.7.2** — Improvements across all eight games: clearer turns and instructions, compact mobile layouts, drawing undo, replay lobbies, poker bet/hand feedback, Ludo move buttons and departure-rule fixes. See the [per-game review and verification](docs/RELEASE-0.7.2.md).
+
+Previous release: **0.7.1** — Microphone-gain recovery and a private voice recording/playback test. See [behavior, measurements and verification](docs/RELEASE-0.7.1.md).
 
 Previous release: **0.7.0** — Seven new voice-channel games alongside Chess, each identifying its supported player count. See [games and rules](docs/GAMES-0.7.0.md) and [release verification](docs/RELEASE-0.7.0.md).
 
