@@ -18,8 +18,9 @@ it('matches Persian/Arabic keyboard variants, half-spaces and digits without cha
 
 it('translates all literal interface keys and preserves interpolation placeholders', async () => {
   expect(Object.values(fa).filter(value => /میبی|گیبی|بی‌کار|راز راه‌اندازی/.test(value))).toEqual([]);
+  expect(fa.Check).toBe('کیش');expect(fa['Check|poker']).toBe('چک');
   const keys = new Set<string>();
-  for (const file of (await readdir('apps/web/src')).filter(name => /\.tsx?$/.test(name))) {
+  for (const file of (await readdir('apps/web/src',{recursive:true})).filter(name => /\.tsx?$/.test(name))) {
     const source = ts.createSourceFile(file, await readFile(`apps/web/src/${file}`, 'utf8'), ts.ScriptTarget.Latest, true);
     const literals = (node: ts.Node) => {
       if (ts.isStringLiteral(node)) keys.add(node.text);

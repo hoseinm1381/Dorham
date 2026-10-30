@@ -25,6 +25,7 @@ import { Attachments } from './attachments';
 import { mediaAdmission } from './media-admission';
 import { publicAccountRoutes, protectedAccountRoutes, audit } from './accounts';
 import { ChessService, chessCreate, chessCommand } from './chess';
+import { GameService, gameCreate, gameCommand } from './games/service';
 
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
 export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean } = {}) {
@@ -40,6 +41,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   const lock = openSync(lockPath, 'wx'); writeSync(lock, String(process.pid)); closeSync(lock);
   const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service);
   const chess = new ChessService(service); chess.onError = e => app.log.error({ err: e }, 'Chess task failed'); await chess.initialize();
+  const games = new GameService(service); games.onError = e => app.log.error({ err: e }, 'Game task failed'); await games.initialize();
   const eventLoop = monitorEventLoopDelay({ resolution: 20 }); eventLoop.enable();
   // Bounded aggregates only: no account IDs, addresses, message content, or traces.
   const realtime = { actions: {} as Record<string, { count: number; failures: number; totalMs: number; maxMs: number; slow: number }>, disconnects: {} as Record<string, number>, maintenance: { passes: 0, maxMs: 0, maxTimerDelayMs: 0 } };
@@ -172,6 +174,10 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   await app.register(async api => {
     api.addHook('preHandler', authenticate);
     protectedAccountRoutes(api, service, disconnectInvalidSessions);
+    api.get('/games', async req => { const channelId=id.parse((req.query as any).channelId); return {games:await games.list(req.account.id,channelId),chess:await chess.voiceGames(req.account.id,channelId)}; });
+    api.post('/games', {bodyLimit:16384}, async req => games.create(req.account.id,gameCreate.parse(req.body)));
+    api.get('/games/:id', async req => games.get(req.account.id,id.parse((req.params as any).id)));
+    api.post('/games/:id', {bodyLimit:16384}, async req => games.command(req.account.id,id.parse((req.params as any).id),gameCommand.parse(req.body)));
     api.get('/chess', async req => { const q = req.query as any; return { games: q.channelId ? await chess.voiceGames(req.account.id, id.parse(q.channelId)) : await chess.list(req.account.id, id.parse(q.serverId)) }; });
     api.post('/chess', async req => chess.create(req.account.id, chessCreate.parse(req.body)));
     api.get('/chess/:id', async req => chess.get(req.account.id, id.parse((req.params as any).id)));
@@ -261,6 +267,15 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }, { prefix: '/api/v1' });
   const io = new SocketServer(app.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 120000, skipMiddlewares: false }, pingInterval: 20000, pingTimeout: 10000, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
   mediaAdmission(app, service, socketId => io.sockets.sockets.get(socketId)?.data.sessionId);
+  games.online = uid => [...io.sockets.sockets.values()].some(s => s.data.userId === uid);
+  games.notify = async (g,directoryChanged,canvas) => {
+    const audience=new Set((await db.all('SELECT user_id FROM voice_members WHERE channel_id=?',[g.channelId])).map(r=>r.user_id));
+    g.seats.forEach(p=>audience.add(p.id));
+    for(const socket of io.sockets.sockets.values())if(audience.has(socket.data.userId)){
+      if(canvas){if(socket.data.gameWatching===g.id&&(g.kind!=='telephone'||g.seats[canvas.seat]?.id===socket.data.userId))socket.emit('game:canvas',canvas);}
+      else socket.emit('game:changed',{id:g.id,channelId:g.channelId,revision:g.revision,directoryChanged});
+    }
+  };
   chess.online = uid => [...io.sockets.sockets.values()].some(s => s.data.userId === uid);
   chess.notify = async (g, directoryChanged) => {
     const members = new Set((await db.all('SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)', [g.serverId])).map(r => r.user_id));
@@ -320,7 +335,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     } else if (kind === 'voice:move') { const target = io.sockets.sockets.get(payload.socketId); if (target) { target.data.voiceChannel = null; target.emit('voice:move', { channelId: payload.channelId }); }
     } else if (kind === 'voice:changed' || kind === 'voice:state:changed') {
       await voiceRefresh.run();
-      if (kind === 'voice:changed') await chess.reconcileVoice();
+      if (kind === 'voice:changed') { await chess.reconcileVoice(); await games.reconcileVoice(); }
       // Local microphone/PTT/deafen state changes do not alter SFU grants.
       // Membership, leases, permissions and moderation retain confirmed enforcement.
       if (kind === 'voice:changed' && sfu.client) try { await sfu.synchronize(); }
@@ -333,6 +348,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     if (connected.size > c.maxOnline) { socket.emit('capacity', { message: 'Online capacity reached.' }); socket.disconnect(true); return; }
     io.emit('presence', { userId: socket.data.userId, online: true });
     void chess.presence(socket.data.userId, true).catch(chess.onError);
+    void games.reconcileVoice().catch(games.onError);
     void measureConnection(socket).then(() => {
       if (socket.connected) socket.emit('connection:latencies', connectionLatency.snapshot(io.sockets.sockets.values()));
     });
@@ -348,6 +364,8 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       finally { const elapsed = performance.now() - started; metric.totalMs += elapsed; metric.maxMs = Math.max(metric.maxMs, elapsed); if (elapsed > 500) metric.slow++; }
     });
     handle('message:send', async b => { const m = messageSchema.parse(b); return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds); });
+    handle('game:watch', async b => {const gameId=id.parse(b.id);const view=await games.get(socket.data.userId,gameId);socket.data.gameWatching=gameId;return view;});
+    handle('game:unwatch', async b => {if(socket.data.gameWatching===id.parse(b.id))socket.data.gameWatching=null;return {};});
     handle('typing', async b => { const v = z.object({ conversationId: id, active: z.boolean() }).parse(b); const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter(s => s.id !== socket.id).map(s => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId); for (const id of audience) io.sockets.sockets.get(id)?.emit('typing', { ...v, userId: socket.data.userId }); return {}; });
     handle('voice:join', async b => { const v = z.object({ channelId: id, eligible: z.boolean() }).parse(b); const result = await service.joinVoice(socket.data.userId, socket.id!, v.channelId, v.eligible); socket.data.voiceChannel = v.channelId; return result; });
     handle('voice:leave', async b => { z.object({ requestId }).parse(b); const result = await service.voiceAction(socket.data.userId, socket.id!, 'leave'); socket.data.voiceChannel = null; return result; });
@@ -377,6 +395,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
         if (vm) await service.voiceAction(socket.data.userId, socket.id!, 'leave');
         if (![...io.sockets.sockets.values()].some(s => s.data.userId === socket.data.userId)) io.emit('presence', { userId: socket.data.userId, online: false });
         if (!chess.online(socket.data.userId)) await chess.presence(socket.data.userId, false);
+        await games.reconcileVoice();
       } catch (err) { app.log.error({ err }, 'Disconnect cleanup failed'); }
     });
   });
@@ -402,7 +421,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }, 5000); maintenance.unref();
   // Upgraded sockets must close before Fastify starts draining the HTTP server.
   // Waiting until onClose deadlocks a restart while any chat client stays online.
-  app.addHook('preClose', async () => { chess.close(); clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
+  app.addHook('preClose', async () => { chess.close(); games.close(); clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
   app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); await attachments.close(); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
-  return { app, db, service, io, chess, attachments, config: c };
+  return { app, db, service, io, chess, games, attachments, config: c };
 }

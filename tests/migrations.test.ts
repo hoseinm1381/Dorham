@@ -27,7 +27,7 @@ it('migrates and restores a schema-3 backup while preserving overrides, attachme
     const restoredDir = path.join(dir, 'restored'); const { mkdir } = await import('node:fs/promises'); await mkdir(restoredDir);
     const raw = new Sqlite(backup, { readonly: true }); await raw.backup(path.join(restoredDir, 'dorham.sqlite')); raw.close();
     const restored = await openDatabase(config({ dataDir: restoredDir, databaseUrl: '' }));
-    try { expect((await restored.one('SELECT name FROM attachments WHERE id=?', [attachment]))!.name).toBe('kept.png'); expect((await restored.one('SELECT COUNT(*) AS n FROM messages'))!.n).toBe(1); expect(await restored.all('PRAGMA foreign_key_check')).toEqual([]); expect((await restored.one('PRAGMA integrity_check'))!.integrity_check).toBe('ok'); expect((await restored.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7]); }
+    try { expect((await restored.one('SELECT name FROM attachments WHERE id=?', [attachment]))!.name).toBe('kept.png'); expect((await restored.one('SELECT COUNT(*) AS n FROM messages'))!.n).toBe(1); expect(await restored.all('PRAGMA foreign_key_check')).toEqual([]); expect((await restored.one('PRAGMA integrity_check'))!.integrity_check).toBe('ok'); expect((await restored.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]); }
     finally { await restored.close(); }
   } finally { await db.close(); await rm(dir, { recursive: true, force: true }); }
 });
@@ -53,7 +53,7 @@ it('upgrades the actual v1 schema without losing existing users, sessions, messa
     expect((await service.bootstrap('legacy-user')).servers[0].ownerId).toBe('legacy-user');
     expect(await db.all('PRAGMA foreign_key_check')).toHaveLength(0);
     await db.close(); db = await openDatabase(config({ dataDir: dir, databaseUrl: '' }));
-    expect((await db.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => Number(r.version))).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect((await db.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => Number(r.version))).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   } finally { await db.close(); await rm(dir, { recursive: true, force: true }); }
 });
 

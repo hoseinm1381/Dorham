@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { applyAction, advanceLegalAction, costs, inCheck, canMateOnTimeout, legalActions, initialPosition, outcome, repetitionCount, squareName, type Color, type ChessAction, type ChessGame, type ChessView, type ChessPosition, type VoiceGame } from '../../../packages/contracts/src/chess';
+import { arcadeBusy } from './games/service';
 import type { Service } from './service';
 import type { Connection } from './db';
 import { fail } from './security';
@@ -94,6 +95,7 @@ export class ChessService {
   }
   async create(uid: string, b: Create) {
     const result = await this.service.mutate(uid, b.requestId, 'chess.create', b, async tx => {
+      if (await arcadeBusy(tx,uid)) fail(409,'CAPACITY','Finish or leave your existing game first.');
       if (b.channelId) {
         const channel = await this.requireVoice(tx, uid, b.channelId);
         if (channel.server_id !== b.serverId) fail(400, 'INVALID_REQUEST', 'The game must use your current voice channel.');
@@ -108,7 +110,7 @@ export class ChessService {
       if (b.opponentId && await tx.one('SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)', [uid, b.opponentId, b.opponentId, uid])) fail(403, 'FORBIDDEN', 'This challenge is unavailable.');
       const active = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [uid, uid]);
       const pending = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='pending' AND (white_id=? OR black_id=?)", [uid, uid]);
-      const total = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status<>'finished'");
+      const total = await tx.one("SELECT (SELECT COUNT(*) FROM chess_games WHERE status<>'finished')+(SELECT COUNT(*) FROM game_sessions WHERE status<>'finished') AS n");
       if (Number(active!.n) >= 1 || Number(pending!.n) >= 3 || Number(total!.n) >= 60) fail(409, 'CAPACITY', 'Finish your current game or pending challenges first.');
       const now = this.now(), g: ChessGame = { channelId: b.channelId || null, openSeat: Boolean(b.openSeat), id: randomUUID(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || (b.openSeat ? 'Open seat' : `${b.difficulty} AI`), difficulty: b.difficulty || null, status: b.opponentId || b.openSeat ? 'pending' : 'playing', position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 60000, b.minutes * 60000], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [30000, 30000], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
       await tx.run("DELETE FROM chess_games WHERE id IN (SELECT id FROM chess_games WHERE status='finished' ORDER BY updated_at DESC LIMIT 10000 OFFSET 999)");
@@ -133,11 +135,13 @@ export class ChessService {
           if (g.pausedUntil) fail(409, 'PAUSED', 'Waiting for the host to return to voice.');
           await this.requireVoice(tx, g.whiteId, g.channelId!);
           if (await tx.one('SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)', [uid, g.whiteId, g.whiteId, uid])) fail(403, 'FORBIDDEN', 'This challenge is unavailable.');
+          if (await arcadeBusy(tx,uid)||await arcadeBusy(tx,g.whiteId)) fail(409,'CAPACITY','A player already has an active game.');
           for (const player of [uid, g.whiteId]) if (await tx.one("SELECT id FROM chess_games WHERE id<>? AND (white_id=? OR black_id=?) AND (status='playing' OR (status='pending' AND channel_id IS NOT NULL))", [id, player, player])) fail(409, 'CAPACITY', 'A player already has an active match.');
           const user = await tx.one('SELECT display_name FROM users WHERE id=?', [uid]);
           g.blackId = uid; g.blackName = user!.display_name; g.openSeat = false; g.status = 'playing'; g.runningSince = now;
         } else if (b.kind === 'accept' && uid === g.blackId) {
           if (!this.online(g.whiteId) || !this.online(g.blackId!)) fail(409, 'OFFLINE', 'Both players must be online to start.');
+          if (await arcadeBusy(tx,uid)||await arcadeBusy(tx,g.whiteId)) fail(409,'CAPACITY','A player already has an active game.');
           for (const player of [g.whiteId, g.blackId]) if (await tx.one("SELECT id FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [player, player])) fail(409, 'CAPACITY', 'A player already has an active match.');
           g.status = 'playing'; g.runningSince = now;
         } else if ((b.kind === 'decline' && uid === g.blackId) || (b.kind === 'cancel' && uid === g.whiteId)) { g.status = 'finished'; g.result = 'Challenge cancelled'; }

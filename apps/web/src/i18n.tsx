@@ -21,8 +21,8 @@ export function useLanguage() {
   const value = useSyncExternalStore(notify => { listeners.add(notify); return () => listeners.delete(notify); }, currentLanguage, () => 'en-US' as Language);
   useEffect(() => { document.documentElement.lang = value; document.documentElement.dir = value === 'fa-IR' ? 'rtl' : 'ltr'; }, [value]); return value;
 }
-export function t(text: string, values: Record<string, string | number> = {}): string {
-  const translated = language === 'fa-IR' ? (fa as Record<string, string>)[text] || text : text;
+export function t(text: string, values: Record<string, string | number> = {}, context?: string): string {
+  const translated = language === 'fa-IR' ? (context && (fa as Record<string, string>)[`${text}|${context}`]) || (fa as Record<string, string>)[text] || text : text;
   return translated.replace(/\{(\w+)\}/g, (match, key: string) => String(values[key] ?? match));
 }
 export function LanguagePicker({ save }: { save?: (language: Language) => Promise<unknown> }) {

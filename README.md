@@ -1,4 +1,6 @@
-**Current release: 0.6.1** — Games beside Share screen; voice-channel Chess with open seats, watch-first joining, atomic Play and reconnect recovery. Standard/Elixer, clocks and bounded AI remain available. See [games and chess](docs/CHESS.md) and [release verification](docs/RELEASE-0.6.1.md).
+**Current release: 0.7.0** — Seven new voice-channel games alongside Chess: play-chip Texas Hold'em, Draw/Block Dominoes, Drawing Telephone, Draw & Guess, Team Word Clues, Ludo and Four in a Row. Every game identifies its supported player count, with occupied seats and watch-first joining. See [games and rules](docs/GAMES-0.7.0.md) and [release verification](docs/RELEASE-0.7.0.md).
+
+Previous release: **0.6.1** — [voice-channel Games and watch-first Chess](docs/RELEASE-0.6.1.md).
 
 Previous release: **0.6.0** — [Standard and Elixer Chess integration](docs/RELEASE-0.6.0.md).
 
