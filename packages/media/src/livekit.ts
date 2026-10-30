@@ -1,4 +1,4 @@
-import { screenSettings, type ScreenQuality } from './screen-quality';
+import { clampScreenBandwidth, screenSettings, type ScreenQuality } from './screen-quality';
 import { Room, RoomEvent, ParticipantEvent, Track, type LocalAudioTrack, type RemoteTrack, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 import { MicrophoneGain, clampMicrophoneGain } from './microphone-gain';
 import { waitForCondition } from './wait-condition';
@@ -10,6 +10,7 @@ import { defaultAudioProcessing, browserAudioProcessing, processingMismatch, typ
 export class LiveKitTransport implements MediaTransport {
   getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true, microphoneGain: true, sharedAudio: !(globalThis as any).desktop || Boolean((globalThis as any).desktop.systemAudioSafe), outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' || (typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype.setSinkId === 'function') }; }
   async reconnect() { const channel = this.channelId; if (channel) { await this.leave(); await this.join(channel); } }
+  private screenBandwidth?:number;
   room: VoiceRoom | null = null; private media = new Room({ webAudioMix: true, adaptiveStream: true, dynacast: true, publishDefaults: { audioPreset: { maxBitrate: 24000 }, dtx: true, forceStereo: false } });
   private heartbeat?: ReturnType<typeof setInterval>; private channelId: string | null = null; private muted = false; private deafened = false;
   private volumes = new Map<string, number>(); private elements = new Map<string, HTMLMediaElement>(); private lease: Share | null = null;
@@ -179,12 +180,14 @@ export class LiveKitTransport implements MediaTransport {
     this.captureProcessing = { ...settings };
   }
   private emitLocalScreen() { const track = this.media.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack; if (track && this.lease) this.options.emit('localScreen', { userId: this.options.userId, leaseId: this.lease.id, stream: new MediaStream([track.mediaStreamTrack]) }); }
-  async startShare(_quality: ScreenQuality = '720p15', options: { includeAudio?: boolean } = {}) {
+  async startShare(quality: ScreenQuality = '720p15', options: { includeAudio?: boolean; bandwidth?:number } = {}) {
     const includeAudio = Boolean(options.includeAudio && this.getCapabilities().sharedAudio);
     const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID(), protocolVersion: 2, includeAudio }); this.lease = result.lease;
-    const settings = screenSettings('720p15', this.options.screenPolicy, this.lease!), maxFramerate = settings.fps, maxBitrate = settings.bitrate;
     const wait = new AbortController(); this.sharePermissionWait = wait;
     try {
+    if(quality.endsWith('30')&&(this.lease!.maxFrameRate||15)>=30){const updated=await ack(this.options.socket,'share:update',{requestId:crypto.randomUUID(),leaseId:this.lease!.id,expectedRevision:this.lease!.policyRevision,frameRate:30});this.lease=updated.lease;}
+    this.screenBandwidth=options.bandwidth===undefined?undefined:clampScreenBandwidth(options.bandwidth);
+    const settings = screenSettings(quality, this.options.screenPolicy, this.lease!, options.bandwidth), maxFramerate = settings.fps, maxBitrate = settings.bitrate;
       // The control-plane acknowledgement and SFU signaling are separate
       // connections. A committed lease does not mean the SDK has its grant yet.
       const participant = this.media.localParticipant;
@@ -199,14 +202,19 @@ export class LiveKitTransport implements MediaTransport {
       this.emitLocalScreen();
     } catch (e) { await this.stopShare(); throw e; } finally { if (this.sharePermissionWait === wait) this.sharePermissionWait = null; }
   }
-  async setShareQuality(quality: ScreenQuality) {
+  async setShareQuality(quality: ScreenQuality, bandwidth?:number) {
     if (!this.lease) return;
     const frameRate = quality.endsWith('30') ? 30 : 15;
     const result = await ack(this.options.socket, 'share:update', { requestId: crypto.randomUUID(), leaseId: this.lease.id, expectedRevision: this.lease.policyRevision, frameRate }); this.lease = result.lease;
-    const settings = screenSettings(quality, this.options.screenPolicy, this.lease!), track = this.media.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack;
+    try {
+    const settings = screenSettings(quality, this.options.screenPolicy, this.lease!, bandwidth??this.screenBandwidth), track = this.media.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack;
     if (!track) return;
     await track.mediaStreamTrack.applyConstraints({ width: { ideal: settings.width, max: settings.width }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } });
     if (track.sender) { const params = track.sender.getParameters(); for (const encoding of params.encodings || []) { encoding.maxBitrate = settings.bitrate; encoding.maxFramerate = settings.fps; } await track.sender.setParameters(params); }
+    this.screenBandwidth=bandwidth??this.screenBandwidth;
+    const publication=this.media.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    if(publication?.options)publication.options.screenShareEncoding={maxBitrate:settings.bitrate,maxFramerate:settings.fps};
+    }catch(e){await this.stopShare();throw e;}
   }
   async stopShare() { this.sharePermissionWait?.abort(); this.sharePermissionWait = null; const lease = this.lease; this.lease = null; this.options.emit('localScreen', null); await this.media.localParticipant.setScreenShareEnabled(false); if (lease) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {}); }
   private updateSubscriptions() {

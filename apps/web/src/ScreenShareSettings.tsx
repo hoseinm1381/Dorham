@@ -1,0 +1,14 @@
+import type { ScreenPolicy } from '../../../packages/media/src';
+import { screenBandwidths, screenQualities, screenSettings, type ScreenQuality } from '../../../packages/media/src/screen-quality';
+import type { Share } from '@dorham/contracts';
+import { t } from './i18n';
+export type ScreenPreferences={quality:ScreenQuality;bandwidth:number};
+const key='dorham.screen-sharing.v1';
+export function readScreenPreferences():ScreenPreferences{try{const value=JSON.parse(localStorage.getItem(key)||'null');if(value&&screenQualities.includes(value.quality)&&screenBandwidths.includes(value.bandwidth))return value;}catch{/* Use conservative defaults without storage. */}return {quality:'720p15',bandwidth:450000};}
+export function saveScreenPreferences(value:ScreenPreferences){try{localStorage.setItem(key,JSON.stringify(value));}catch{/* Current session still works. */}}
+export function effectiveScreenPreferences(value:ScreenPreferences,share?:Share):ScreenPreferences{return share?.requestedFrameRate===15?{...value,quality:value.quality.replace('30','15') as ScreenQuality}:value;}
+export function screenSummary(value:ScreenPreferences,policy?:ScreenPolicy,share?:Share){const s=screenSettings(effectiveScreenPreferences(value,share).quality,policy,share,value.bandwidth);return `${s.height}p · ${s.fps}fps · ${Math.round((s.bitrate+s.audioBitrate)/1000)} ${t('kbps')}`;}
+export function ScreenShareSettings({value,policy,share,busy,change}:{value:ScreenPreferences;policy?:ScreenPolicy;share?:Share;busy:boolean;change:(next:ScreenPreferences)=>void}){
+  value=effectiveScreenPreferences(value,share);const cap=policy?.maxBitrate??450000,maxFps=Math.min(policy?.maxFrameRate??30,share?.maxFrameRate??30);
+  return <section className="screen-share-settings" aria-label={t('Screen sharing settings')}><div className="screen-share-options"><label>{t('Quality')}<select aria-label={t('Screen quality')} disabled={busy} value={value.quality} onChange={e=>change({...value,quality:e.target.value as ScreenQuality})}>{(['720p15','720p30','480p15','480p30'] as const).map(q=><option key={q} value={q} disabled={q.endsWith('30')&&maxFps<30}>{q.startsWith('720')?'720p':'480p'} {q.endsWith('30')?'30':'15'}fps</option>)}</select></label><label>{t('Bandwidth')}<select aria-label={t('Screen bandwidth')} disabled={busy} value={value.bandwidth} onChange={e=>change({...value,bandwidth:Number(e.target.value)})}>{screenBandwidths.map(n=><option key={n} value={n} disabled={n>cap}>{n/1000} {t('kbps')}</option>)}</select></label></div><small>{t('Maximum for video and shared sound. Actual use adapts to your connection.')}</small>{cap<1500000&&<small>{t('Server limit: {count} kbps',{count:Math.round(cap/1000)})}</small>}{maxFps<30&&<small>{t('30fps is unavailable on this sharing slot.')}</small>}</section>;
+}

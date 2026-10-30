@@ -197,7 +197,7 @@ class DorhamMediaPlugin : Plugin() {
         screenWidth = (call.getInt("width") ?: if (quality.startsWith("480")) 854 else 1280).coerceIn(160, 1280)
         screenHeight = (call.getInt("height") ?: if (quality.startsWith("480")) 480 else 720).coerceIn(90, 720)
         screenFps = (call.getInt("fps") ?: if (quality.endsWith("15")) 15 else 30).coerceIn(1, 30)
-        screenBitrate = (call.getInt("bitrate") ?: 800000).coerceIn(64000, 1200000)
+        screenBitrate = (call.getInt("bitrate") ?: 800000).coerceIn(64000, 1500000)
         sfu?.localParticipant?.let { p -> p.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(isScreencast = true, captureParams = VideoCaptureParameter(screenWidth, screenHeight, screenFps)); p.screenShareTrackPublishDefaults = p.screenShareTrackPublishDefaults.copy(videoEncoding = VideoEncoding(screenBitrate, screenFps), simulcast = false, videoCodec = "vp8") }
     }
     @PluginMethod fun setShareQuality(call: PluginCall) = ui(call) {

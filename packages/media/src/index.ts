@@ -19,7 +19,7 @@ export interface MediaTransport {
   setVolume(userId: string, value: number): void; setDevice(deviceId: string): Promise<void>;
   setMicrophoneGain?(value: number): Promise<void>;
   getAudioProcessing?(): AudioProcessingState; setAudioProcessing?(settings: AudioProcessing): Promise<void>;
-  startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean }): Promise<void>; setShareQuality(quality: ScreenQuality): Promise<void>; stopShare(): Promise<void>;
+  startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean; bandwidth?: number }): Promise<void>; setShareQuality(quality: ScreenQuality, bandwidth?:number): Promise<void>; stopShare(): Promise<void>;
   setOutputDevice?(deviceId: string): Promise<void>; setStreamVolume?(leaseId: string, value: number): void;
   getLocalAudioStream?(): MediaStream | null;
   subscribe(share: Share, enabled: boolean): Promise<void>;

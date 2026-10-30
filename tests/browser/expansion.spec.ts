@@ -67,17 +67,17 @@ test('offers four capture modes and changes quality during a share without chang
   });
   try {
     await register(page, `Quality${Date.now().toString().slice(-7)}`); const server = await api(page, '/servers', { name: 'Quality controls' }); await page.getByRole('button', { name: 'Open Quality controls', exact: true }).click();
-    await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click();
+    await page.getByRole('button', { name: 'Lounge', exact: true }).click();
     const quality = page.getByLabel('Screen quality', { exact: true }); await expect(quality).toBeVisible(); expect(await quality.locator('option').evaluateAll(options => options.map(o => (o as HTMLOptionElement).value))).toEqual(['720p15', '720p30', '480p15', '480p30']);
-    await quality.selectOption('480p15'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+    await quality.selectOption('480p15');  await page.getByRole('button', { name: 'Share screen', exact: true }).click();
     await expect.poll(async () => (await api(page, '/bootstrap')).voicePresence[0]?.shares).toBe(1);
     const channel = (await api(page, '/bootstrap')).channels.find((c: any) => c.serverId === server.id && c.kind === 'voice'), before = (await api(page, `/voice/${channel.id}`)).shares[0].id;
-    expect(await page.evaluate(() => (window as any).__captureCalls[0].video.height.ideal)).toBe(720);
-    await page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); await quality.selectOption('720p30');
+    expect(await page.evaluate(() => (window as any).__captureCalls[0].video.height.ideal)).toBe(480);
+     await quality.selectOption('720p30');
     await expect.poll(async () => page.evaluate(() => (window as any).__screenTrack.getConstraints().height?.max)).toBe(720);
     expect((await api(page, `/voice/${channel.id}`)).shares[0].id).toBe(before);
     expect(await page.evaluate(() => (window as any).__captureCalls.length)).toBe(1);
-    await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.getByRole('button', { name: 'Stop sharing', exact: true }).click();
+     await page.getByRole('button', { name: 'Stop sharing', exact: true }).click();
   } finally { await context.close(); }
 });
 test('compresses a large picture locally and offers an explicit preview before uploading', async ({ browser }) => {

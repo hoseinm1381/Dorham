@@ -33,7 +33,7 @@ export function config(overrides: Partial<{
     turnUsername: process.env.TURN_USERNAME || '', turnPassword: process.env.TURN_PASSWORD || '', turnSecret: process.env.TURN_SECRET || '',
     cloudflareTurnKeyId: process.env.CLOUDFLARE_TURN_KEY_ID || '', cloudflareTurnApiToken: process.env.CLOUDFLARE_TURN_API_TOKEN || '',
     mediaTransport: (process.env.MEDIA_TRANSPORT === 'livekit' ? 'livekit' : 'mesh') as 'mesh' | 'livekit',
-    screenMaxBitrate: num('SCREEN_MAX_BITRATE', 450000), screenMaxFrameRate: num('SCREEN_MAX_FRAME_RATE', 30),
+    screenMaxBitrate: num('SCREEN_MAX_BITRATE', 1500000), screenMaxFrameRate: num('SCREEN_MAX_FRAME_RATE', 30),
     standardShareSlots: num('STANDARD_SHARE_SLOTS', 3), trustedProxies: list('TRUSTED_PROXIES'),
     guestsEnabled: process.env.GUESTS_ENABLED !== 'false', maxGuests: num('MAX_GUESTS', 100),
     attachmentDir: path.resolve(process.env.ATTACHMENT_DIR || path.join(process.env.DATA_DIR || './data', 'attachments')),

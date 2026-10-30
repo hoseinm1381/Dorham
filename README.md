@@ -1,4 +1,6 @@
-**Current release: 0.7.2** — Improvements across all eight games: clearer turns and instructions, compact mobile layouts, drawing undo, replay lobbies, poker bet/hand feedback, Ludo move buttons and departure-rule fixes. See the [per-game review and verification](docs/RELEASE-0.7.2.md).
+**Current release: 0.7.4** — Visible screen-sharing quality and bandwidth controls, from 300 to 1500 kbps, with live changes and remembered preferences. See [behavior and verification](docs/RELEASE-0.7.4.md).
+
+Previous release: **0.7.2** — Improvements across all eight games: clearer turns and instructions, compact mobile layouts, drawing undo, replay lobbies, poker bet/hand feedback, Ludo move buttons and departure-rule fixes. See the [per-game review and verification](docs/RELEASE-0.7.2.md).
 
 Previous release: **0.7.1** — Microphone-gain recovery and a private voice recording/playback test. See [behavior, measurements and verification](docs/RELEASE-0.7.1.md).
 

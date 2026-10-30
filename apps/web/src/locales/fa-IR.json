@@ -1082,5 +1082,14 @@
   "Spectating. Watch the board while staying in voice.": "تماشاگر هستید. هم‌زمان با تماس صوتی صفحهٔ بازی را ببینید.",
   "Your turn: select a piece, then a marked square.": "نوبت شماست: یک مهره و سپس خانهٔ مشخص‌شده را انتخاب کنید.",
   "Waiting for your opponent.": "در انتظار حریف شما.",
-  "Human-match clocks start when someone takes the open seat. Closing the viewer keeps your match and voice connected.": "در بازی دونفره ساعت‌ها با پیوستن بازیکن دوم شروع می‌شوند. با بستن صفحه، بازی و تماس صوتی ادامه دارند."
+  "Human-match clocks start when someone takes the open seat. Closing the viewer keeps your match and voice connected.": "در بازی دونفره ساعت‌ها با پیوستن بازیکن دوم شروع می‌شوند. با بستن صفحه، بازی و تماس صوتی ادامه دارند.",
+  "Screen sharing settings": "تنظیمات اشتراک صفحه",
+  "Quality": "کیفیت",
+  "Bandwidth": "پهنای باند",
+  "Screen bandwidth": "پهنای باند اشتراک صفحه",
+  "kbps": "kbps",
+  "Maximum for video and shared sound. Actual use adapts to your connection.": "سقف مصرف تصویر و صدای اشتراکی. مصرف واقعی با اتصال شما تنظیم می‌شود.",
+  "Server limit: {count} kbps": "سقف سرور: {count} کیلوبیت/ثانیه",
+  "30fps is unavailable on this sharing slot.": "در این جایگاه اشتراک، ۳۰ فریم در ثانیه در دسترس نیست.",
+  "Change quality and bandwidth beside Share screen.": "کیفیت و پهنای باند را کنار دکمهٔ اشتراک صفحه تغییر دهید."
 }

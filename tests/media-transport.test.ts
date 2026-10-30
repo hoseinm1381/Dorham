@@ -128,3 +128,23 @@ it('repairs a removed gain processor even when the microphone enabled state has 
     expect(track.setProcessor).toHaveBeenCalledTimes(2); expect(microphone.enabled).toBe(false); expect((processor as any).enabled).toBe(false);
   } finally { await f.transport.destroy(); }
 });
+
+it('applies live screen limits and keeps the new bandwidth for later quality and SDK republish settings',async()=>{
+  const f=fixture();try{
+    const transport=f.transport as any,media=transport.media,lease={id:'screen',policyRevision:1,maxFrameRate:30,includeAudio:true};transport.lease=lease;transport.options.screenPolicy={maxBitrate:1500000,maxFrameRate:30};
+    (f.socket as any).timeout=()=>({emit:(name:string,_body:any,reply:any)=>reply(null,{ok:true,data:{lease:{...lease,policyRevision:2}}})});
+    let parameters:any={encodings:[{active:true,maxBitrate:402000,maxFramerate:15}]};
+    const sender={getParameters:()=>structuredClone(parameters),setParameters:vi.fn(async(value:any)=>{parameters=value;})};
+    const track={sender,mediaStreamTrack:{applyConstraints:vi.fn(async()=>{})}},publication={videoTrack:track,options:{screenShareEncoding:{maxBitrate:402000,maxFramerate:15}}};media.localParticipant.getTrackPublication=()=>publication;
+    await f.transport.setShareQuality('480p30',1500000);expect(parameters.encodings[0]).toMatchObject({active:true,maxBitrate:1452000,maxFramerate:30});expect(publication.options.screenShareEncoding).toEqual({maxBitrate:1452000,maxFramerate:30});
+    await f.transport.setShareQuality('720p15');expect(parameters.encodings[0]).toMatchObject({maxBitrate:1452000,maxFramerate:15});expect(track.mediaStreamTrack.applyConstraints).toHaveBeenLastCalledWith(expect.objectContaining({height:{ideal:720,max:720}}));
+  }finally{await f.transport.destroy();}
+});
+it('stops a partly applied screen when encoder changes fail instead of displaying a false applied limit',async()=>{
+  const f=fixture();try{
+    const transport=f.transport as any,media=transport.media,lease={id:'screen',policyRevision:1,maxFrameRate:30};transport.lease=lease;
+    (f.socket as any).timeout=()=>({emit:(name:string,_body:any,reply:any)=>reply(null,{ok:true,data:{lease:{...lease,policyRevision:2}}})});
+    const sender={getParameters:()=>({encodings:[{}]}),setParameters:vi.fn(async()=>{throw Error('Encoder rejected the limit');})};media.localParticipant.getTrackPublication=()=>({videoTrack:{sender,mediaStreamTrack:{applyConstraints:async()=>{}}}});
+    await expect(f.transport.setShareQuality('720p30',300000)).rejects.toThrow('Encoder rejected');expect(media.localParticipant.setScreenShareEnabled).toHaveBeenCalledWith(false);expect(transport.lease).toBeNull();
+  }finally{await f.transport.destroy();}
+});

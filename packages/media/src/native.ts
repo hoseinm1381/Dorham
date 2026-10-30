@@ -9,7 +9,7 @@ export class NativeTransport implements MediaTransport {
   async reconnect() { const channel = this.channelId; if (channel) { await this.leave(); await this.join(channel); } }
   room: VoiceRoom | null = null; private channelId: string | null = null; private epoch = ''; private muted = false; private deafened = false;
   private heartbeat?: ReturnType<typeof setInterval>; private handles: PluginListenerHandle[] = []; private lease: Share | null = null;
-  private onRoom = (r: VoiceRoom) => { if (r.channelId === this.channelId) { this.room = r; void NativeMedia.updateRoom({ room: r, selfId: this.options.userId }); this.options.emit('room', r); if (this.lease && !r.shares.some(s => s.id === this.lease!.id)) void this.stopShare(); } };
+  private onRoom = (r: VoiceRoom) => { if (r.channelId === this.channelId) { this.room = r;const own=r.shares.find(s=>s.userId===this.options.userId);if(this.lease&&own)this.lease=own; void NativeMedia.updateRoom({ room: r, selfId: this.options.userId }); this.options.emit('room', r); if (this.lease && !r.shares.some(s => s.id === this.lease!.id)) void this.stopShare(); } };
   private onSignal = (s: Signal) => { if (s.channelId === this.channelId) void NativeMedia.signal({ signal: s }); };
   private onMoved = (move: { channelId: string }) => { void this.leave().then(() => this.join(move.channelId)).catch(e => this.options.emit('error', e.message)); };
   private onRemoved = () => { void this.leave(); };
@@ -39,11 +39,11 @@ export class NativeTransport implements MediaTransport {
   async setDeafened(value: boolean) { this.deafened = value; await this.state(); }
   setVolume(userId: string, value: number) { void NativeMedia.setVolume({ userId, volume: value }); }
   async setDevice(deviceId: string) { await NativeMedia.setDevice({ deviceId }); }
-  async startShare(quality: ScreenQuality = '720p15') {
-    const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID() }); this.lease = result.lease;
-    try { await NativeMedia.startShare({ leaseId: this.lease!.id, quality, ...screenSettings(quality, this.options.screenPolicy) }); } catch (e) { await this.stopShare(); throw e; }
+  async startShare(quality: ScreenQuality = '720p15', options:{bandwidth?:number}={}) {
+    const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID(),protocolVersion:2 }); this.lease = result.lease;
+    try { if(quality.endsWith('30')&&(this.lease!.maxFrameRate||15)>=30){const updated=await ack(this.options.socket,'share:update',{requestId:crypto.randomUUID(),leaseId:this.lease!.id,expectedRevision:this.lease!.policyRevision,frameRate:30});this.lease=updated.lease;}await NativeMedia.startShare({ leaseId: this.lease!.id, quality, ...screenSettings(quality, this.options.screenPolicy,this.lease!,options.bandwidth) }); } catch (e) { await this.stopShare(); throw e; }
   }
-  async setShareQuality(quality: ScreenQuality) { await NativeMedia.setShareQuality({ quality, ...screenSettings(quality, this.options.screenPolicy) }); }
+  async setShareQuality(quality: ScreenQuality,bandwidth?:number) { if(!this.lease)return;const result=await ack(this.options.socket,'share:update',{requestId:crypto.randomUUID(),leaseId:this.lease.id,expectedRevision:this.lease.policyRevision,frameRate:quality.endsWith('30')?30:15});this.lease=result.lease;await NativeMedia.setShareQuality({ quality, ...screenSettings(quality, this.options.screenPolicy,this.lease!,bandwidth) }); }
   async stopShare() { const lease = this.lease; this.lease = null; await NativeMedia.stopShare(); if (lease && this.options.socket.connected) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {}); }
   async subscribe(share: Share, enabled: boolean) { await NativeMedia.subscribe({ userId: share.userId, leaseId: share.id, enabled }); }
   async getStats() { return NativeMedia.getStats(); }

@@ -4,9 +4,10 @@ import type { MediaTransport, MediaOptions } from './index';
 import { defaultAudioProcessing, browserAudioProcessing, processingMismatch, type AudioProcessing } from './audio-processing';
 import { MicrophoneGain, clampMicrophoneGain } from './microphone-gain';
 import { AudioActivityMeter } from './audio-activity';
-import { screenSettings, type ScreenQuality } from './screen-quality';
+import { clampScreenBandwidth, screenSettings, type ScreenQuality } from './screen-quality';
 type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaStreamAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode; meterSource: MediaStreamAudioSourceNode; meter: AudioActivityMeter }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number; connectionTimer?: ReturnType<typeof setTimeout>; timedOut: boolean; iceErrors: number[] };
 export class MeshTransport implements MediaTransport {
+  private screenBandwidth?:number;
   room: VoiceRoom | null = null;
   getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true, microphoneGain: true, sharedAudio: false, outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' }; }
   async reconnect() { if (this.channelId && !this.joining) await this.rejoin(); }
@@ -264,14 +265,16 @@ export class MeshTransport implements MediaTransport {
     this.audioProcessing = { ...settings };
     this.captureProcessing = { ...settings };
   }
-  async startShare(_quality: ScreenQuality = '720p15') {
+  async startShare(quality: ScreenQuality = '720p15', options:{bandwidth?:number}={}) {
     if (!this.channelId) throw new Error('Join a voice channel first.');
     if (this.screen) return;
     const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID(), protocolVersion: 2, includeAudio: false }); this.lease = result.lease;
-    const settings = screenSettings('720p15', this.options.screenPolicy, this.lease!); this.screenTarget = { bitrate: settings.bitrate, fps: settings.fps };
-    const constraints = { width: { ideal: settings.width }, height: { ideal: settings.height }, frameRate: { ideal: this.screenTarget.fps, max: this.screenTarget.fps } };
     let screen: MediaStream | undefined;
     try {
+    if(quality.endsWith('30')&&(this.lease!.maxFrameRate||15)>=30){const updated=await ack(this.options.socket,'share:update',{requestId:crypto.randomUUID(),leaseId:this.lease!.id,expectedRevision:this.lease!.policyRevision,frameRate:30});this.lease=updated.lease;}
+    this.screenBandwidth=options.bandwidth===undefined?undefined:clampScreenBandwidth(options.bandwidth);
+    const settings = screenSettings(quality, this.options.screenPolicy, this.lease!, options.bandwidth); this.screenTarget = { bitrate: settings.bitrate, fps: settings.fps };
+    const constraints = { width: { ideal: settings.width }, height: { ideal: settings.height }, frameRate: { ideal: this.screenTarget.fps, max: this.screenTarget.fps } };
       screen = await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: false }); this.screen = screen;
       screen.getVideoTracks()[0].onended = () => { void this.stopShare(); };
       for (const [userId, p] of this.peers) {
@@ -282,14 +285,16 @@ export class MeshTransport implements MediaTransport {
       this.options.emit('localScreen', { userId: this.options.userId, leaseId: this.lease!.id, stream: screen });
     } catch (e) { screen?.getTracks().forEach(t => t.stop()); await this.stopShare(); throw e; }
   }
-  async setShareQuality(quality: ScreenQuality) {
+  async setShareQuality(quality: ScreenQuality, bandwidth?:number) {
     if (!this.lease) return;
     const result = await ack(this.options.socket, 'share:update', { requestId: crypto.randomUUID(), leaseId: this.lease.id, expectedRevision: this.lease.policyRevision, frameRate: quality.endsWith('30') ? 30 : 15 }); this.lease = result.lease;
-    const settings = screenSettings(quality, this.options.screenPolicy, this.lease!);
+    try {
+    const settings = screenSettings(quality, this.options.screenPolicy, this.lease!, bandwidth??this.screenBandwidth);
     const track = this.screen?.getVideoTracks()[0];
     if (track) await track.applyConstraints({ width: { ideal: settings.width, max: settings.width }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } });
     for (const p of this.peers.values()) if (p.screenSender?.track) { const params = p.screenSender.getParameters(); if (!params.encodings?.length) params.encodings = [{}]; for (const e of params.encodings) { e.maxBitrate = settings.bitrate; e.maxFramerate = settings.fps; } await p.screenSender.setParameters(params); }
-    this.screenTarget = { bitrate: settings.bitrate, fps: settings.fps };
+    this.screenTarget = { bitrate: settings.bitrate, fps: settings.fps }; this.screenBandwidth=bandwidth??this.screenBandwidth;
+    }catch(e){await this.stopShare();throw e;}
   }
   async stopShare() {
     const screen = this.screen, lease = this.lease; this.screen = null; this.lease = null;
