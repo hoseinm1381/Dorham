@@ -7,7 +7,7 @@ import {
 import {
   config,
   openDatabase
-} from "./chunk-TFZZS3MZ.js";
+} from "./chunk-KAONWHCO.js";
 
 // scripts/admin.ts
 import path from "path";

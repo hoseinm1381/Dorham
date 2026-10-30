@@ -26,7 +26,7 @@ import {
 import {
   config,
   openDatabase
-} from "./chunk-TFZZS3MZ.js";
+} from "./chunk-KAONWHCO.js";
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
@@ -775,8 +775,8 @@ function outcome(s) {
 }
 
 // apps/api/src/chess.ts
-var chessCreate = z4.object({ requestId: z4.string().uuid(), serverId: z4.string().min(1).max(100), opponentId: z4.string().min(1).max(100).optional(), difficulty: z4.enum(["Easy", "Medium", "Hard"]).optional(), mode: z4.enum(["standard", "elixer"]), minutes: z4.union([z4.literal(3), z4.literal(5), z4.literal(10), z4.literal(15)]), increment: z4.union([z4.literal(0), z4.literal(2), z4.literal(5), z4.literal(10)]) }).strict().refine((b) => Boolean(b.opponentId) !== Boolean(b.difficulty), "Choose a person or AI");
-var chessCommand = z4.object({ requestId: z4.string().uuid(), revision: z4.number().int().positive(), kind: z4.enum(["accept", "decline", "cancel", "action", "resign", "offerDraw", "acceptDraw", "declineDraw", "claimDraw"]), action: z4.object({ from: z4.number().int().min(0).max(63).optional(), to: z4.number().int().min(0).max(63), buy: z4.enum(["p", "n", "b", "r", "q"]).optional(), promotion: z4.enum(["q", "r", "b", "n"]).optional() }).strict().optional() }).strict();
+var chessCreate = z4.object({ requestId: z4.string().uuid(), serverId: z4.string().min(1).max(100), channelId: z4.string().min(1).max(100).optional(), openSeat: z4.literal(true).optional(), opponentId: z4.string().min(1).max(100).optional(), difficulty: z4.enum(["Easy", "Medium", "Hard"]).optional(), mode: z4.enum(["standard", "elixer"]), minutes: z4.union([z4.literal(3), z4.literal(5), z4.literal(10), z4.literal(15)]), increment: z4.union([z4.literal(0), z4.literal(2), z4.literal(5), z4.literal(10)]) }).strict().refine((b) => [b.opponentId, b.difficulty, b.openSeat].filter(Boolean).length === 1 && (!b.openSeat || Boolean(b.channelId)) && (!b.channelId || !b.opponentId), "Choose an open voice seat or AI");
+var chessCommand = z4.object({ requestId: z4.string().uuid(), revision: z4.number().int().positive(), kind: z4.enum(["join", "accept", "decline", "cancel", "action", "resign", "offerDraw", "acceptDraw", "declineDraw", "claimDraw"]), action: z4.object({ from: z4.number().int().min(0).max(63).optional(), to: z4.number().int().min(0).max(63), buy: z4.enum(["p", "n", "b", "r", "q"]).optional(), promotion: z4.enum(["q", "r", "b", "n"]).optional() }).strict().optional() }).strict();
 var winner = (color, reason) => `${color === 0 ? "White" : "Black"} wins by ${reason}`;
 function chargeClock(g, now) {
   if (g.status !== "playing" || g.pausedUntil) return;
@@ -860,6 +860,12 @@ var ChessService = class {
     if (!member) fail(403, "FORBIDDEN", "Join the match server to play or watch.");
     const ids = [g.whiteId, ...g.blackId ? [g.blackId] : []];
     for (const id2 of ids) if (!await tx.one("SELECT user_id FROM members WHERE server_id=? AND user_id=?", [g.serverId, id2])) fail(403, "FORBIDDEN", "A player has left the match server.");
+    if (g.channelId && uid !== g.whiteId && uid !== g.blackId) await this.requireVoice(tx, uid, g.channelId);
+  }
+  async requireVoice(tx, uid, channelId) {
+    const channel = await this.service.channel(tx, uid, channelId);
+    if (channel.kind !== "voice" || !await tx.one("SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?", [uid, channelId])) fail(403, "VOICE_REQUIRED", "Join this voice channel to play or watch.");
+    return channel;
   }
   async load(tx, id2) {
     const row = await tx.one("SELECT state FROM chess_games WHERE id=?", [id2]);
@@ -868,7 +874,7 @@ var ChessService = class {
   }
   async save(tx, g) {
     g.updatedAt = this.now();
-    await tx.run("INSERT INTO chess_games(id,server_id,white_id,black_id,status,updated_at,state) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,state=excluded.state", [g.id, g.serverId, g.whiteId, g.blackId, g.status, g.updatedAt, JSON.stringify(g)]);
+    await tx.run("INSERT INTO chess_games(id,server_id,white_id,black_id,status,updated_at,state,channel_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET black_id=excluded.black_id,channel_id=excluded.channel_id,status=excluded.status,updated_at=excluded.updated_at,state=excluded.state", [g.id, g.serverId, g.whiteId, g.blackId, g.status, g.updatedAt, JSON.stringify(g), g.channelId || null]);
   }
   async get(uid, id2) {
     return this.service.db.transaction(async (tx) => {
@@ -878,7 +884,15 @@ var ChessService = class {
       const view = structuredClone(g);
       chargeClock(view, now);
       const ownTurn = (view.position.turn === 0 ? view.whiteId : view.blackId) === uid;
-      return { ...view, serverNow: now, actions: view.status === "playing" && !view.pausedUntil && ownTurn ? legalActions(view.position) : [], check: inCheck(view.position), canClaimDraw: view.position.mode === "standard" && (view.position.half >= 100 || repetitionCount(view.position) >= 3) };
+      const inVoice = !g.channelId || Boolean(await tx.one("SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?", [uid, g.channelId]));
+      return { ...view, serverNow: now, actions: view.status === "playing" && !view.pausedUntil && ownTurn && inVoice ? legalActions(view.position) : [], canPlay: Boolean(g.openSeat && g.status === "pending" && !g.blackId && uid !== g.whiteId && inVoice && !g.pausedUntil), check: inCheck(view.position), canClaimDraw: view.position.mode === "standard" && (view.position.half >= 100 || repetitionCount(view.position) >= 3) };
+    });
+  }
+  async voiceGames(uid, channelId) {
+    return this.service.db.transaction(async (tx) => {
+      const channel = await this.requireVoice(tx, uid, channelId);
+      const rows = await tx.all("SELECT state FROM chess_games WHERE status<>'finished' AND (channel_id=? OR (channel_id IS NULL AND server_id=? AND (white_id=? OR black_id=?))) ORDER BY updated_at DESC LIMIT 60", [channelId, channel.server_id, uid, uid]);
+      return rows.map((r) => JSON.parse(r.state)).map((g) => ({ id: g.id, channelId, hostName: g.whiteName, whiteId: g.whiteId, blackId: g.blackId, status: g.status, openSeat: Boolean(g.openSeat && !g.blackId && g.status === "pending"), mode: g.position.mode, minutes: g.minutes, increment: g.increment, paused: Boolean(g.pausedUntil), legacy: !g.channelId }));
     });
   }
   async list(uid, serverId) {
@@ -888,6 +902,11 @@ var ChessService = class {
   }
   async create(uid, b) {
     const result = await this.service.mutate(uid, b.requestId, "chess.create", b, async (tx) => {
+      if (b.channelId) {
+        const channel = await this.requireVoice(tx, uid, b.channelId);
+        if (channel.server_id !== b.serverId) fail(400, "INVALID_REQUEST", "The game must use your current voice channel.");
+        if (await tx.one("SELECT id FROM chess_games WHERE white_id=? AND channel_id IS NOT NULL AND status<>'finished'", [uid])) fail(409, "CAPACITY", "Open your existing game or close it before creating another.");
+      }
       const names = [];
       for (const userId of [uid, ...b.opponentId ? [b.opponentId] : []]) {
         const row = await tx.one("SELECT u.display_name FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND m.user_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [b.serverId, userId]);
@@ -900,25 +919,40 @@ var ChessService = class {
       const pending = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='pending' AND (white_id=? OR black_id=?)", [uid, uid]);
       const total = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status<>'finished'");
       if (Number(active.n) >= 1 || Number(pending.n) >= 3 || Number(total.n) >= 60) fail(409, "CAPACITY", "Finish your current game or pending challenges first.");
-      const now = this.now(), g = { id: randomUUID2(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || `${b.difficulty} AI`, difficulty: b.difficulty || null, status: b.opponentId ? "pending" : "playing", position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 6e4, b.minutes * 6e4], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [3e4, 3e4], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
+      const now = this.now(), g = { channelId: b.channelId || null, openSeat: Boolean(b.openSeat), id: randomUUID2(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || (b.openSeat ? "Open seat" : `${b.difficulty} AI`), difficulty: b.difficulty || null, status: b.opponentId || b.openSeat ? "pending" : "playing", position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 6e4, b.minutes * 6e4], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [3e4, 3e4], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
       await tx.run("DELETE FROM chess_games WHERE id IN (SELECT id FROM chess_games WHERE status='finished' ORDER BY updated_at DESC LIMIT 10000 OFFSET 999)");
       await this.save(tx, g);
       return { id: g.id };
     });
     await this.changed(result.id);
+    if (b.channelId) await this.presence(uid, this.online(uid));
     return this.get(uid, result.id);
   }
   async command(uid, id2, b) {
     const result = await this.service.mutate(uid, b.requestId, "chess.command", { id: id2, ...b }, async (tx) => {
       const g = await this.load(tx, id2);
       await this.allowed(tx, uid, g);
-      if (uid !== g.whiteId && uid !== g.blackId) fail(403, "FORBIDDEN", "Spectators cannot change a match.");
+      const joining = b.kind === "join" && g.openSeat && g.status === "pending" && !g.blackId && uid !== g.whiteId;
+      if (b.kind === "join" && !joining) fail(409, "SEAT_TAKEN", "The seat is no longer open. You can keep watching.");
+      if (!joining && uid !== g.whiteId && uid !== g.blackId) fail(403, "FORBIDDEN", "Spectators cannot change a match.");
       if (g.revision !== b.revision) fail(409, "STALE_GAME", "The board changed. Review the latest position.");
       const now = this.now();
       this.expire(g, now);
       if (g.status === "finished") fail(409, "GAME_FINISHED", "The match has ended.");
+      if (g.channelId && !["resign", "cancel"].includes(b.kind)) await this.requireVoice(tx, uid, g.channelId);
       if (g.status === "pending") {
-        if (b.kind === "accept" && uid === g.blackId) {
+        if (joining) {
+          if (g.pausedUntil) fail(409, "PAUSED", "Waiting for the host to return to voice.");
+          await this.requireVoice(tx, g.whiteId, g.channelId);
+          if (await tx.one("SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)", [uid, g.whiteId, g.whiteId, uid])) fail(403, "FORBIDDEN", "This challenge is unavailable.");
+          for (const player of [uid, g.whiteId]) if (await tx.one("SELECT id FROM chess_games WHERE id<>? AND (white_id=? OR black_id=?) AND (status='playing' OR (status='pending' AND channel_id IS NOT NULL))", [id2, player, player])) fail(409, "CAPACITY", "A player already has an active match.");
+          const user = await tx.one("SELECT display_name FROM users WHERE id=?", [uid]);
+          g.blackId = uid;
+          g.blackName = user.display_name;
+          g.openSeat = false;
+          g.status = "playing";
+          g.runningSince = now;
+        } else if (b.kind === "accept" && uid === g.blackId) {
           if (!this.online(g.whiteId) || !this.online(g.blackId)) fail(409, "OFFLINE", "Both players must be online to start.");
           for (const player of [g.whiteId, g.blackId]) if (await tx.one("SELECT id FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [player, player])) fail(409, "CAPACITY", "A player already has an active match.");
           g.status = "playing";
@@ -954,6 +988,7 @@ var ChessService = class {
       return { id: id2 };
     });
     await this.changed(result.id);
+    if (b.kind === "join") await this.reconcileVoice();
     return this.get(uid, result.id);
   }
   move(g, a) {
@@ -973,7 +1008,7 @@ var ChessService = class {
     }
   }
   expire(g, now) {
-    if (g.status === "pending" && now >= g.createdAt + 12e4) {
+    if (g.status === "pending" && (now >= g.createdAt + (g.openSeat ? 6e5 : 12e4) || g.pausedUntil && now >= g.pausedUntil)) {
       g.status = "finished";
       g.result = "Challenge expired";
     }
@@ -984,18 +1019,24 @@ var ChessService = class {
     } else chargeClock(g, now);
   }
   async presence(uid, online) {
-    const ids = [...this.active.values()].filter((g) => g.status === "playing" && (g.whiteId === uid || g.blackId === uid)).map((g) => g.id);
+    const ids = [...this.active.values()].filter((g) => (g.status === "playing" || g.status === "pending" && g.channelId) && (g.whiteId === uid || g.blackId === uid)).map((g) => g.id);
     for (const id2 of ids) {
       const changed = await this.service.db.transaction(async (tx) => {
-        const g = await this.load(tx, id2), now = this.now();
-        if (g.status !== "playing") return false;
+        const row = await tx.one("SELECT state FROM chess_games WHERE id=?", [id2]);
+        if (!row) {
+          this.active.delete(id2);
+          return false;
+        }
+        const g = JSON.parse(row.state), now = this.now();
+        if (g.status === "finished") return false;
+        const present = online && (!g.channelId || Boolean(await tx.one("SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?", [uid, g.channelId])));
         this.expire(g, now);
         const color = uid === g.whiteId ? 0 : 1;
-        if (online && g.missing.includes(uid)) {
+        if (present && g.missing.includes(uid)) {
           g.grace[color] = Math.max(0, g.grace[color] - (now - g.missingAt[uid]));
           g.missing = g.missing.filter((v) => v !== uid);
           delete g.missingAt[uid];
-        } else if (!online && !g.missing.includes(uid)) {
+        } else if (!present && !g.missing.includes(uid)) {
           g.missing.push(uid);
           g.missingAt[uid] = now;
         } else return false;
@@ -1009,6 +1050,15 @@ var ChessService = class {
       if (changed) await this.changed(id2);
     }
   }
+  async reconcileVoice() {
+    const games = [...this.active.values()].filter((g) => g.channelId);
+    if (!games.length) return;
+    const voice = new Map((await this.service.db.all("SELECT user_id,channel_id FROM voice_members")).map((r) => [r.user_id, r.channel_id]));
+    for (const g of games) for (const uid of [g.whiteId, ...g.blackId ? [g.blackId] : []]) {
+      const present = voice.get(uid) === g.channelId && this.online(uid);
+      if (present === g.missing.includes(uid)) await this.presence(uid, present);
+    }
+  }
   async changed(id2) {
     if (this.closed) return;
     const row = await this.service.db.one("SELECT state FROM chess_games WHERE id=?", [id2]);
@@ -1018,18 +1068,20 @@ var ChessService = class {
       return;
     }
     const g = JSON.parse(row.state);
+    const previous = this.active.get(id2);
+    const directoryChanged = !previous || previous.status !== g.status || previous.blackId !== g.blackId || Boolean(previous.pausedUntil) !== Boolean(g.pausedUntil);
     if (g.status === "finished") this.active.delete(id2);
     else this.active.set(id2, g);
-    await this.notify(g).catch(this.onError);
+    await this.notify(g, directoryChanged).catch(this.onError);
     this.schedule();
-    if (g.status === "playing" && !g.pausedUntil && !g.blackId && g.position.turn === 1) setImmediate(() => {
+    if (g.status === "playing" && !g.pausedUntil && g.difficulty && !g.blackId && g.position.turn === 1) setImmediate(() => {
       if (!this.closed) void this.bot(id2, g.revision).catch(this.onError);
     });
   }
   async bot(id2, revision) {
     await this.service.db.transaction(async (tx) => {
       const g = await this.load(tx, id2);
-      if (g.revision !== revision || g.status !== "playing" || g.pausedUntil || g.blackId || g.position.turn !== 1) return;
+      if (g.revision !== revision || g.status !== "playing" || g.pausedUntil || !g.difficulty || g.blackId || g.position.turn !== 1) return;
       const now = this.now();
       this.expire(g, now);
       if (g.status === "playing") {
@@ -1047,7 +1099,7 @@ var ChessService = class {
   schedule() {
     clearTimeout(this.timer);
     if (this.closed || !this.active.size) return;
-    const deadline = Math.min(...[...this.active.values()].map((g) => g.status === "pending" ? g.createdAt + 12e4 : g.pausedUntil || g.runningSince + g.remaining[g.position.turn]));
+    const deadline = Math.min(...[...this.active.values()].map((g) => g.status === "pending" ? Math.min(g.createdAt + (g.openSeat ? 6e5 : 12e4), g.pausedUntil || Infinity) : g.pausedUntil || g.runningSince + g.remaining[g.position.turn]));
     this.timer = setTimeout(() => {
       void this.tick().catch((e) => {
         this.onError(e);
@@ -1267,7 +1319,10 @@ async function createApp(c = config(), options = {}) {
   await app2.register(async (api) => {
     api.addHook("preHandler", authenticate);
     protectedAccountRoutes(api, service, disconnectInvalidSessions);
-    api.get("/chess", async (req) => ({ games: await chess.list(req.account.id, z5.string().min(1).max(100).parse(req.query.serverId)) }));
+    api.get("/chess", async (req) => {
+      const q = req.query;
+      return { games: q.channelId ? await chess.voiceGames(req.account.id, id.parse(q.channelId)) : await chess.list(req.account.id, id.parse(q.serverId)) };
+    });
     api.post("/chess", async (req) => chess.create(req.account.id, chessCreate.parse(req.body)));
     api.get("/chess/:id", async (req) => chess.get(req.account.id, id.parse(req.params.id)));
     api.post("/chess/:id", async (req) => chess.command(req.account.id, id.parse(req.params.id), chessCommand.parse(req.body)));
@@ -1460,10 +1515,11 @@ async function createApp(c = config(), options = {}) {
   const io = new SocketServer(app2.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 12e4, skipMiddlewares: false }, pingInterval: 2e4, pingTimeout: 1e4, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
   mediaAdmission(app2, service, (socketId) => io.sockets.sockets.get(socketId)?.data.sessionId);
   chess.online = (uid) => [...io.sockets.sockets.values()].some((s) => s.data.userId === uid);
-  chess.notify = async (g) => {
+  chess.notify = async (g, directoryChanged) => {
     const members = new Set((await db.all("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [g.serverId])).map((r) => r.user_id));
     if (!members.has(g.whiteId) || g.blackId && !members.has(g.blackId)) return;
-    for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId)) s.emit("chess:changed", { id: g.id, serverId: g.serverId, challengeTo: g.status === "pending" ? g.blackId : null });
+    const voice = g.channelId ? new Set((await db.all("SELECT user_id FROM voice_members WHERE channel_id=?", [g.channelId])).map((r) => r.user_id)) : null;
+    for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId) && (!voice || voice.has(s.data.userId) || s.data.userId === g.whiteId || s.data.userId === g.blackId)) s.emit("chess:changed", { id: g.id, serverId: g.serverId, channelId: g.channelId || null, directoryChanged, challengeTo: g.status === "pending" ? g.blackId : null });
   };
   io.use(async (socket, next) => {
     try {
@@ -1552,6 +1608,7 @@ async function createApp(c = config(), options = {}) {
       }
     } else if (kind === "voice:changed" || kind === "voice:state:changed") {
       await voiceRefresh.run();
+      if (kind === "voice:changed") await chess.reconcileVoice();
       if (kind === "voice:changed" && sfu.client) try {
         await sfu.synchronize();
       } catch (err) {
