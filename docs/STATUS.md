@@ -1,4 +1,6 @@
-Current release: **0.5.1**, deployed on the operator’s explicit instruction. Server control-plane SQL work is reduced; PTT recovers after microphone clicks and toggle-to-talk survives switching tabs/apps. Lint, types, 84 unit/API tests, production builds, core browser and installed Windows/background-hotkey checks pass. See [release verification](RELEASE-0.5.1.md) and [measurements](PERFORMANCE-0.5.1.md). The failed ten-user media hold remains failed; see [capacity limitations](CAPACITY-RETEST-2026-10-30.md).
+Current release: **0.5.2**, deployed through the previously authorized pilot workflow. Member invitations default to enabled, with an owner-only switch and private management of ordinary members' own links. Chrome voice-volume gestures recover suspended playback and produce measured 0–200% gain. Lint, types, 87 unit/API tests, production builds, invitation UI, mesh/SFU volume tests and installed Windows/background-hotkey checks pass. Public HTTPS/WSS Windows/Chrome checks verify invitations, owner disable/re-enable, volume ratios, playback recovery and bidirectional media. See [release verification](RELEASE-0.5.2.md). The failed ten-user media hold remains failed; see [capacity limitations](CAPACITY-RETEST-2026-10-30.md).
+
+Previous release: **0.5.1** — [server efficiency and talk controls](RELEASE-0.5.1.md), [measurements](PERFORMANCE-0.5.1.md).
 
 Previous release: **0.5.0** — [release verification](RELEASE-0.5.0.md) and [features](GAMING-0.5.0.md). Paragraphs below retain historical checkpoints.
 

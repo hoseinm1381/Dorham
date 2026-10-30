@@ -11,7 +11,7 @@ export type Tag = { id: string; serverId: string; name: string; color: string };
 export type CustomRole = { id: string; serverId: string; name: string; color: string; permissions: Partial<Record<Permission, boolean>> };
 export type ServerMember = { user: PublicUser; role: Role; customRoles: CustomRole[] };
 export type PublicUser = { id: string; username: string; displayName: string; bio: string; avatar: string | null; status: Presence; instanceAdmin?: boolean; guest?: boolean; language?: 'en-US' | 'fa-IR'; banned?: boolean; mustChangePassword?: boolean; tags?: Tag[] };
-export type Server = { id: string; name: string; ownerId: string; role: Role; allowGuests?: boolean; permissions?: Record<Permission, boolean> };
+export type Server = { id: string; name: string; ownerId: string; role: Role; allowGuests?: boolean; allowMemberInvites?: boolean; permissions?: Record<Permission, boolean> };
 export type Channel = { id: string; serverId: string; name: string; kind: 'text' | 'voice'; conversationId: string | null; permissions: Record<Permission, boolean>; locked?: boolean; userLimit?: number; tagMode?: 'ANY' | 'ALL'; requiredTags?: string[] };
 export type Attachment = { id: string; name: string; size: number; expiresAt: number; available: boolean };
 export type Reaction = { emoji: string; userIds: string[] };
@@ -32,7 +32,7 @@ export const messageSchema = z.object({ conversationId: id, content: z.string().
 export const signalSchema = z.object({ channelId: id, to: id, epoch: id, description: z.object({ type: z.enum(['offer', 'answer', 'pranswer', 'rollback']), sdp: z.string().max(100000).optional() }).optional(), candidate: z.object({ candidate: z.string().max(4096).optional(), sdpMid: z.string().nullable().optional(), sdpMLineIndex: z.number().int().nullable().optional(), usernameFragment: z.string().nullable().optional() }).nullable().optional(), streams: z.array(z.object({ streamId: id, kind: z.enum(['audio', 'screen']), leaseId: id.optional() })).max(3).optional(), subscription: z.object({ leaseId: id, enabled: z.boolean() }).optional() });
 const rank: Record<Role, number> = { member: 0, moderator: 1, administrator: 2, owner: 3 };
 export function basePermissions(role: Role): Record<Permission, boolean> {
-  return { view: true, write: true, speak: true, share: true, manageChannels: rank[role] >= 2, manageMembers: rank[role] >= 1, moderate: rank[role] >= 1, createInvites: rank[role] >= 1 };
+  return { view: true, write: true, speak: true, share: true, manageChannels: rank[role] >= 2, manageMembers: rank[role] >= 1, moderate: rank[role] >= 1, createInvites: true };
 }
 export function resolvePermissions(role: Role, overrides: Partial<Record<Permission, boolean>> = {}): Record<Permission, boolean> {
   return role === 'owner' ? basePermissions(role) : { ...basePermissions(role), ...overrides };

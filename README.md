@@ -1,6 +1,8 @@
-**Current release: 0.5.1** — server efficiency, push-to-talk recovery, toggle-to-talk focus behavior and readability improvements are deployed on the pilot at the operator’s explicit request. All 84 unit/API tests and production builds pass. The failed ten-user media capacity gate remains a known limitation. See [release verification and limitations](docs/RELEASE-0.5.1.md) and [matched performance measurements](docs/PERFORMANCE-0.5.1.md).
+**Current release: 0.5.2** — members can create invite links by default, with an owner-only switch to disable it. Browser voice volume recovers suspended playback and verifies real 0–200% gain, including saved levels after rejoin/reload. The pilot and Windows installer are updated. All 87 unit/API tests and production builds pass. See [release verification and limitations](docs/RELEASE-0.5.2.md). The earlier failed ten-user media capacity gate remains unresolved.
 
-Previous release: **0.5.0** — [gaming voice/viewer and reliability](docs/RELEASE-0.5.0.md).
+Previous release: **0.5.1** — [server efficiency and talk controls](docs/RELEASE-0.5.1.md), [matched measurements](docs/PERFORMANCE-0.5.1.md).
+
+Earlier release: **0.5.0** — [gaming voice/viewer and reliability](docs/RELEASE-0.5.0.md).
 
 Previous update: **0.4.4** — [compact upload allowance](docs/COMPACT-UPLOAD-0.4.4.md).
 

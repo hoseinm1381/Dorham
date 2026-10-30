@@ -658,5 +658,11 @@
   "Push to talk ready": "آمادهٔ صحبت با نگه‌داشتن کلید",
   "Hold {key} to talk. Pressing the talk key also clears manual mute.": "برای صحبت، {key} را نگه دارید. فشردن کلید صحبت، قطع صدای دستی را هم برمی‌دارد.",
   "Push-to-talk releases when this page loses focus. Toggle-to-talk stays on until toggled off or you leave the call. Function keys work while typing; letter keys do not. Website hotkeys cannot be pressed from other apps.": "با خروج از صفحه، صحبت با نگه‌داشتن کلید متوقف می‌شود. حالت روشن/خاموش با کلید، تا خاموش کردن یا خروج از تماس فعال می‌ماند. کلیدهای F هنگام تایپ هم کار می‌کنند، اما کلیدهای حروف نه. در نسخهٔ وب، کلید صحبت در برنامه‌های دیگر کار نمی‌کند.",
-  "Windows background talk keys work in other apps and the tray. Toggle-to-talk stays on when switching apps. Lock, sleep or helper failure mutes the microphone.": "کلید صحبت در ویندوز هنگام استفاده از برنامه‌های دیگر و در حالت کوچک‌شده هم کار می‌کند. جابه‌جایی بین برنامه‌ها حالت روشن/خاموش با کلید را قطع نمی‌کند. قفل شدن ویندوز، حالت خواب یا خرابی ابزار کلید میانبر، میکروفون را قطع می‌کند."
+  "Windows background talk keys work in other apps and the tray. Toggle-to-talk stays on when switching apps. Lock, sleep or helper failure mutes the microphone.": "کلید صحبت در ویندوز هنگام استفاده از برنامه‌های دیگر و در حالت کوچک‌شده هم کار می‌کند. جابه‌جایی بین برنامه‌ها حالت روشن/خاموش با کلید را قطع نمی‌کند. قفل شدن ویندوز، حالت خواب یا خرابی ابزار کلید میانبر، میکروفون را قطع می‌کند.",
+  "Invite people": "دعوت از دیگران",
+  "Allow members to create invite links": "اجازه ساخت لینک دعوت به اعضا",
+  "Members manage their own links. Turning this off stops new member invitations; existing links remain valid until revoked.": "اعضا لینک‌های خودشان را مدیریت می‌کنند. با خاموش کردن این گزینه، اعضا نمی‌توانند لینک جدید بسازند؛ لینک‌های قبلی تا زمان لغو معتبر می‌مانند.",
+  "Only the owner can change member invitations.": "فقط مالک می‌تواند تنظیم دعوت اعضا را تغییر دهد.",
+  "You can revoke only your own invitations.": "فقط می‌توانید لینک‌های دعوت خودتان را لغو کنید.",
+  "0% mutes this person; 100% is original volume; 200% doubles the audio signal.": "۰٪ صدای این فرد را قطع می‌کند؛ ۱۰۰٪ صدای اصلی و ۲۰۰٪ سیگنال صوتی دوبرابر است."
 }

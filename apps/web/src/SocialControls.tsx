@@ -10,6 +10,14 @@ export function NotificationSettings() {
   return <section className="notification-settings"><h3>{tr('Notification sounds')}</h3>{(['messages', 'voice'] as const).map(key => <label className="check-row" key={key}><input type="checkbox" checked={preferences[key]} onChange={e => { const next = { ...preferences, [key]: e.target.checked }; setPreferences(next); saveSoundPreferences(next); }}/>{tr(key === 'messages' ? 'Direct message sounds' : 'Voice join and leave sounds')}</label>)}<button type="button" className="secondary" onClick={() => { unlockSounds(); playCue('message'); }}>{tr('Preview notification sound')}</button><small>{tr('Do not disturb silences notification sounds. Sound starts after interacting with the app.')}</small></section>;
 }
 type Invite = { code: string; url: string; expiresAt: number; remaining: number };
+export function MemberInviteSetting({ server, refresh, error }: { server: Server; refresh: () => Promise<void>; error: (e: unknown) => void }) {
+  const [enabled, setEnabled] = useState(server.allowMemberInvites !== false), [busy, setBusy] = useState(false);
+  useEffect(() => { if (!busy) setEnabled(server.allowMemberInvites !== false); }, [server.id, server.allowMemberInvites, busy]);
+  return <><label className="check-row"><input type="checkbox" checked={enabled} disabled={busy} onChange={event => {
+    const previous = enabled, next = event.target.checked; setEnabled(next); setBusy(true);
+    void request(`/servers/${server.id}`, { allowMemberInvites: next }, 'PATCH').then(refresh).catch(reason => { setEnabled(previous); error(reason); }).finally(() => setBusy(false));
+  }}/>{tr('Allow members to create invite links')}</label><p>{tr('Members manage their own links. Turning this off stops new member invitations; existing links remain valid until revoked.')}</p></>;
+}
 export function InvitationManager({ serverId, error }: { serverId: string; error: (e: unknown) => void }) {
   const [invites, setInvites] = useState<Invite[]>([]), [hours, setHours] = useState(168), [uses, setUses] = useState(10), [busy, setBusy] = useState(false), [copied, setCopied] = useState('');
   async function load() { setInvites((await request(`/servers/${serverId}/invites`)).invites); }

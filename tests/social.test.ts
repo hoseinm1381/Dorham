@@ -18,7 +18,7 @@ it('applies custom-role denies, allows, channel overrides and protected ownershi
 });
 it('keeps invite links across sessions, limits who can read them, and revokes them idempotently', async () => {
   const { owner, member, outsider, server } = await setup();
-  expect((await h.api(member, `/servers/${server.id}/invites`)).statusCode).toBe(403);
+  expect((await h.api(member, `/servers/${server.id}/invites`)).json().invites).toEqual([]);
   expect((await h.api(outsider, `/servers/${server.id}/invites`)).statusCode).toBe(403);
   const rid = randomUUID(), first = await h.api(owner, `/servers/${server.id}/invites`, { requestId: rid, hours: 168, uses: 3 });
   expect((await h.api(owner, `/servers/${server.id}/invites`, { requestId: rid, hours: 168, uses: 3 })).json()).toEqual(first.json());
@@ -115,5 +115,5 @@ it('leaves a server with voice and role cleanup, preserves its history, and requ
   const requestId = randomUUID(); for (let i = 0; i < 2; i++) expect((await h.api(member, `/servers/${server.id}/leave`, { requestId })).statusCode).toBe(200);
   expect((await h.api(member, '/bootstrap')).json().servers).toEqual([]); expect(await h.db.all('SELECT * FROM member_roles WHERE user_id=?', [member.id])).toEqual([]); expect(await h.db.one('SELECT * FROM voice_members WHERE user_id=?', [member.id])).toBeUndefined(); expect(await h.db.one('SELECT * FROM share_leases WHERE user_id=?', [member.id])).toBeUndefined();
   expect((await h.api(member, `/conversations/${text.conversationId}/messages`)).statusCode).toBe(403); expect((await h.api(owner, `/conversations/${text.conversationId}/messages`)).json().messages[0].content).toBe('Retain after leaving');
-  const invite = (await h.api(owner, `/servers/${server.id}/invites`, {})).json(); await h.api(member, '/invites/join', { code: invite.code }); expect((await h.api(member, '/bootstrap')).json().servers[0].permissions.createInvites).toBe(false);
+  const invite = (await h.api(owner, `/servers/${server.id}/invites`, {})).json(); await h.api(member, '/invites/join', { code: invite.code }); expect((await h.api(member, '/bootstrap')).json().servers[0].permissions.createInvites).toBe(true);
 });

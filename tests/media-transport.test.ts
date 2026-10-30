@@ -35,6 +35,18 @@ it('a cancelled pending join cannot resurrect a voice room or start its heartbea
   const f = fixture(); const joining = f.transport.join('room'); const rejected = expect(joining).rejects.toThrow('cancelled');
   await f.transport.leave(); f.release(); await rejected; expect(f.transport.room).toBeNull(); expect(f.events).not.toContain('voice:sfu'); await f.transport.destroy();
 });
+it('a positive volume gesture resumes playback and reapplies the latest amplification after readiness', async () => {
+  const f = fixture();
+  try {
+    const joining = f.transport.join('room'); f.release(); await joining;
+    const media = (f.transport as any).media, participant = { identity: 'friend:epoch', setVolume: vi.fn() }; media.remoteParticipants.set(participant.identity, participant);
+    let resume!: () => void; media.startAudio = vi.fn(() => new Promise<void>(resolve => { resume = resolve; }));
+    f.transport.setVolume('friend', 1.5); f.transport.setVolume('friend', 2);
+    expect(media.startAudio).toHaveBeenCalledTimes(1); expect(participant.setVolume).toHaveBeenCalledWith(2, 'microphone');
+    participant.setVolume.mockClear(); resume(); await Promise.resolve();
+    expect(participant.setVolume).toHaveBeenCalledWith(2, 'microphone');
+  } finally { await f.transport.destroy(); }
+});
 it('coalesces overlapping microphone state acknowledgements without losing the final mute', async () => {
   const f = fixture();
   try {

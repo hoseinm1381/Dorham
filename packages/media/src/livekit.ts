@@ -12,6 +12,7 @@ export class LiveKitTransport implements MediaTransport {
   room: VoiceRoom | null = null; private media = new Room({ webAudioMix: true, adaptiveStream: true, dynacast: true, publishDefaults: { audioPreset: { maxBitrate: 24000 }, dtx: true, forceStereo: false } });
   private heartbeat?: ReturnType<typeof setInterval>; private channelId: string | null = null; private muted = false; private deafened = false;
   private volumes = new Map<string, number>(); private elements = new Map<string, HTMLMediaElement>(); private lease: Share | null = null;
+  private playbackTask: Promise<void> | null = null;
   private microphoneTask: Promise<void> | null = null; private appliedMicrophone: boolean | undefined;
   private deliveredScreens = new Set<string>(); private hiddenScreens = new Set<string>();
   private watchedShares = new Set<string>(); private streamVolumes = new Map<string, number>();
@@ -43,9 +44,9 @@ export class LiveKitTransport implements MediaTransport {
         // The SDK owns the only audible graph. Wrapping a MediaStream-backed
         // element in createMediaElementSource can leave Chromium playback
         // outside that graph, bypassing our gain and deafen controls.
-        this.applyVolumes();
         const element = track.attach(); element.hidden = true; document.body.appendChild(element);
         this.elements.set(publication.trackSid, element);
+        this.applyVolumes();
         void element.play().catch(e => this.options.emit('error', e.message));
       }
       if (track.source === Track.Source.ScreenShare) this.deliverScreen(participant, track);
@@ -55,7 +56,7 @@ export class LiveKitTransport implements MediaTransport {
     this.media.on(RoomEvent.LocalTrackPublished, publication => { if (publication.source === Track.Source.ScreenShare) this.emitLocalScreen(); });
     this.media.on(RoomEvent.LocalTrackUnpublished, publication => { if (publication.source === Track.Source.ScreenShare && this.lease) void this.stopShare().catch(e => options.emit('error', e.message)); });
     this.media.on(RoomEvent.Reconnecting, () => options.emit('status', 'Reconnecting SFU…'));
-    this.media.on(RoomEvent.Reconnected, () => { this.appliedMicrophone = undefined; void this.applyMicrophone().catch(e => options.emit('error', e.message)); options.emit('status', 'Voice connected through SFU'); });
+    this.media.on(RoomEvent.Reconnected, () => { this.appliedMicrophone = undefined; this.applyVolumes(); this.updateSubscriptions(); void this.applyMicrophone().catch(e => options.emit('error', e.message)); options.emit('status', 'Voice connected through SFU'); });
   }
   async join(channelId: string) {
     if (this.channelId) await this.leave(); this.channelId = channelId; this.captureProcessing = { ...this.audioProcessing }; this.joining = true;
@@ -113,7 +114,18 @@ export class LiveKitTransport implements MediaTransport {
     }
   }
   async setDeafened(value: boolean) { this.deafened = value; this.applyVolumes(); if (this.channelId && this.media.state === 'connected') await this.state(); }
-  setVolume(userId: string, value: number) { this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolumes(); }
+  private resumePlayback() {
+    if (this.media.state !== 'connected' || this.playbackTask) return;
+    // A volume gesture must also wake Chrome's suspended playback context.
+    // Invoke the SDK immediately while the browser still has user activation.
+    this.playbackTask = this.media.startAudio().then(() => this.applyVolumes())
+      .catch(error => this.options.emit('error', error.message))
+      .finally(() => { this.playbackTask = null; });
+  }
+  setVolume(userId: string, value: number) {
+    this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolumes();
+    if (value > 0) this.resumePlayback();
+  }
   setStreamVolume(leaseId: string, value: number) { this.streamVolumes.set(leaseId, Math.max(0, Math.min(2, value))); this.applyVolumes(); }
   async setOutputDevice(deviceId: string) { await this.media.switchActiveDevice('audiooutput', deviceId || 'default'); }
   getLocalAudioStream() { const track = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack?.mediaStreamTrack; return track ? new MediaStream([track]) : null; }

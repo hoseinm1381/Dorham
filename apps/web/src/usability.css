@@ -13,3 +13,4 @@
 @media(prefers-reduced-motion:reduce) {
   *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; }
 }
+.invite-people { width:100%; margin-top:16px; }

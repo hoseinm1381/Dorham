@@ -195,7 +195,10 @@ export class MeshTransport implements MediaTransport {
   }
   async setMuted(value: boolean) { this.muted = value; for (const t of this.mic?.getAudioTracks() || []) t.enabled = !value && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverDeafened; await this.publishState(); }
   async setDeafened(value: boolean) { this.deafened = value; for (const userId of this.peers.keys()) this.applyVolume(userId); await this.setMuted(this.muted); }
-  setVolume(userId: string, value: number) { this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolume(userId); }
+  setVolume(userId: string, value: number) {
+    this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolume(userId);
+    if (value > 0 && this.context?.state === 'suspended') void this.context.resume().catch(error => this.error(error));
+  }
   async setDevice(deviceId: string) { await this.replaceMicrophone(deviceId, this.captureProcessing); }
   async setOutputDevice(deviceId: string) { if (!this.context || typeof (this.context as any).setSinkId !== 'function') throw new Error('Speaker selection is not supported in this browser.'); await (this.context as any).setSinkId(deviceId); }
   getLocalAudioStream() { return this.mic; }
