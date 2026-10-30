@@ -278,7 +278,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   };
   chess.online = uid => [...io.sockets.sockets.values()].some(s => s.data.userId === uid);
   chess.notify = async (g, directoryChanged) => {
-    const members = new Set((await db.all('SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)', [g.serverId])).map(r => r.user_id));
+    const members = new Set((await db.all('SELECT u.id AS user_id FROM users u JOIN servers s ON s.id=? LEFT JOIN members m ON m.server_id=s.id AND m.user_id=u.id WHERE u.banned=0 AND (u.instance_admin=1 OR (m.user_id IS NOT NULL AND (u.guest=0 OR s.allow_guests=1)))', [g.serverId])).map(r => r.user_id));
     if (!members.has(g.whiteId) || (g.blackId && !members.has(g.blackId))) return;
     const voice = g.channelId ? new Set((await db.all('SELECT user_id FROM voice_members WHERE channel_id=?', [g.channelId])).map(r => r.user_id)) : null;
     for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId) && (!voice || voice.has(s.data.userId) || s.data.userId === g.whiteId || s.data.userId === g.blackId)) s.emit('chess:changed', { id: g.id, serverId: g.serverId, channelId: g.channelId || null, directoryChanged, challengeTo: g.status === 'pending' ? g.blackId : null });

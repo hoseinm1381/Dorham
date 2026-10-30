@@ -3,6 +3,25 @@ import { io, type Socket } from 'socket.io-client';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { definition, type GameKind, type GameView } from '../../packages/contracts/src/games';
 test.use({trace:'off',actionTimeout:12000});
+test('administrator without explicit membership joins Poker and hosts Chess with a second browser account',async({browser})=>{
+  const contexts=await Promise.all([browser.newContext({permissions:['microphone']}),browser.newContext({permissions:['microphone']})]);
+  const [a,b]=await Promise.all(contexts.map(c=>c.newPage())),suffix=Date.now().toString().slice(-7),host='Member'+suffix,admin='Admin'+suffix;
+  try{
+    await register(a,host);await register(b,admin);await api(b,'/admin/claim',{secret:'browser-fixture-bootstrap-not-for-deployment'});
+    const server=await api(a,'/servers',{name:'Admin regression lounge'});
+    for(const p of [a,b]){await p.reload();await p.getByRole('button',{name:'Open Admin regression lounge',exact:true}).click();await p.getByRole('button',{name:'Lounge',exact:true}).click();}
+    await a.getByRole('button',{name:'Games',exact:true}).click();await a.getByRole('button',{name:'Texas Hold\u2019em',exact:true}).click();await a.getByRole('button',{name:'Create game',exact:true}).click();
+    await b.getByRole('button',{name:`Join ${host}'s game`,exact:true}).click();await expect(b.locator('.game-status')).toContainText('Spectating');await b.getByRole('button',{name:'Play',exact:true}).click();
+    await a.getByRole('button',{name:'Start game',exact:true}).click();await a.getByRole('button',{name:'Call 10',exact:true}).click();await b.getByRole('button',{name:'Check',exact:true}).click();await expect(a.locator('.poker-community .poker-card.empty')).toHaveCount(2);
+    await b.getByRole('button',{name:'Fold',exact:true}).click();b.once('dialog',d=>d.accept());await b.getByRole('button',{name:'Leave game',exact:true}).click();
+    for(const p of [a,b])await p.getByRole('button',{name:'Back to chat',exact:true}).click();
+    await b.getByRole('button',{name:'Games',exact:true}).click();await b.getByRole('button',{name:'Chess',exact:true}).click();await b.getByLabel('Game mode',{exact:true}).selectOption('standard');await b.getByRole('button',{name:'Create game',exact:true}).click();
+    await a.getByRole('button',{name:`Join ${admin}'s game`,exact:true}).click();await a.getByRole('button',{name:'Play',exact:true}).click();await expect(b.locator('.chess-status')).toHaveText('White to move');
+    await b.locator('[data-square="e2"]').click();await b.locator('[data-square="e4"]').click();await expect(a.locator('[data-square="e4"] img')).toBeVisible();
+    await a.locator('[data-square="e7"]').click();await a.locator('[data-square="e5"]').click();await expect(b.locator('[data-square="e5"] img')).toBeVisible();
+    await writeFile('artifacts/evidence/game-admin-browser.json',JSON.stringify({administratorJoinedWithoutInvite:true,pokerWatchPlayBetting:true,administratorHostedChess:true,twoWayMoves:true,server:server.name},null,2));
+  }finally{await Promise.allSettled(contexts.map(c=>c.close()));}
+});
 async function register(p:Page,name:string){await p.goto('/');await p.getByRole('button',{name:'Create an account',exact:true}).click();await p.getByLabel('Display name',{exact:true}).fill(name);await p.getByLabel('Username',{exact:true}).fill(name);await p.getByLabel('Password',{exact:true}).fill('correct-horse-123');await p.getByRole('button',{name:'Create account',exact:true}).click();await expect(p.locator('.app')).toBeVisible();}
 async function api(p:Page,route:string,body?:any,method=body?'POST':'GET'){return p.evaluate(async({route,body,method})=>{const me=await(await fetch('/api/v1/auth/me')).json();const r=await fetch('/api/v1'+route,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf},body:body?JSON.stringify({requestId:crypto.randomUUID(),...body}):undefined});if(!r.ok)throw Error(await r.text());return r.json();},{route,body,method});}
 async function fixture(browser:Browser,baseURL:string,kind:GameKind,extra=0){

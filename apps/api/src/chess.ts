@@ -58,11 +58,11 @@ export class ChessService {
   }
   close() { this.closed = true; clearTimeout(this.timer); }
   async allowed(tx: Connection, uid: string, g: ChessGame) {
-    const member = await tx.one('SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.user_id=? AND m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)', [uid, g.serverId]);
-    if (!member) fail(403, 'FORBIDDEN', 'Join the match server to play or watch.');
-    // Spectators must still share this server with both players.
+    await this.service.member(tx, uid, g.serverId);
+    // Both players and spectators must retain server access, including an
+    // instance administrator's existing access without an explicit membership.
     const ids = [g.whiteId, ...(g.blackId ? [g.blackId] : [])];
-    for (const id of ids) if (!await tx.one('SELECT user_id FROM members WHERE server_id=? AND user_id=?', [g.serverId, id])) fail(403, 'FORBIDDEN', 'A player has left the match server.');
+    for (const id of ids) await this.service.member(tx, id, g.serverId);
     if (g.channelId && uid !== g.whiteId && uid !== g.blackId) await this.requireVoice(tx, uid, g.channelId);
   }
   private async requireVoice(tx: Connection, uid: string, channelId: string) {
@@ -89,7 +89,7 @@ export class ChessService {
     });
   }
   async list(uid: string, serverId: string) {
-    if (!await this.service.db.one('SELECT user_id FROM members WHERE server_id=? AND user_id=?', [serverId, uid])) fail(403, 'FORBIDDEN', 'Server membership required.');
+    await this.service.member(this.service.db, uid, serverId);
     const rows = await this.service.db.all('SELECT state FROM chess_games WHERE server_id=? ORDER BY updated_at DESC LIMIT 30', [serverId]);
     return rows.map(r => JSON.parse(r.state) as ChessGame).map(({ id, whiteId, blackId, whiteName, blackName, status, position, minutes, increment, result }) => ({ id, whiteId, blackId, whiteName, blackName, status, mode: position.mode, minutes, increment, result }));
   }
@@ -103,8 +103,8 @@ export class ChessService {
       }
       const names = [];
       for (const userId of [uid, ...(b.opponentId ? [b.opponentId] : [])]) {
-        const row = await tx.one('SELECT u.display_name FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND m.user_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)', [b.serverId, userId]);
-        if (!row) fail(403, 'FORBIDDEN', 'Both players must belong to this server.'); names.push(row!.display_name);
+        await this.service.member(tx, userId, b.serverId);
+        const row = await tx.one('SELECT display_name FROM users WHERE id=?', [userId]); names.push(row!.display_name);
       }
       if (b.opponentId === uid) fail(400, 'INVALID_REQUEST', 'Choose another player.');
       if (b.opponentId && await tx.one('SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)', [uid, b.opponentId, b.opponentId, uid])) fail(403, 'FORBIDDEN', 'This challenge is unavailable.');

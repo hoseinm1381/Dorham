@@ -1,0 +1,9 @@
+# Game access for instance administrators
+
+On 2026-10-30, a real administrator account could enter a server's voice channel and see its Poker lobby, but opening the game returned `Join the game server to play or watch.` The instance administrator had no explicit `members` row. General server/channel access intentionally allows that account through `Service.member`; the game code incorrectly used a separate membership-only query. This was an application authorization mismatch, independent of Internet latency.
+
+Arcade game access now uses the same server-access rule as voice. Chess creation, listing, player/spectator access and change-event audiences follow the same rule. No membership records, roles or permissions are changed. Banned-account checks, ordinary membership requirements, voice-channel requirements, seat allocation and private player projections remain enforced.
+
+Lint, TypeScript, 16 focused administrator/arcade/Chess API tests and a guarded two-account Chrome scenario pass. The API regression covers all seven new games with the nonmember administrator joining and hosting; Poker private cards, out-of-voice rejection, ordinary outsiders, banned accounts and Chess updates are checked. The browser scenario plays Poker with an administrator joining without an invite, then plays two-way Chess with the administrator hosting. The isolated test fixture is removed afterward.
+
+This is a server-only correction to 0.7.0; existing website and Windows clients use it without downloading a new UI. Deployment validates the compiled candidate against a restored database copy, retains a fresh SQLite backup and the previous API directory, and checks unchanged schema, web assets and configuration. Evidence and hotfixed server/source packages are kept separately under `artifacts/game-admin-fix`, preserving the original 0.7.0 release archives.
