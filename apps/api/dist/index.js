@@ -22,11 +22,11 @@ import {
   shareUpdateSchema,
   signalSchema,
   token
-} from "./chunk-6RYK2GQZ.js";
+} from "./chunk-Q4STIB6F.js";
 import {
   config,
   openDatabase
-} from "./chunk-JFW54OBS.js";
+} from "./chunk-VFHQ757F.js";
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
@@ -873,7 +873,7 @@ async function createApp(c = config(), options = {}) {
       return service.createServer(req.account.id, b.requestId, b.name);
     });
     api.patch("/servers/:id", async (req) => {
-      const b = z4.object({ name: schemas.name.optional(), delete: z4.boolean().optional(), allowGuests: z4.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0).parse(req.body);
+      const b = z4.object({ name: schemas.name.optional(), delete: z4.boolean().optional(), allowGuests: z4.boolean().optional(), allowMemberInvites: z4.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
       return service.changeServer(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/channels", async (req) => {

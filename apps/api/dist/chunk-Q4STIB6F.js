@@ -12,7 +12,7 @@ var messageSchema = z.object({ conversationId: id, content: z.string().trim().ma
 var signalSchema = z.object({ channelId: id, to: id, epoch: id, description: z.object({ type: z.enum(["offer", "answer", "pranswer", "rollback"]), sdp: z.string().max(1e5).optional() }).optional(), candidate: z.object({ candidate: z.string().max(4096).optional(), sdpMid: z.string().nullable().optional(), sdpMLineIndex: z.number().int().nullable().optional(), usernameFragment: z.string().nullable().optional() }).nullable().optional(), streams: z.array(z.object({ streamId: id, kind: z.enum(["audio", "screen"]), leaseId: id.optional() })).max(3).optional(), subscription: z.object({ leaseId: id, enabled: z.boolean() }).optional() });
 var rank = { member: 0, moderator: 1, administrator: 2, owner: 3 };
 function basePermissions(role) {
-  return { view: true, write: true, speak: true, share: true, manageChannels: rank[role] >= 2, manageMembers: rank[role] >= 1, moderate: rank[role] >= 1, createInvites: rank[role] >= 1 };
+  return { view: true, write: true, speak: true, share: true, manageChannels: rank[role] >= 2, manageMembers: rank[role] >= 1, moderate: rank[role] >= 1, createInvites: true };
 }
 function canManage(actor, target) {
   return rank[actor] > rank[target];
@@ -217,7 +217,7 @@ var Service = class {
       if (!await tx.one("SELECT id FROM servers WHERE id=?", [serverId])) fail(404, "NOT_FOUND", "Server not found.");
       return { server_id: serverId, user_id: userId, role: "owner", globalAdmin: true };
     }
-    if (account.guest && permission && ["manageChannels", "manageMembers", "moderate", "createInvites"].includes(permission)) fail(403, "GUEST_ACCOUNT", "Register before using administration controls.");
+    if (account.guest && permission && ["manageChannels", "manageMembers", "moderate"].includes(permission)) fail(403, "GUEST_ACCOUNT", "Register before using administration controls.");
     if (account.guest && !(await tx.one("SELECT allow_guests FROM servers WHERE id=?", [serverId]))?.allow_guests) fail(403, "GUESTS_DISABLED", "This server does not allow guests.");
     const m = await tx.one("SELECT * FROM members WHERE server_id=? AND user_id=?", [serverId, userId]);
     if (!m || permission && !(await this.memberPermissions(tx, m.role, userId, serverId))[permission]) fail(403, "FORBIDDEN", "You do not have permission.");
@@ -227,7 +227,14 @@ var Service = class {
     return (await tx.all("SELECT r.* FROM custom_roles r JOIN member_roles mr ON mr.role_id=r.id AND mr.server_id=r.server_id WHERE mr.user_id=? AND r.server_id=? ORDER BY r.name", [userId, serverId])).map((r) => ({ id: r.id, serverId: r.server_id, name: r.name, color: r.color, permissions: JSON.parse(r.permissions) }));
   }
   async memberPermissions(tx, role, userId, serverId) {
-    return resolveCustomPermissions(role, (await this.assignedRoles(tx, userId, serverId)).map((r) => r.permissions));
+    const permissions2 = resolveCustomPermissions(role, (await this.assignedRoles(tx, userId, serverId)).map((r) => r.permissions));
+    if (role !== "owner" && !(await tx.one("SELECT allow_member_invites FROM servers WHERE id=?", [serverId]))?.allow_member_invites) permissions2.createInvites = false;
+    if ((await tx.one("SELECT guest FROM users WHERE id=?", [userId]))?.guest) {
+      permissions2.manageChannels = false;
+      permissions2.manageMembers = false;
+      permissions2.moderate = false;
+    }
+    return permissions2;
   }
   async authority(tx, member) {
     if (member.role !== "member") return member.role;
@@ -244,8 +251,8 @@ var Service = class {
       permissions2.manageChannels = false;
       permissions2.manageMembers = false;
       permissions2.moderate = false;
-      permissions2.createInvites = false;
     }
+    if (m.role !== "owner" && !(await tx.one("SELECT allow_member_invites FROM servers WHERE id=?", [ch.server_id]))?.allow_member_invites) permissions2.createInvites = false;
     const restriction = await tx.one("SELECT sharing_allowed FROM voice_restrictions WHERE channel_id=? AND user_id=?", [channelId, userId]);
     if (restriction && !restriction.sharing_allowed) permissions2.share = false;
     if (ch.kind === "voice" && m.role !== "owner") {
@@ -300,7 +307,7 @@ var Service = class {
     return this.db.transaction(async (connection) => {
       const tx = readSnapshot(connection);
       const me = await tx.one("SELECT * FROM users WHERE id=?", [userId]);
-      const servers = (await tx.all("SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at", [userId, me.instance_admin])).map((s) => ({ id: s.id, name: s.name, ownerId: s.owner_id, role: me.instance_admin ? "owner" : s.role, allowGuests: Boolean(s.allow_guests) }));
+      const servers = (await tx.all("SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at", [userId, me.instance_admin])).map((s) => ({ id: s.id, name: s.name, ownerId: s.owner_id, role: me.instance_admin ? "owner" : s.role, allowGuests: Boolean(s.allow_guests), allowMemberInvites: Boolean(s.allow_member_invites) }));
       for (const server of servers) Object.assign(server, { permissions: await this.memberPermissions(tx, server.role, userId, server.id) });
       const allChannels = await tx.all("SELECT c.* FROM channels c LEFT JOIN members m ON c.server_id=m.server_id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY c.created_at", [userId, me.instance_admin]);
       const channels = [];
@@ -348,6 +355,7 @@ var Service = class {
   async changeServer(userId, requestId2, serverId, body) {
     const result = await this.mutate(userId, requestId2, "server.change", { serverId, ...body }, async (tx) => {
       const m = await this.member(tx, userId, serverId, "manageChannels");
+      if (body.allowMemberInvites !== void 0 && m.role !== "owner") fail(403, "FORBIDDEN", "Only the owner can change member invitations.");
       if (body.delete) {
         if (m.role !== "owner") fail(403, "FORBIDDEN", "Only the owner can delete a server.");
         const cvs = await tx.all("SELECT conversation_id FROM channels WHERE server_id=?", [serverId]);
@@ -360,7 +368,8 @@ var Service = class {
           await this.revalidateVoice(tx, serverId);
         }
       }
-      await audit(tx, userId, "server.change", serverId, { delete: Boolean(body.delete), allowGuests: body.allowGuests });
+      if (!body.delete && body.allowMemberInvites !== void 0) await tx.run("UPDATE servers SET allow_member_invites=? WHERE id=?", [Number(body.allowMemberInvites), serverId]);
+      await audit(tx, userId, "server.change", serverId, { delete: Boolean(body.delete), allowGuests: body.allowGuests, allowMemberInvites: body.allowMemberInvites });
       return { success: true };
     });
     await this.notify("state:changed", {});
@@ -432,12 +441,16 @@ var Service = class {
     });
   }
   async invitations(userId, serverId) {
-    await this.member(this.db, userId, serverId, "createInvites");
-    return { invites: (await this.db.all("SELECT code,expires_at,remaining FROM invites WHERE server_id=? AND expires_at>? AND remaining>0 AND code IS NOT NULL ORDER BY expires_at DESC", [serverId, Date.now()])).map((r) => ({ code: r.code, url: `${this.c.publicUrl}/?invite=${r.code}`, expiresAt: Number(r.expires_at), remaining: r.remaining })) };
+    return this.db.transaction(async (tx) => {
+      const member = await this.member(tx, userId, serverId, "createInvites"), manageAll = await this.authority(tx, member) !== "member";
+      return { invites: (await tx.all("SELECT code,expires_at,remaining FROM invites WHERE server_id=? AND expires_at>? AND remaining>0 AND code IS NOT NULL" + (manageAll ? "" : " AND created_by=?") + " ORDER BY expires_at DESC", [serverId, Date.now(), ...manageAll ? [] : [userId]])).map((r) => ({ code: r.code, url: `${this.c.publicUrl}/?invite=${r.code}`, expiresAt: Number(r.expires_at), remaining: r.remaining })) };
+    });
   }
   async revokeInvitation(userId, rid, serverId, code) {
     return this.mutate(userId, rid, "invite.revoke", { serverId, code }, async (tx) => {
-      await this.member(tx, userId, serverId, "createInvites");
+      const member = await this.member(tx, userId, serverId, "createInvites"), manageAll = await this.authority(tx, member) !== "member";
+      const invitation = await tx.one("SELECT created_by FROM invites WHERE server_id=? AND hash=?", [serverId, hash(code)]);
+      if (invitation && !manageAll && invitation.created_by !== userId) fail(403, "FORBIDDEN", "You can revoke only your own invitations.");
       await tx.run("DELETE FROM invites WHERE server_id=? AND hash=?", [serverId, hash(code)]);
       await audit(tx, userId, "invite.revoke", serverId);
       return { success: true };
@@ -1165,4 +1178,4 @@ export {
   Service,
   schemas
 };
-//# sourceMappingURL=chunk-6RYK2GQZ.js.map
+//# sourceMappingURL=chunk-Q4STIB6F.js.map

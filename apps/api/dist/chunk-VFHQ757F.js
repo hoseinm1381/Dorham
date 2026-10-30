@@ -142,6 +142,11 @@ async function migrateExpansion(db) {
     ]) await tx.run(query);
     await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(4,?)", [Date.now()]);
   });
+  await db.transaction(async (tx) => {
+    if (await tx.one("SELECT version FROM schema_migrations WHERE version=5")) return;
+    await tx.run("ALTER TABLE servers ADD COLUMN allow_member_invites INTEGER NOT NULL DEFAULT 1");
+    await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(5,?)", [Date.now()]);
+  });
 }
 
 // apps/api/src/db.ts
@@ -278,4 +283,4 @@ export {
   config,
   openDatabase
 };
-//# sourceMappingURL=chunk-JFW54OBS.js.map
+//# sourceMappingURL=chunk-VFHQ757F.js.map
