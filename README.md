@@ -1,8 +1,8 @@
-**0.5.0 candidate:** Discord-style gaming voice, deliberate stream viewing and reliability changes are implemented locally. Live remains **0.4.4** while the required media capacity gate is failing. See [candidate status and continuation](docs/GAMING-0.5.0.md).
+**Current release: 0.5.0** — gaming voice/viewer and reliability changes are deployed on the pilot at the operator’s explicit request. The failed capacity gate remains a known limitation. See [release verification and limitations](docs/RELEASE-0.5.0.md).
 
-Current update: **0.4.4** — [compact upload allowance](docs/COMPACT-UPLOAD-0.4.4.md).
+Previous update: **0.4.4** — [compact upload allowance](docs/COMPACT-UPLOAD-0.4.4.md).
 
-Current audio-controls update: **0.4.3**. See [audio fixes](docs/AUDIO-FIX-0.4.3.md).
+Earlier audio-controls update: **0.4.3**. See [audio fixes](docs/AUDIO-FIX-0.4.3.md).
 
 # Dorham
 

@@ -1,6 +1,6 @@
 # Dorham 0.5.0 capacity retest — 30 October 2026
 
-**Result: required capacity gate remains failed. No push or deployment. Live stays 0.4.4.**
+**Retest result: the required capacity gate failed. No push or deployment occurred during the retest. The operator subsequently explicitly authorized the 0.5.0 rollout; see [release verification](RELEASE-0.5.0.md).**
 
 The operator requested another test and freed memory twice. The executed application was the existing 0.5.0 candidate, commit `0d0e39013b9ff4106605aedc3b898beeea71c721`; no application feature or codec changed during these tests. The final diagnostic also used two Chrome processes, five isolated account contexts each. That topology is explicitly different from the original single-browser run.
 

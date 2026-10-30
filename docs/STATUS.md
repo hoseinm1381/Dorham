@@ -1,6 +1,6 @@
-Candidate: **0.5.0** — [gaming and reliability](GAMING-0.5.0.md). Live remains **0.4.4**; the required ten-user media hold failed, so rollout is held. [Current measurements](GAMING-0.5.0-MEASUREMENTS.md).
+Current release: **0.5.0**, deployed on the operator’s explicit instruction after the failed capacity retest. See [release verification](RELEASE-0.5.0.md), [features](GAMING-0.5.0.md) and [capacity limitations](CAPACITY-RETEST-2026-10-30.md). The stress tests are not reclassified as passes.
 
-Current update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
+Previous update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
 
 Current audio-controls update: **0.4.3**. See [AUDIO-FIX-0.4.3.md](AUDIO-FIX-0.4.3.md).
 

@@ -1,5 +1,7 @@
 Current update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
 
+Current deployed application: **0.5.0**, schema 4, three standard share slots plus room-first fallback, a 30fps selectable ceiling and the combined 450 kbps target. The operator explicitly authorized rollout despite failed capacity tests. See [release verification and limitations](RELEASE-0.5.0.md).
+
 Current audio-controls update: **0.4.3**. See [AUDIO-FIX-0.4.3.md](AUDIO-FIX-0.4.3.md).
 
 # Ninecraft Iranian SFU pilot — 29 October 2026

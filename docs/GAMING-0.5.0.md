@@ -1,6 +1,6 @@
-# Dorham 0.5.0 release candidate
+# Dorham 0.5.0
 
-This is a local candidate. The Iranian pilot remains 0.4.4. Do not deploy or push this release as accepted while the required five-minute decoded-media capacity gate is failing. Existing accounts, files, messages and saved server addresses remain intact. Android work, hosting/domain migration, search, mentions, webcams, recording and transcription are deferred.
+Version 0.5.0 is deployed on the operator’s explicit instruction after reviewing the failed capacity tests. This supersedes the earlier rollout hold, without certifying sustained media capacity. Existing accounts, files, messages and saved server addresses remain intact. See [release and backup verification](RELEASE-0.5.0.md). Android work, hosting/domain migration, search, mentions, webcams, recording and transcription remain deferred.
 
 ## Interaction changes
 
@@ -59,4 +59,4 @@ Use the pinned Node 24.22.1 runtime and committed npm lock. Run `npm ci`, `npm r
 
 The heavy run requires `DORHAM_GAMING_CAPACITY=1`, `DORHAM_SFU_ISOLATED_TEST=1`, configured private SFU credentials and `node scripts/browser-tests.mjs --gaming-capacity`. It uses the authorized 6 GiB ceiling with a conservative 5,500 MiB combined-browser stop threshold. Small runs retain the normal 4 GiB guard. Never close unrelated browser windows. Evidence must distinguish private signaling tunnels, public media transport, physical devices and distributed/outage tests.
 
-Before rollout: complete the five-minute decoded hold on a stable path, rerun the matched optimization comparison at identical media settings, verify the proxy chain, and repeat final builds/installed checks if source changes. Keep independent verified data/configuration backups and the previous application. Apply schema 4 and the tier policy together. Verify readiness, public WSS, files/auth, preserved rows and restart persistence before declaring the pilot upgraded. Do not restore an older database over newer user messages.
+The operator subsequently authorized rollout despite the failed capacity gate. Schema 4, the tier policy and the installed-proxy trust path are now applied together; independent backups, preserved rows, public WSS, two-client decoded media and restart checks are recorded in RELEASE-0.5.0.md. Capacity certification still requires the complete five-minute hold on a stable/distributed path and a matched optimization comparison at identical media settings. Repeat relevant builds/installed checks after future source changes. Do not restore an older database over newer user messages.
