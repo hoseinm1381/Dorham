@@ -10,7 +10,7 @@ The Halloween plan is a shared account pool: 1 vCore, 1 GiB RAM, 1 GiB storage, 
 
 1. Run `npm run verify`, the browser tests, and `npm run deploy:bundle` locally.
 2. Import `artifacts/Dorham-0.2.0-Server.zip`, or use a private deployment repository containing the contents of `artifacts/server-0.2.0`. Connecting/importing a repository is an operator action; this project does not push or publish automatically.
-3. Select a patched supported Node 24 runtime. Install with `npm ci --omit=dev --ignore-scripts` and use `npm start`. Do not upload Windows-native dependencies.
+3. Select a patched supported Node 24 runtime. Install with `npm ci --omit=dev` during provisioning so the pinned native modules can install/build, verify `argon2`, `better-sqlite3` and `sharp` load on the matching Linux architecture, then use `npm start`. Do not upload Windows-native dependencies. Using `--ignore-scripts` requires separately completing native-module preparation before startup.
 4. In Environment, configure `NODE_ENV=production`, `HOST=0.0.0.0`, `PUBLIC_URL=https://<assigned-domain>`, `COOKIE_SECURE=true`, and `ALLOWED_ORIGINS=https://<assigned-domain>,https://localhost,dorham://app`. Keep Botkeep's assigned `SERVER_PORT`.
 5. Set `DATA_DIR` to the **actual persistent-volume path shown in your panel**. Do not assume `/tmp`, the import directory, or a particular container path survives redeployment.
 6. Configure Domains/HTTPS and verify `/health` and `/ready` from outside the hosting network.
