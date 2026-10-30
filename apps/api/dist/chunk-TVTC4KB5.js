@@ -161,6 +161,14 @@ async function migrateExpansion(db) {
     await tx.run("CREATE INDEX chess_voice ON chess_games(channel_id,status,updated_at)");
     await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(7,?)", [Date.now()]);
   });
+  await db.transaction(async (tx) => {
+    if (await tx.one("SELECT version FROM schema_migrations WHERE version=8")) return;
+    await tx.run("CREATE TABLE game_sessions (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, host_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL, status TEXT NOT NULL, updated_at BIGINT NOT NULL, state TEXT NOT NULL)");
+    await tx.run("CREATE INDEX games_channel ON game_sessions(channel_id,status,updated_at)");
+    await tx.run("CREATE TABLE game_players (game_id TEXT NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(game_id,user_id))");
+    await tx.run("CREATE INDEX games_user ON game_players(user_id,game_id)");
+    await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(8,?)", [Date.now()]);
+  });
 }
 
 // apps/api/src/db.ts
@@ -297,4 +305,4 @@ export {
   config,
   openDatabase
 };
-//# sourceMappingURL=chunk-KAONWHCO.js.map
+//# sourceMappingURL=chunk-TVTC4KB5.js.map

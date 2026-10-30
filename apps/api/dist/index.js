@@ -26,7 +26,7 @@ import {
 import {
   config,
   openDatabase
-} from "./chunk-KAONWHCO.js";
+} from "./chunk-TVTC4KB5.js";
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
@@ -37,8 +37,8 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import { Server as SocketServer } from "socket.io";
-import { z as z5, ZodError } from "zod";
-import { randomUUID as randomUUID3 } from "crypto";
+import { z as z6, ZodError } from "zod";
+import { randomUUID as randomUUID4 } from "crypto";
 import { monitorEventLoopDelay } from "perf_hooks";
 import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from "fs";
 import { mkdir as mkdir2, writeFile, unlink as unlink2, readdir, stat as stat3 } from "fs/promises";
@@ -602,8 +602,8 @@ function mediaAdmission(app2, service, sessionForSocket) {
 }
 
 // apps/api/src/chess.ts
-import { randomUUID as randomUUID2 } from "crypto";
-import { z as z4 } from "zod";
+import { randomUUID as randomUUID3 } from "crypto";
+import { z as z5 } from "zod";
 
 // packages/contracts/src/chess.ts
 var costs = { p: 1, n: 3, b: 3, r: 5, q: 9 };
@@ -740,8 +740,8 @@ function positionKey(s) {
   const ep = s.ep >= 0 && pseudo({ ...s, coins: [0, 0] }).some((a) => a.from !== void 0 && a.to === s.ep && s.board[a.from].toLowerCase() === "p" && a.from % 8 !== a.to % 8 && !inCheck(transition(s, a), s.turn)) ? s.ep : -1;
   return `${s.board.map((p) => p || ".").join("")}/${s.turn}/${s.rights}/${ep}${s.mode === "elixer" ? `/${s.coins}/${s.virgin.slice().sort((a, b) => a - b)}` : ""}`;
 }
-function applyAction(s, action) {
-  const a = legalActions(s).find((a2) => sameAction(a2, action));
+function applyAction(s, action2) {
+  const a = legalActions(s).find((a2) => sameAction(a2, action2));
   if (!a) throw new Error("Illegal chess action");
   return advanceLegalAction(s, a);
 }
@@ -774,9 +774,1070 @@ function outcome(s) {
   return s.ply >= 1e3 ? "Draw by game length limit" : null;
 }
 
+// apps/api/src/games/service.ts
+import { randomUUID as randomUUID2 } from "crypto";
+import { z as z4 } from "zod";
+
+// packages/contracts/src/games.ts
+var gameCatalog = [
+  { id: "chess", name: "Chess", icon: "\u265F", min: 2, max: 2, description: "Standard chess and Elixer Chess" },
+  { id: "poker", name: "Texas Hold\u2019em", icon: "\u2660", min: 2, max: 8, description: "Poker with play chips only" },
+  { id: "domino", name: "Dominoes", icon: "\u2685", min: 2, max: 4, description: "Draw and Block dominoes" },
+  { id: "telephone", name: "Drawing Telephone", icon: "\u270E", min: 3, max: 8, description: "Write, draw, guess, and reveal" },
+  { id: "drawing", name: "Draw & Guess", icon: "\u25A7", min: 2, max: 8, description: "Draw a word for your friends to guess" },
+  { id: "words", name: "Team Word Clues", icon: "\u25A6", min: 4, max: 8, description: "Two teams, secret words, clever clues" },
+  { id: "ludo", name: "Ludo", icon: "\u2684", min: 2, max: 4, description: "Race your four tokens home" },
+  { id: "four", name: "Four in a Row", icon: "\u25CF", min: 2, max: 2, description: "Connect four counters to win" }
+];
+var definition = (id2) => gameCatalog.find((g) => g.id === id2);
+
+// apps/api/src/games/engine.ts
+import { randomInt as randomInt2 } from "crypto";
+
+// apps/api/src/games/common.ts
+import { randomInt } from "crypto";
+function insist(value, message = "That action is unavailable.") {
+  if (!value) throw new Error(message);
+}
+function integer(value, min, max) {
+  insist(typeof value === "number" && Number.isInteger(value) && value >= min && value <= max, "Choose a valid number.");
+  return value;
+}
+function text(value, max = 180) {
+  insist(typeof value === "string" && value.trim().length > 0 && value.trim().length <= max, "Enter a shorter, nonempty answer.");
+  return value.trim().normalize("NFC");
+}
+function shuffle(values) {
+  const a = values.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+var freshPicture = () => ({ strokes: [], points: 0 });
+var colors = ["#20232b", "#ffffff", "#e45b63", "#4a86e8", "#43a477", "#ecc64c", "#9a69d5", "#e78e48"];
+function stroke(picture, value) {
+  insist(value && colors.includes(value.color) && [3, 7, 14].includes(value.width), "Choose a drawing tool.");
+  insist(Array.isArray(value.points) && value.points.length >= 1 && value.points.length <= 100, "Draw shorter strokes.");
+  insist(picture.points + value.points.length <= 1e3 && picture.strokes.length < 160, "This drawing is full. Clear it or submit it.");
+  const item = { color: value.color, width: value.width, points: value.points.map((p) => {
+    insist(Array.isArray(p) && p.length === 2);
+    return [integer(p[0], 0, 1e3), integer(p[1], 0, 1e3)];
+  }) };
+  picture.strokes.push(item);
+  picture.points += item.points.length;
+}
+var english = ["apple", "bridge", "castle", "dragon", "elephant", "flower", "guitar", "island", "jungle", "kite", "lantern", "mountain", "notebook", "ocean", "pencil", "queen", "rainbow", "snowman", "tiger", "umbrella", "volcano", "window", "yacht", "zebra", "balloon", "camera", "dolphin", "eagle", "forest", "garden", "hammer", "iceberg", "jacket", "kettle", "lemon", "moon", "needle", "orange", "penguin", "rocket", "sailboat", "turtle", "unicorn", "violin", "waterfall", "anchor", "bicycle", "cloud", "desert", "envelope", "feather", "glove", "helmet", "igloo", "jellyfish", "key", "ladder", "mirror", "nest", "owl", "planet", "rabbit", "sunflower", "train", "village", "whale", "zipper", "robot", "candle", "butterfly", "crown", "diamond", "fire", "ghost", "heart", "leaf", "magnet", "pearl", "star", "tower"];
+var persian = ["\u0633\u06CC\u0628", "\u067E\u0644", "\u0642\u0644\u0639\u0647", "\u0627\u0698\u062F\u0647\u0627", "\u0641\u06CC\u0644", "\u06AF\u0644", "\u06AF\u06CC\u062A\u0627\u0631", "\u062C\u0632\u06CC\u0631\u0647", "\u062C\u0646\u06AF\u0644", "\u0628\u0627\u062F\u0628\u0627\u062F\u06A9", "\u0641\u0627\u0646\u0648\u0633", "\u06A9\u0648\u0647", "\u062F\u0641\u062A\u0631", "\u062F\u0631\u06CC\u0627", "\u0645\u062F\u0627\u062F", "\u0645\u0644\u06A9\u0647", "\u0631\u0646\u06AF\u06CC\u0646\u200C\u06A9\u0645\u0627\u0646", "\u0622\u062F\u0645\u200C\u0628\u0631\u0641\u06CC", "\u0628\u0628\u0631", "\u0686\u062A\u0631", "\u0622\u062A\u0634\u0641\u0634\u0627\u0646", "\u067E\u0646\u062C\u0631\u0647", "\u0642\u0627\u06CC\u0642", "\u06AF\u0648\u0631\u062E\u0631", "\u0628\u0627\u062F\u06A9\u0646\u06A9", "\u062F\u0648\u0631\u0628\u06CC\u0646", "\u062F\u0644\u0641\u06CC\u0646", "\u0639\u0642\u0627\u0628", "\u0628\u0627\u063A", "\u0686\u06A9\u0634", "\u06A9\u0627\u067E\u0634\u0646", "\u06A9\u062A\u0631\u06CC", "\u0644\u06CC\u0645\u0648", "\u0645\u0627\u0647", "\u0633\u0648\u0632\u0646", "\u067E\u0631\u062A\u0642\u0627\u0644", "\u067E\u0646\u06AF\u0648\u0626\u0646", "\u0645\u0648\u0634\u06A9", "\u0644\u0627\u06A9\u200C\u067E\u0634\u062A", "\u0648\u06CC\u0648\u0644\u0646", "\u0622\u0628\u0634\u0627\u0631", "\u0644\u0646\u06AF\u0631", "\u062F\u0648\u0686\u0631\u062E\u0647", "\u0627\u0628\u0631", "\u0628\u06CC\u0627\u0628\u0627\u0646", "\u067E\u0627\u06A9\u062A", "\u067E\u0631", "\u062F\u0633\u062A\u06A9\u0634", "\u06A9\u0644\u0627\u0647", "\u06A9\u0644\u06CC\u062F", "\u0646\u0631\u062F\u0628\u0627\u0646", "\u0622\u06CC\u0646\u0647", "\u0644\u0627\u0646\u0647", "\u062C\u063A\u062F", "\u0633\u06CC\u0627\u0631\u0647", "\u062E\u0631\u06AF\u0648\u0634", "\u0642\u0637\u0627\u0631", "\u0631\u0648\u0633\u062A\u0627", "\u0646\u0647\u0646\u06AF", "\u0631\u0628\u0627\u062A", "\u0634\u0645\u0639", "\u067E\u0631\u0648\u0627\u0646\u0647", "\u062A\u0627\u062C", "\u0627\u0644\u0645\u0627\u0633", "\u0622\u062A\u0634", "\u0631\u0648\u062D", "\u0642\u0644\u0628", "\u0628\u0631\u06AF", "\u0622\u0647\u0646\u0631\u0628\u0627", "\u0645\u0631\u0648\u0627\u0631\u06CC\u062F", "\u0633\u062A\u0627\u0631\u0647", "\u0628\u0631\u062C"];
+var words = (s) => shuffle(s.language === "fa" ? persian : english);
+var normalizeAnswer = (s) => s.normalize("NFKC").toLocaleLowerCase().replace(/[يى]/g, "\u06CC").replace(/ك/g, "\u06A9").replace(/\s|\u200c|\u200d|ـ/g, "");
+
+// apps/api/src/games/boards.ts
+function fourStart(now) {
+  return { phase: "turn", deadline: now + 6e4, result: null, board: Array(42).fill(-1), turn: 0, moves: 0 };
+}
+function fourAction(s, seat, a, now) {
+  insist(s.phase === "turn" && seat === s.turn && a.type === "drop");
+  const col = integer(a.column, 0, 6);
+  let row = 5;
+  while (row >= 0 && s.board[row * 7 + col] !== -1) row--;
+  insist(row >= 0, "That column is full.");
+  const index = row * 7 + col;
+  s.board[index] = seat;
+  s.moves++;
+  for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
+    let count = 1;
+    for (const sign of [-1, 1]) for (let d = 1; d < 4; d++) {
+      const x = col + dx * d * sign, y = row + dy * d * sign;
+      if (x < 0 || x > 6 || y < 0 || y > 5 || s.board[y * 7 + x] !== seat) break;
+      count++;
+    }
+    if (count >= 4) {
+      s.result = `Player ${seat + 1} wins`;
+      s.phase = "ended";
+      s.winner = seat;
+    }
+  }
+  if (!s.result && s.moves === 42) {
+    s.result = "Draw";
+    s.phase = "ended";
+  }
+  s.turn = 1 - seat;
+  s.deadline = s.result ? 0 : now + 6e4;
+}
+var dominoTiles = Array.from({ length: 7 }, (_, a) => Array.from({ length: 7 - a }, (_2, b) => [a, a + b])).flat();
+function dominoRound(s, n, now) {
+  const deck = shuffle(Array.from({ length: 28 }, (_, i) => i));
+  s.hands = Array.from({ length: n }, (_, i) => s.active?.[i] === false ? [] : deck.splice(0, 7));
+  s.boneyard = deck;
+  s.chain = [];
+  s.passes = 0;
+  s.phase = "turn";
+  s.roundResult = null;
+  s.opening = -1;
+  let best = -1, leader = 0;
+  s.hands.forEach((hand, p) => hand.forEach((t) => {
+    const [a, b] = dominoTiles[t], weight = a === b ? 100 + a : a + b;
+    if (weight > best) {
+      best = weight;
+      leader = p;
+      s.opening = t;
+    }
+  }));
+  s.turn = leader;
+  s.deadline = now + 6e4;
+  s.round = (s.round || 0) + 1;
+}
+function dominoStart(n, settings, now) {
+  const s = { phase: "turn", deadline: 0, result: null, scores: Array(n).fill(0), mode: settings.domino };
+  dominoRound(s, n, now);
+  return s;
+}
+function dominoLegal(s, seat) {
+  const hand = s.hands[seat] || [];
+  if (!s.chain.length) return hand.filter((t) => t === s.opening).map((tile) => ({ tile, end: "right" }));
+  const left = s.chain[0][0], right = s.chain.at(-1)[1];
+  return hand.flatMap((tile) => {
+    const pair = dominoTiles[tile];
+    return [...pair.includes(left) ? [{ tile, end: "left" }] : [], ...pair.includes(right) ? [{ tile, end: "right" }] : []];
+  });
+}
+function dominoScore(s, now) {
+  const sums = s.hands.map((h) => h.reduce((sum, t) => sum + dominoTiles[t][0] + dominoTiles[t][1], 0)), low = Math.min(...sums.filter((_, i) => s.active?.[i] !== false)), winners = sums.map((v, i) => v === low && s.active?.[i] !== false ? i : -1).filter((i) => i >= 0);
+  s.roundResult = winners.length === 1 ? `Player ${winners[0] + 1} wins the round` : "Round drawn";
+  if (winners.length === 1) s.scores[winners[0]] += sums.reduce((sum, v, i) => sum + (i === winners[0] ? 0 : v), 0);
+  if (winners.length === 1 && s.scores[winners[0]] >= 100) {
+    s.result = `Player ${winners[0] + 1} wins`;
+    s.phase = "ended";
+  } else s.phase = "between";
+  s.deadline = now + 3e5;
+}
+function dominoAction(s, seat, a, now) {
+  if (a.type === "next") {
+    insist(s.phase === "between");
+    dominoRound(s, s.hands.length, now);
+    return;
+  }
+  insist(s.phase === "turn" && seat === s.turn, "Wait for your turn.");
+  const legal = dominoLegal(s, seat);
+  if (a.type === "draw") {
+    insist(s.mode === "draw" && legal.length === 0 && s.boneyard.length > 0, "You must play an available tile.");
+    s.hands[seat].push(s.boneyard.pop());
+    s.deadline = now + 6e4;
+    return;
+  }
+  if (a.type === "pass") {
+    insist(legal.length === 0 && (s.mode === "block" || s.boneyard.length === 0), "Play or draw a tile first.");
+    s.passes++;
+  } else {
+    insist(a.type === "tile");
+    const tile = integer(a.tile, 0, 27);
+    insist(legal.some((m) => m.tile === tile && m.end === a.end), "That tile does not fit.");
+    const pair = dominoTiles[tile].slice();
+    if (s.chain.length) {
+      if (a.end === "left") {
+        if (pair[1] !== s.chain[0][0]) pair.reverse();
+      } else if (pair[0] !== s.chain.at(-1)[1]) pair.reverse();
+    }
+    if (a.end === "left") s.chain.unshift(pair);
+    else s.chain.push(pair);
+    s.hands[seat].splice(s.hands[seat].indexOf(tile), 1);
+    s.passes = 0;
+  }
+  if (!s.hands[seat].length || s.passes >= (s.active?.filter(Boolean).length || s.hands.length)) dominoScore(s, now);
+  else {
+    do {
+      s.turn = (s.turn + 1) % s.hands.length;
+    } while (s.active?.[s.turn] === false);
+    s.deadline = now + 6e4;
+  }
+}
+function dominoView(s, seat) {
+  return { phase: s.phase, turn: s.turn, chain: s.chain, hand: seat >= 0 ? s.hands[seat] : [], counts: s.hands.map((h) => h.length), boneyard: s.boneyard.length, scores: s.scores, round: s.round, roundResult: s.roundResult, legal: s.phase === "turn" && seat === s.turn ? dominoLegal(s, seat) : [], mode: s.mode };
+}
+function ludoStart(n, now) {
+  return { phase: "roll", deadline: now + 6e4, result: null, tokens: Array.from({ length: n }, () => [-1, -1, -1, -1]), turn: 0, die: 0, sixes: 0, rolls: 0 };
+}
+var ludoNext = (s, seat) => {
+  let p = seat;
+  do {
+    p = (p + 1) % s.tokens.length;
+  } while (s.active?.[p] === false);
+  return p;
+};
+var ludoOffset = (s, seat) => s.tokens.length === 2 ? seat * 26 : seat * 13;
+var safe = /* @__PURE__ */ new Set([0, 8, 13, 21, 26, 34, 39, 47]);
+var ludoLegal = (s) => s.tokens[s.turn].flatMap((v, i) => (v === -1 ? s.die === 6 : v < 56 && v + s.die <= 56) ? [i] : []);
+function ludoAction(s, seat, a, now, roll) {
+  insist(seat === s.turn, "Wait for your turn.");
+  if (a.type === "roll") {
+    insist(s.phase === "roll");
+    s.die = roll();
+    s.rolls++;
+    s.sixes = s.die === 6 ? s.sixes + 1 : 0;
+    if (s.sixes === 3) {
+      s.turn = ludoNext(s, seat);
+      s.sixes = 0;
+      s.phase = "roll";
+    } else if (ludoLegal(s).length) s.phase = "move";
+    else {
+      s.turn = ludoNext(s, seat);
+      s.sixes = 0;
+    }
+  } else {
+    insist(a.type === "token" && s.phase === "move");
+    const token2 = integer(a.piece, 0, 3);
+    insist(ludoLegal(s).includes(token2), "That token cannot move.");
+    let value = s.tokens[seat][token2];
+    value = value === -1 ? 0 : value + s.die;
+    s.tokens[seat][token2] = value;
+    if (value < 51) {
+      const cell = (value + ludoOffset(s, seat)) % 52;
+      if (!safe.has(cell)) s.tokens.forEach((hand, p) => {
+        if (p !== seat) hand.forEach((v, i) => {
+          if (v >= 0 && v < 51 && (v + ludoOffset(s, p)) % 52 === cell) hand[i] = -1;
+        });
+      });
+    }
+    if (s.tokens[seat].every((v) => v === 56)) {
+      s.result = `Player ${seat + 1} wins`;
+      s.phase = "ended";
+      s.winner = seat;
+    } else {
+      s.phase = "roll";
+      if (s.die !== 6) {
+        s.turn = ludoNext(s, seat);
+        s.sixes = 0;
+      }
+    }
+  }
+  s.deadline = s.result ? 0 : now + 6e4;
+}
+
+// apps/api/src/games/poker.ts
+function rankFive(cards) {
+  const ranks = cards.map((c) => c % 13 + 2).sort((a, b) => b - a), counts = /* @__PURE__ */ new Map();
+  for (const r of ranks) counts.set(r, (counts.get(r) || 0) + 1);
+  const groups = [...counts].sort((a, b) => b[1] - a[1] || b[0] - a[0]), flush = cards.every((c) => Math.floor(c / 13) === Math.floor(cards[0] / 13));
+  const unique = [...new Set(ranks)], straight = unique.length === 5 ? unique[0] - unique[4] === 4 ? unique[0] : unique.join(",") === "14,5,4,3,2" ? 5 : 0 : 0;
+  if (flush && straight) return [8, straight];
+  if (groups[0][1] === 4) return [7, groups[0][0], groups[1][0]];
+  if (groups[0][1] === 3 && groups[1][1] === 2) return [6, groups[0][0], groups[1][0]];
+  if (flush) return [5, ...ranks];
+  if (straight) return [4, straight];
+  if (groups[0][1] === 3) return [3, groups[0][0], ...groups.slice(1).map((g) => g[0])];
+  if (groups[0][1] === 2 && groups[1][1] === 2) return [2, Math.max(groups[0][0], groups[1][0]), Math.min(groups[0][0], groups[1][0]), groups[2][0]];
+  if (groups[0][1] === 2) return [1, groups[0][0], ...groups.slice(1).map((g) => g[0])];
+  return [0, ...ranks];
+}
+function compareRank(a, b) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0);
+  return 0;
+}
+function rankHand(cards) {
+  insist(cards.length >= 5 && cards.length <= 7 && new Set(cards).size === cards.length);
+  let best = [];
+  for (let a = 0; a < cards.length - 4; a++) for (let b = a + 1; b < cards.length - 3; b++) for (let c = b + 1; c < cards.length - 2; c++) for (let d = c + 1; d < cards.length - 1; d++) for (let e = d + 1; e < cards.length; e++) {
+    const rank = rankFive([cards[a], cards[b], cards[c], cards[d], cards[e]]);
+    if (compareRank(rank, best) > 0) best = rank;
+  }
+  return best;
+}
+var live = (s) => s.stack.map((chips, i) => chips > 0 && !s.departed[i] ? i : -1).filter((i) => i >= 0);
+var minimumRaise = (s) => s.bet < s.blind ? s.blind : s.bet + s.lastRaise;
+function after(s, p, available) {
+  for (let i = 1; i <= s.stack.length; i++) {
+    const q = (p + i) % s.stack.length;
+    if (available.includes(q)) return q;
+  }
+  return -1;
+}
+function pay(s, p, amount) {
+  const paid = Math.min(s.stack[p], amount);
+  s.stack[p] -= paid;
+  s.street[p] += paid;
+  s.committed[p] += paid;
+}
+function log(s, message) {
+  s.log.push(message);
+  s.log = s.log.slice(-60);
+}
+function finishHand(s, now, showdown) {
+  const contenders = s.stack.map((_, i) => !s.folded[i] ? i : -1).filter((i) => i >= 0), levels = [...new Set(s.committed)].filter((n) => n > 0).sort((a, b) => a - b);
+  let previous = 0;
+  const payouts = Array(s.stack.length).fill(0), ranks = /* @__PURE__ */ new Map();
+  if (showdown) for (const p of contenders) ranks.set(p, rankHand([...s.holes[p], ...s.board]));
+  const pots = [];
+  for (const level of levels) {
+    const contributors = s.committed.map((n, i) => n >= level ? i : -1).filter((i) => i >= 0), amount = (level - previous) * contributors.length;
+    previous = level;
+    let eligible = contributors.filter((i) => contenders.includes(i));
+    if (contributors.length === 1) {
+      payouts[contributors[0]] += amount;
+      continue;
+    }
+    if (!eligible.length) {
+      for (const p2 of contributors) payouts[p2] += amount / contributors.length;
+      continue;
+    }
+    if (showdown) {
+      let best = ranks.get(eligible[0]);
+      for (const p2 of eligible) if (compareRank(ranks.get(p2), best) > 0) best = ranks.get(p2);
+      eligible = eligible.filter((p2) => compareRank(ranks.get(p2), best) === 0);
+    }
+    const share = Math.floor(amount / eligible.length);
+    for (const p2 of eligible) payouts[p2] += share;
+    let odd = amount - share * eligible.length, p = s.dealer;
+    while (odd--) {
+      p = after(s, p, eligible);
+      payouts[p]++;
+    }
+    pots.push({ amount, winners: eligible });
+  }
+  s.stack = s.stack.map((n, i) => n + payouts[i]);
+  s.payouts = payouts;
+  s.pots = pots;
+  s.showdown = showdown;
+  s.phase = "between";
+  s.deadline = now + 3e5;
+  s.turn = -1;
+  s.handResult = payouts.map((v, i) => v ? `Player ${i + 1}: +${v}` : "").filter(Boolean).join(" \xB7 ");
+  if (live(s).length <= 1) {
+    s.phase = "ended";
+    s.result = live(s).length ? `Player ${live(s)[0] + 1} wins` : "Table closed";
+    s.deadline = 0;
+  }
+}
+function advance(s, now) {
+  const contenders = s.stack.map((_, i) => !s.folded[i] ? i : -1).filter((i) => i >= 0);
+  if (contenders.length <= 1) {
+    finishHand(s, now, false);
+    return;
+  }
+  const able = contenders.filter((i) => s.stack[i] > 0), needed = able.filter((i) => !s.acted[i] || s.street[i] < s.bet);
+  if (needed.length && (able.length > 1 || s.street[able[0]] < s.bet)) {
+    s.turn = after(s, s.turn, needed);
+    s.deadline = now + 3e4;
+    return;
+  }
+  if (s.board.length === 5) {
+    finishHand(s, now, true);
+    return;
+  }
+  s.deck.pop();
+  const count = s.board.length === 0 ? 3 : 1;
+  for (let i = 0; i < count; i++) s.board.push(s.deck.pop());
+  s.street.fill(0);
+  s.acted.fill(false);
+  s.reopen.fill(0);
+  s.bet = 0;
+  s.lastRaise = s.blind;
+  if (able.length <= 1) {
+    advance(s, now);
+    return;
+  }
+  s.turn = after(s, s.dealer, able);
+  s.deadline = now + 3e4;
+}
+function pokerHand(s, now) {
+  const seats = live(s);
+  insist(seats.length >= 2, "Two players with chips are required.");
+  s.dealer = after(s, s.dealer, seats);
+  s.hand = (s.hand || 0) + 1;
+  s.deck = shuffle(Array.from({ length: 52 }, (_, i) => i));
+  s.holes = s.stack.map(() => []);
+  s.board = [];
+  s.folded = s.stack.map((chips, i) => chips === 0 || s.departed[i]);
+  s.street = s.stack.map(() => 0);
+  s.committed = s.stack.map(() => 0);
+  s.acted = s.stack.map(() => false);
+  s.reopen = s.stack.map(() => 0);
+  s.log = [];
+  s.pots = [];
+  s.payouts = [];
+  s.showdown = false;
+  s.handResult = null;
+  s.phase = "betting";
+  s.result = null;
+  let p = s.dealer;
+  for (let round = 0; round < 2; round++) for (let i = 0; i < seats.length; i++) {
+    p = after(s, p, seats);
+    s.holes[p].push(s.deck.pop());
+  }
+  const small = seats.length === 2 ? s.dealer : after(s, s.dealer, seats), big = after(s, small, seats);
+  pay(s, small, Math.floor(s.blind / 2));
+  pay(s, big, s.blind);
+  s.bet = s.blind;
+  s.lastRaise = s.blind;
+  s.turn = big;
+  s.deadline = now + 3e4;
+  advance(s, now);
+}
+function pokerStart(n, settings, now) {
+  const s = { phase: "between", deadline: 0, result: null, stack: Array(n).fill(settings.chips), departed: Array(n).fill(false), blind: settings.blind, dealer: -1, hand: 0 };
+  pokerHand(s, now);
+  return s;
+}
+function pokerJoin(s, settings, index = s.stack.length) {
+  insist(s.phase === "between");
+  s.stack[index] = settings.chips;
+  s.departed[index] = false;
+  s.holes[index] = [];
+  s.folded[index] = true;
+  s.street[index] = 0;
+  s.committed[index] = 0;
+  s.acted[index] = false;
+  s.reopen[index] = 0;
+  s.payouts[index] = 0;
+}
+function pokerAction(s, seat, a, now) {
+  if (a.type === "next") {
+    insist(s.phase === "between");
+    pokerHand(s, now);
+    return;
+  }
+  insist(s.phase === "betting" && s.turn === seat && !s.folded[seat] && s.stack[seat] > 0, "Wait for your turn.");
+  const owed = Math.max(0, s.bet - s.street[seat]);
+  if (a.type === "fold") {
+    s.folded[seat] = true;
+    log(s, `Player ${seat + 1} folded`);
+  } else if (a.type === "check") {
+    insist(owed === 0, "Call or fold.");
+    log(s, `Player ${seat + 1} checked`);
+  } else if (a.type === "call") {
+    insist(owed > 0, "You can check.");
+    pay(s, seat, owed);
+    log(s, `Player ${seat + 1} called`);
+  } else {
+    insist(a.type === "raise");
+    const to = integer(a.to, s.bet + 1, s.street[seat] + s.stack[seat]);
+    insist(!s.acted[seat] || s.bet >= s.reopen[seat], "A short all-in did not reopen raising.");
+    const increase = s.bet < s.blind ? to : to - s.bet, full = to >= minimumRaise(s);
+    insist(full || to === s.street[seat] + s.stack[seat], "Raise at least the minimum, or go all-in.");
+    pay(s, seat, to - s.street[seat]);
+    s.bet = to;
+    if (full) {
+      s.lastRaise = increase;
+      s.acted.fill(false);
+    }
+    log(s, `Player ${seat + 1} raised to ${to}`);
+  }
+  s.acted[seat] = true;
+  s.reopen[seat] = s.bet + s.lastRaise;
+  advance(s, now);
+}
+function pokerView(s, seat) {
+  const own = seat >= 0, acting = own && s.phase === "betting" && s.turn === seat, call = acting ? Math.max(0, s.bet - s.street[seat]) : 0;
+  return {
+    phase: s.phase,
+    stack: s.stack,
+    departed: s.departed,
+    board: s.board,
+    holes: s.holes.map((h, i) => i === seat || s.showdown && !s.folded[i] ? h : h.map(() => -1)),
+    folded: s.folded,
+    street: s.street,
+    committed: s.committed,
+    dealer: s.dealer,
+    turn: s.turn,
+    hand: s.hand,
+    blind: s.blind,
+    bet: s.bet,
+    pots: s.pots,
+    payouts: s.payouts,
+    handResult: s.handResult,
+    log: s.log,
+    controls: acting ? { call: Math.min(call, s.stack[seat]), canCheck: call === 0, canRaise: s.street[seat] + s.stack[seat] > s.bet && (!s.acted[seat] || s.bet >= s.reopen[seat]), minRaise: minimumRaise(s), maxRaise: s.street[seat] + s.stack[seat] } : null
+  };
+}
+function pokerTimeout(s, now) {
+  pokerAction(s, s.turn, { type: s.street[s.turn] >= s.bet ? "check" : "fold" }, now);
+}
+function pokerDepart(s, seat, now) {
+  s.departed[seat] = true;
+  s.folded[seat] = true;
+  if (s.phase === "betting" && (s.turn === seat || s.folded.filter((v) => !v).length <= 1)) advance(s, now);
+  else if (s.phase === "between" && live(s).length < 2) {
+    s.phase = "ended";
+    s.result = live(s).length ? `Player ${live(s)[0] + 1} wins` : "Table closed";
+    s.deadline = 0;
+  }
+}
+
+// apps/api/src/games/party.ts
+function drawingTurn(s, settings, now) {
+  while (s.round < s.order.length && s.active?.[s.order[s.round]] === false) s.round++;
+  if (s.round >= s.order.length) {
+    s.phase = "ended";
+    s.result = "Drawing rounds complete";
+    s.deadline = 0;
+    return;
+  }
+  s.drawer = s.order[s.round];
+  s.word = s.words[s.round % s.words.length];
+  s.picture = freshPicture();
+  s.guessed = [];
+  s.guesses = [];
+  s.phase = "drawing";
+  s.token = `draw-${s.round}`;
+  s.started = now;
+  s.deadline = now + settings.seconds * 1e3;
+}
+function drawingStart(n, settings, now) {
+  const s = { phase: "drawing", deadline: 0, result: null, round: 0, order: Array.from({ length: settings.rounds }, () => Array.from({ length: n }, (_, i) => i)).flat(), words: words(settings), scores: Array(n).fill(0) };
+  drawingTurn(s, settings, now);
+  return s;
+}
+function drawingReveal(s, now) {
+  s.phase = "reveal";
+  s.token = `reveal-${s.round}`;
+  s.deadline = now + 5e3;
+}
+function drawingAction(s, seat, a, settings, now) {
+  insist(s.phase === "drawing" && a.token === s.token, "The drawing round has changed.");
+  if (a.type === "stroke" || a.type === "clear") {
+    insist(seat === s.drawer, "Only the drawer can draw.");
+    if (a.type === "clear") s.picture = freshPicture();
+    else stroke(s.picture, a.stroke);
+  } else {
+    insist(a.type === "guess" && seat !== s.drawer && !s.guessed.includes(seat), "Wait for the next drawing.");
+    const answer = text(a.text, 80), correct = normalizeAnswer(answer) === normalizeAnswer(s.word);
+    if (correct) {
+      s.guessed.push(seat);
+      s.scores[seat] += Math.max(20, 100 - Math.floor((now - s.started) / 1e3));
+      s.scores[s.drawer] += 10;
+      s.guesses.push({ seat, correct: true });
+      if (s.guessed.length === (s.active?.filter(Boolean).length || s.scores.length) - 1) drawingReveal(s, now);
+    } else s.guesses.push({ seat, text: answer, correct: false });
+    s.guesses = s.guesses.slice(-30);
+  }
+}
+function drawingTick(s, settings, now) {
+  if (s.phase === "drawing") drawingReveal(s, now);
+  else if (s.phase === "reveal") {
+    s.round++;
+    drawingTurn(s, settings, now);
+  }
+}
+function drawingView(s, seat) {
+  const reveal = s.phase !== "drawing" || seat === s.drawer || s.guessed.includes(seat);
+  return { phase: s.phase, token: s.token, round: s.round + 1, total: s.order.length, drawer: s.drawer, word: reveal ? s.word : null, wordLength: Array.from(s.word).length, picture: s.picture, scores: s.scores, guesses: s.guesses, guessed: s.guessed };
+}
+function phoneAdvance(s, settings, now) {
+  const n = s.albums.length;
+  for (let seat = 0; seat < n; seat++) {
+    const chain = (seat - s.step + n) % n;
+    const entry = s.step % 2 ? { author: seat, type: "picture", picture: s.pictures[seat] } : { author: seat, type: "text", text: s.answers[seat] || "\u2026" };
+    s.albums[chain].push(entry);
+  }
+  s.step++;
+  s.done = Array.from({ length: n }, (_, i) => s.active?.[i] === false ? i : -1).filter((i) => i >= 0);
+  s.answers = {};
+  s.pictures = Array.from({ length: n }, freshPicture);
+  if (s.step >= n) {
+    s.phase = "reveal";
+    s.deadline = 0;
+    s.result = "Albums ready";
+  } else {
+    s.phase = s.step % 2 ? "draw" : "describe";
+    s.token = `phone-${s.step}`;
+    s.deadline = now + settings.seconds * 1e3;
+  }
+}
+function phoneStart(n, settings, now) {
+  return { phase: "write", deadline: now + settings.seconds * 1e3, result: null, step: 0, token: "phone-0", albums: Array.from({ length: n }, () => []), done: [], answers: {}, pictures: Array.from({ length: n }, freshPicture) };
+}
+function phoneAction(s, seat, a, settings, now) {
+  insist(s.phase !== "reveal" && a.token === s.token && !s.done.includes(seat), "This page has already been submitted.");
+  if (a.type === "stroke" || a.type === "clear") {
+    insist(s.phase === "draw");
+    if (a.type === "clear") s.pictures[seat] = freshPicture();
+    else stroke(s.pictures[seat], a.stroke);
+  } else {
+    insist(a.type === "submit");
+    if (s.phase !== "draw") s.answers[seat] = text(a.text);
+    s.done.push(seat);
+    if (s.done.length === s.albums.length) phoneAdvance(s, settings, now);
+  }
+}
+function phoneTick(s, settings, now) {
+  phoneAdvance(s, settings, now);
+}
+function phoneView(s, seat) {
+  if (s.phase === "reveal") return { phase: s.phase, step: s.step, total: s.albums.length, albums: s.albums, done: s.done };
+  const chain = seat >= 0 ? (seat - s.step + s.albums.length) % s.albums.length : -1, previous = chain >= 0 ? s.albums[chain].at(-1) : null;
+  return { phase: s.phase, token: s.token, step: s.step, total: s.albums.length, done: s.done, previous: previous?.type === "text" ? { type: "text", text: previous.text } : previous ? { type: "picture", picture: previous.picture } : null, picture: seat >= 0 ? s.pictures[seat] : null, submitted: seat >= 0 && s.done.includes(seat) };
+}
+function teamCaptain(team, n) {
+  return Array.from({ length: n }, (_, i) => i).find((i) => i % 2 === team);
+}
+function wordsStart(n, settings, now) {
+  const team = shuffle([0, 1])[0], roles = shuffle([...Array(9).fill(team), ...Array(8).fill(1 - team), ...Array(7).fill(2), 3]);
+  return { phase: "clue", deadline: now + settings.seconds * 1e3, result: null, team, captains: [teamCaptain(0, n), teamCaptain(1, n)], board: words(settings).slice(0, 25), roles, revealed: Array(25).fill(false), clue: null, guesses: 0, history: [], turns: 0, token: "words-0" };
+}
+function switchTeam(s, settings, now) {
+  s.team = 1 - s.team;
+  s.phase = "clue";
+  s.clue = null;
+  s.guesses = 0;
+  s.turns++;
+  s.token = `words-${s.turns}`;
+  s.deadline = now + settings.seconds * 1e3;
+  if (s.turns >= 100) {
+    s.phase = "ended";
+    s.result = "Round limit reached";
+    s.deadline = 0;
+  }
+}
+function wordsAction(s, seat, a, settings, now) {
+  insist(seat % 2 === s.team, "It is the other team\u2019s turn.");
+  if (a.type === "clue") {
+    insist(s.phase === "clue" && s.captains[s.team] === seat, "Only your captain can give a clue.");
+    const clue = text(a.text, 40);
+    insist(!/\s/.test(clue), "Use a single word for the clue.");
+    insist(!s.board.some((w, i) => !s.revealed[i] && normalizeAnswer(w) === normalizeAnswer(clue)), "Do not use an unrevealed board word.");
+    const count = integer(a.count, 1, 9);
+    s.clue = { text: clue, count };
+    s.guesses = count + 1;
+    s.phase = "guess";
+    s.deadline = now + settings.seconds * 1e3;
+    s.history.push({ team: s.team, text: clue, count });
+    s.history = s.history.slice(-40);
+  } else {
+    insist(s.phase === "guess" && s.captains[s.team] !== seat, "Guessers choose the words.");
+    if (a.type === "pass") {
+      switchTeam(s, settings, now);
+      return;
+    }
+    insist(a.type === "word");
+    const i = integer(a.index, 0, 24);
+    insist(!s.revealed[i], "That word is already revealed.");
+    s.revealed[i] = true;
+    s.guesses--;
+    if (s.roles[i] === 3) {
+      s.result = `Team ${2 - s.team} wins`;
+      s.phase = "ended";
+      s.deadline = 0;
+      return;
+    }
+    for (const team of [0, 1]) if (s.roles.every((role, i2) => role !== team || s.revealed[i2])) {
+      s.result = `Team ${team + 1} wins`;
+      s.phase = "ended";
+      s.deadline = 0;
+      return;
+    }
+    if (s.roles[i] !== s.team || s.guesses === 0) switchTeam(s, settings, now);
+  }
+}
+function wordsTick(s, settings, now) {
+  switchTeam(s, settings, now);
+}
+function wordsView(s, seat) {
+  const captain = s.captains.includes(seat);
+  return { phase: s.phase, token: s.token, team: s.team, captains: s.captains, board: s.board, roles: s.roles.map((r, i) => captain || s.revealed[i] || s.phase === "ended" ? r : null), revealed: s.revealed, clue: s.clue, guesses: s.guesses, history: s.history, remaining: [0, 1].map((team) => s.roles.filter((r, i) => r === team && !s.revealed[i]).length) };
+}
+
+// apps/api/src/games/engine.ts
+function startEngine(kind, n, settings, now) {
+  const state = kind === "poker" ? pokerStart(n, settings, now) : kind === "domino" ? dominoStart(n, settings, now) : kind === "four" ? fourStart(now) : kind === "ludo" ? ludoStart(n, now) : kind === "drawing" ? drawingStart(n, settings, now) : kind === "telephone" ? phoneStart(n, settings, now) : wordsStart(n, settings, now);
+  state.active = Array(n).fill(true);
+  return state;
+}
+function act(kind, s, seat, a, settings, now) {
+  insist(a && typeof a.type === "string");
+  if (kind === "poker") pokerAction(s, seat, a, now);
+  else if (kind === "domino") dominoAction(s, seat, a, now);
+  else if (kind === "four") fourAction(s, seat, a, now);
+  else if (kind === "ludo") ludoAction(s, seat, a, now, () => randomInt2(1, 7));
+  else if (kind === "drawing") drawingAction(s, seat, a, settings, now);
+  else if (kind === "telephone") phoneAction(s, seat, a, settings, now);
+  else wordsAction(s, seat, a, settings, now);
+}
+function project(kind, s, seat) {
+  if (kind === "poker") return pokerView(s, seat);
+  if (kind === "domino") return dominoView(s, seat);
+  if (kind === "drawing") return drawingView(s, seat);
+  if (kind === "telephone") return phoneView(s, seat);
+  if (kind === "words") return wordsView(s, seat);
+  if (kind === "four") return { phase: s.phase, board: s.board, turn: s.turn, winner: s.winner };
+  return { phase: s.phase, tokens: s.tokens, turn: s.turn, die: s.die, offsets: s.tokens.map((_, i) => ludoOffset(s, i)), legal: seat === s.turn && s.phase === "move" ? ludoLegal(s) : [] };
+}
+function timeout(kind, s, settings, now) {
+  if (kind === "drawing") drawingTick(s, settings, now);
+  else if (kind === "telephone") phoneTick(s, settings, now);
+  else if (kind === "words") wordsTick(s, settings, now);
+  else if (kind === "poker" && s.phase === "betting") pokerTimeout(s, now);
+  else {
+    s.phase = "ended";
+    s.result = "Game ended after inactivity";
+    s.deadline = 0;
+  }
+}
+function depart(kind, s, seat, settings, now) {
+  s.active[seat] = false;
+  const remaining = s.active.flatMap((v, i) => v ? [i] : []);
+  if (kind === "poker") {
+    pokerDepart(s, seat, now);
+    return;
+  }
+  if (remaining.length < 2) {
+    s.phase = "ended";
+    s.result = remaining.length ? `Player ${remaining[0] + 1} wins by departure` : "Game closed";
+    s.deadline = 0;
+    return;
+  }
+  if (kind === "drawing") {
+    if (s.drawer === seat && s.phase === "drawing") drawingTick(s, settings, now);
+  } else if (kind === "telephone") {
+    if (!s.done.includes(seat)) s.done.push(seat);
+    if (s.done.length === s.albums.length) phoneTick(s, settings, now);
+  } else if (kind === "words") {
+    const team = seat % 2, teamSeats = remaining.filter((i) => i % 2 === team);
+    if (teamSeats.length < 2) {
+      s.phase = "ended";
+      s.result = `Team ${2 - team} wins by departure`;
+      s.deadline = 0;
+    } else if (s.captains[team] === seat) s.captains[team] = teamSeats[0];
+  } else if (kind === "domino") {
+    s.boneyard.push(...s.hands[seat]);
+    s.hands[seat] = [];
+    if (s.turn === seat) {
+      s.turn = remaining.find((i) => i > seat) ?? remaining[0];
+      s.deadline = now + 6e4;
+    }
+  } else if (kind === "ludo") {
+    s.tokens[seat] = [-1, -1, -1, -1];
+    if (s.turn === seat) {
+      s.turn = remaining.find((i) => i > seat) ?? remaining[0];
+      s.phase = "roll";
+      s.sixes = 0;
+      s.deadline = now + 6e4;
+    }
+  }
+}
+
+// apps/api/src/games/service.ts
+var kinds = ["poker", "domino", "telephone", "drawing", "words", "ludo", "four"];
+var settingsSchema = z4.object({ maxPlayers: z4.number().int().min(2).max(8), seconds: z4.union([z4.literal(45), z4.literal(60), z4.literal(90)]).default(60), rounds: z4.number().int().min(1).max(3).default(1), language: z4.enum(["en", "fa"]).default("en"), domino: z4.enum(["draw", "block"]).default("draw"), chips: z4.union([z4.literal(1e3), z4.literal(2e3)]).default(1e3), blind: z4.union([z4.literal(10), z4.literal(20), z4.literal(50)]).default(20) }).strict();
+var gameCreate = z4.object({ requestId: z4.string().uuid(), channelId: z4.string().min(1).max(100), kind: z4.enum(kinds), settings: settingsSchema }).strict().refine((b) => b.settings.maxPlayers >= definition(b.kind).min && b.settings.maxPlayers <= definition(b.kind).max, "Choose a valid player limit.");
+var action = z4.object({ type: z4.enum(["drop", "tile", "draw", "pass", "next", "roll", "token", "fold", "check", "call", "raise", "stroke", "clear", "guess", "submit", "clue", "word"]), token: z4.string().max(40).optional(), piece: z4.number().int().min(0).max(3).optional(), column: z4.number().int().min(0).max(6).optional(), tile: z4.number().int().min(0).max(27).optional(), end: z4.enum(["left", "right"]).optional(), to: z4.number().int().min(0).max(1e6).optional(), index: z4.number().int().min(0).max(24).optional(), count: z4.number().int().min(1).max(9).optional(), text: z4.string().max(180).optional(), stroke: z4.object({ color: z4.string().max(7), width: z4.number().int(), points: z4.array(z4.tuple([z4.number().int().min(0).max(1e3), z4.number().int().min(0).max(1e3)])).min(1).max(100) }).strict().optional() }).strict();
+var gameCommand = z4.object({ requestId: z4.string().uuid(), revision: z4.number().int().positive(), kind: z4.enum(["join", "start", "leave", "close", "action"]), action: action.optional() }).strict();
+var activeSeats = (g) => g.seats.filter((s) => !s.left);
+async function arcadeBusy(tx, uid, except = "") {
+  return Boolean(await tx.one("SELECT p.user_id FROM game_players p JOIN game_sessions g ON g.id=p.game_id WHERE p.user_id=? AND g.status<>'finished' AND g.id<>?", [uid, except]));
+}
+var GameService = class {
+  constructor(service) {
+    this.service = service;
+  }
+  service;
+  active = /* @__PURE__ */ new Map();
+  timer;
+  closed = false;
+  rates = /* @__PURE__ */ new Map();
+  epoch = Date.now();
+  monotonic = performance.now();
+  now = () => this.epoch + performance.now() - this.monotonic;
+  online = () => true;
+  notify = async () => {
+  };
+  onError = () => {
+  };
+  async initialize() {
+    for (const row of await this.service.db.all("SELECT state FROM game_sessions WHERE status<>'finished'")) {
+      const g = JSON.parse(row.state);
+      if (g.status === "playing") {
+        const now = this.now();
+        g.pauseStarted = g.pauseStarted ? Math.min(g.pauseStarted, now) : now;
+        for (const seat of activeSeats(g)) {
+          if (seat.missingAt) seat.grace = Math.max(0, seat.grace - Math.max(0, now - seat.missingAt));
+          seat.missingAt = now;
+        }
+        g.pausedUntil = Math.min(...activeSeats(g).map((s) => now + s.grace));
+        g.revision++;
+        await this.save(this.service.db, g);
+      }
+      this.active.set(g.id, g);
+    }
+    this.schedule();
+  }
+  close() {
+    this.closed = true;
+    clearTimeout(this.timer);
+    this.active.clear();
+    this.rates.clear();
+  }
+  async requireVoice(tx, uid, channelId) {
+    const channel = await this.service.channel(tx, uid, channelId);
+    if (channel.kind !== "voice" || !await tx.one("SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?", [uid, channelId])) fail(403, "VOICE_REQUIRED", "Join this voice channel to play or watch.");
+    return channel;
+  }
+  async allowed(tx, uid, g) {
+    const m = await tx.one("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.user_id=? AND m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [uid, g.serverId]);
+    if (!m) fail(403, "FORBIDDEN", "Join the game server to play or watch.");
+    if (!g.seats.some((s) => s.id === uid && !s.left)) await this.requireVoice(tx, uid, g.channelId);
+  }
+  async load(tx, id2) {
+    const row = await tx.one("SELECT state FROM game_sessions WHERE id=?", [id2]);
+    if (!row) fail(404, "NOT_FOUND", "Game not found.");
+    return JSON.parse(row.state);
+  }
+  async save(tx, g, roster = false) {
+    g.updatedAt = this.now();
+    const state = JSON.stringify(g);
+    if (Buffer.byteLength(state, "utf8") > 768 * 1024) fail(413, "CAPACITY", "This game has reached its drawing limit.");
+    await tx.run("INSERT INTO game_sessions(id,server_id,channel_id,host_id,kind,status,updated_at,state) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET host_id=excluded.host_id,status=excluded.status,updated_at=excluded.updated_at,state=excluded.state", [g.id, g.serverId, g.channelId, g.hostId, g.kind, g.status, g.updatedAt, state]);
+    if (roster) {
+      await tx.run("DELETE FROM game_players WHERE game_id=?", [g.id]);
+      for (const seat of activeSeats(g)) await tx.run("INSERT INTO game_players(game_id,user_id) VALUES(?,?)", [g.id, seat.id]);
+    }
+  }
+  summary(g, uid) {
+    return { id: g.id, channelId: g.channelId, kind: g.kind, hostId: g.hostId, hostName: g.hostName, status: g.status, players: activeSeats(g).length, maxPlayers: g.settings.maxPlayers, minPlayers: definition(g.kind).min, paused: Boolean(g.pausedUntil), seated: g.seats.some((s) => s.id === uid && !s.left) };
+  }
+  joinable(g) {
+    return g.status === "waiting" || g.status === "playing" && g.kind === "poker" && g.state?.phase === "between";
+  }
+  async list(uid, channelId) {
+    await this.requireVoice(this.service.db, uid, channelId);
+    const rows = await this.service.db.all("SELECT state FROM game_sessions WHERE channel_id=? AND status<>'finished' ORDER BY updated_at DESC LIMIT 60", [channelId]);
+    return rows.map((r) => this.summary(JSON.parse(r.state), uid));
+  }
+  async get(uid, id2) {
+    await this.tickId(id2);
+    return this.service.db.transaction(async (tx) => {
+      const g = await this.load(tx, id2);
+      await this.allowed(tx, uid, g);
+      const self = g.seats.findIndex((s) => s.id === uid && !s.left), inVoice = Boolean(await tx.one("SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?", [uid, g.channelId]));
+      return { ...this.summary(g, uid), revision: g.revision, seats: g.seats, settings: g.settings, self, canPlay: self < 0 && inVoice && !g.pausedUntil && this.joinable(g) && activeSeats(g).length < g.settings.maxPlayers, canStart: g.status === "waiting" && uid === g.hostId && inVoice && !g.pausedUntil && activeSeats(g).length >= definition(g.kind).min, deadline: g.status === "waiting" ? g.createdAt + 6e5 : g.state?.deadline || 0, serverNow: this.now(), pausedUntil: g.pausedUntil, result: g.result, state: g.state ? project(g.kind, g.state, self) : { phase: "lobby" } };
+    });
+  }
+  async free(tx, uid, except = "") {
+    if (await arcadeBusy(tx, uid, except) || await tx.one("SELECT id FROM chess_games WHERE status<>'finished' AND (white_id=? OR black_id=?)", [uid, uid])) fail(409, "CAPACITY", "Finish or leave your existing game first.");
+  }
+  async create(uid, b) {
+    const result = await this.service.mutate(uid, b.requestId, "game.create", b, async (tx) => {
+      const channel = await this.requireVoice(tx, uid, b.channelId);
+      await this.free(tx, uid);
+      const total = await tx.one("SELECT (SELECT COUNT(*) FROM game_sessions WHERE status<>'finished')+(SELECT COUNT(*) FROM chess_games WHERE status<>'finished') AS n");
+      if (Number(total.n) >= 60) fail(409, "CAPACITY", "The game limit is reached. Try again later.");
+      const user = await tx.one("SELECT display_name FROM users WHERE id=?", [uid]), now = this.now();
+      const g = { id: randomUUID2(), serverId: channel.server_id, channelId: b.channelId, hostId: uid, hostName: user.display_name, kind: b.kind, settings: b.settings, seats: [{ id: uid, name: user.display_name, left: false, grace: 3e4, missingAt: 0 }], status: "waiting", revision: 1, createdAt: now, updatedAt: now, pausedUntil: 0, pauseStarted: 0, result: null, state: null };
+      await tx.run("DELETE FROM game_sessions WHERE id IN (SELECT id FROM game_sessions WHERE status='finished' ORDER BY updated_at DESC LIMIT 10000 OFFSET 99)");
+      await this.save(tx, g, true);
+      return { id: g.id };
+    });
+    await this.changed(result.id);
+    await this.reconcileVoice();
+    return this.get(uid, result.id);
+  }
+  async command(uid, id2, b) {
+    const now = this.now(), rate = this.rates.get(uid);
+    if (!rate || now - rate.at > 1e3) this.rates.set(uid, { at: now, count: 1 });
+    else if (++rate.count > 20) fail(429, "RATE_LIMIT", "Slow down a little.");
+    await this.tickId(id2);
+    const result = await this.service.mutate(uid, b.requestId, "game.command", { id: id2, ...b }, async (tx) => {
+      const g = await this.load(tx, id2);
+      await this.allowed(tx, uid, g);
+      if (g.status === "finished") fail(409, "GAME_FINISHED", "This game has ended.");
+      const concurrent = (g.kind === "drawing" || g.kind === "telephone") && b.kind === "action" && b.action?.token === g.state?.token;
+      if (g.revision !== b.revision && !concurrent) fail(409, "STALE_GAME", "The game changed. Review the latest state.");
+      let roster = false;
+      let seat = g.seats.findIndex((s) => s.id === uid && !s.left);
+      if (!["leave", "close"].includes(b.kind)) await this.requireVoice(tx, uid, g.channelId);
+      if (b.kind === "join") {
+        if (seat >= 0) fail(409, "SEAT_TAKEN", "You already have a seat.");
+        if (!this.joinable(g) || g.pausedUntil || activeSeats(g).length >= g.settings.maxPlayers) fail(409, "SEAT_TAKEN", "Seats are unavailable now. You can keep watching.");
+        await this.free(tx, uid, id2);
+        for (const p of activeSeats(g)) if (await tx.one("SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)", [uid, p.id, p.id, uid])) fail(403, "FORBIDDEN", "This game is unavailable.");
+        const user = await tx.one("SELECT display_name FROM users WHERE id=?", [uid]);
+        seat = g.seats.findIndex((s) => s.left);
+        if (seat < 0) seat = g.seats.length;
+        g.seats[seat] = { id: uid, name: user.display_name, left: false, grace: 3e4, missingAt: 0 };
+        if (g.state) {
+          pokerJoin(g.state, g.settings, seat);
+          g.state.active[seat] = true;
+        }
+        roster = true;
+      } else {
+        if (seat < 0) fail(403, "FORBIDDEN", "Spectators cannot change a game.");
+        if (b.kind === "close") {
+          if (g.hostId !== uid || g.status !== "waiting") fail(403, "FORBIDDEN", "Only the host can close the waiting game.");
+          g.status = "finished";
+          g.result = "Lobby closed";
+        } else if (b.kind === "leave") {
+          this.remove(g, seat, this.now());
+          this.reconcilePause(g, this.now());
+          roster = true;
+        } else if (b.kind === "start") {
+          if (g.hostId !== uid || g.status !== "waiting" || g.pausedUntil || activeSeats(g).length < definition(g.kind).min) fail(409, "NOT_READY", "Wait for enough players to join.");
+          for (const p of activeSeats(g)) await this.requireVoice(tx, p.id, g.channelId);
+          g.seats = g.seats.filter((s) => !s.left);
+          g.state = startEngine(g.kind, g.seats.length, g.settings, this.now());
+          g.status = "playing";
+          roster = true;
+        } else {
+          if (g.status !== "playing" || g.pausedUntil) fail(409, "PAUSED", "Wait for the players to return to voice.");
+          if (b.action?.type === "next" && uid !== g.hostId) fail(403, "FORBIDDEN", "Only the host can start the next round.");
+          try {
+            act(g.kind, g.state, seat, b.action, g.settings, this.now());
+          } catch (e) {
+            fail(400, "INVALID_MOVE", e instanceof Error ? e.message : "That action is unavailable.");
+          }
+          this.complete(g);
+        }
+      }
+      g.revision++;
+      await this.save(tx, g, roster);
+      const canvas = b.kind === "action" && b.action && ["stroke", "clear"].includes(b.action.type) ? { id: id2, revision: g.revision, serverNow: this.now(), token: b.action.token, seat, requestId: b.requestId, type: b.action.type, ...b.action.stroke ? { stroke: b.action.stroke } : {} } : void 0;
+      return { id: id2, ...canvas ? { canvas } : {} };
+    });
+    await this.changed(result.id, result.canvas);
+    if (b.kind === "join" || b.kind === "start") await this.reconcileVoice();
+    return b.kind === "leave" ? { left: true, id: id2 } : this.get(uid, result.id);
+  }
+  complete(g) {
+    if (g.state?.result) {
+      g.status = "finished";
+      g.result = g.state.result;
+      g.pausedUntil = 0;
+    }
+  }
+  remove(g, seat, now) {
+    const person = g.seats[seat];
+    person.left = true;
+    person.missingAt = 0;
+    if (g.state) {
+      const previous = g.state.deadline;
+      depart(g.kind, g.state, seat, g.settings, now);
+      if (g.pauseStarted && g.state.deadline !== previous) g.pauseStarted = now;
+    }
+    this.complete(g);
+    const remaining = activeSeats(g);
+    if (!remaining.length) {
+      g.status = "finished";
+      g.result = "Game closed";
+      g.pausedUntil = 0;
+    } else if (person.id === g.hostId) {
+      const host = remaining.find((s) => !s.missingAt) || remaining[0];
+      g.hostId = host.id;
+      g.hostName = host.name;
+    }
+  }
+  reconcilePause(g, now) {
+    const absent = activeSeats(g).filter((s) => s.missingAt);
+    g.pausedUntil = absent.length ? Math.min(...absent.map((s) => s.missingAt + s.grace)) : 0;
+    if (!g.pausedUntil && g.pauseStarted) {
+      const elapsed = now - g.pauseStarted;
+      if (g.state?.deadline) g.state.deadline += elapsed;
+      if (g.state?.started) g.state.started += elapsed;
+      g.pauseStarted = 0;
+    } else if (g.pausedUntil && !g.pauseStarted) g.pauseStarted = now;
+  }
+  async reconcileVoice() {
+    if (!this.active.size) return;
+    const voice = new Map((await this.service.db.all("SELECT user_id,channel_id FROM voice_members")).map((r) => [r.user_id, r.channel_id]));
+    for (const cached of [...this.active.values()]) {
+      await this.tickId(cached.id);
+      const g = this.active.get(cached.id);
+      if (!g) continue;
+      if (activeSeats(g).some((s) => (voice.get(s.id) === g.channelId && this.online(s.id)) === Boolean(s.missingAt))) {
+        await this.service.db.transaction(async (tx) => {
+          const row = await tx.one("SELECT state FROM game_sessions WHERE id=?", [g.id]);
+          if (!row) return;
+          const current = JSON.parse(row.state);
+          if (current.status === "finished") return;
+          const now = this.now();
+          for (const s of activeSeats(current)) {
+            const present = voice.get(s.id) === current.channelId && this.online(s.id);
+            if (present && s.missingAt) {
+              s.grace = Math.max(0, s.grace - (now - s.missingAt));
+              s.missingAt = 0;
+            } else if (!present && !s.missingAt) s.missingAt = now;
+          }
+          this.reconcilePause(current, now);
+          current.revision++;
+          await this.save(tx, current);
+        });
+        await this.changed(g.id);
+      }
+    }
+  }
+  deadline(g) {
+    return g.status === "waiting" ? Math.min(g.createdAt + 6e5, g.pausedUntil || Infinity) : g.pausedUntil || g.state?.deadline || g.updatedAt + 72e5;
+  }
+  async changed(id2, canvas) {
+    if (this.closed) return;
+    const row = await this.service.db.one("SELECT state FROM game_sessions WHERE id=?", [id2]);
+    if (!row) {
+      const removed = this.active.get(id2);
+      this.active.delete(id2);
+      if (removed) await this.notify({ ...removed, status: "finished" }, true).catch(this.onError);
+      this.schedule();
+      return;
+    }
+    const g = JSON.parse(row.state), previous = this.active.get(id2);
+    const directoryChanged = !previous || g.status !== previous.status || g.hostId !== previous.hostId || activeSeats(g).map((s) => s.id).join() !== activeSeats(previous).map((s) => s.id).join() || Boolean(g.pausedUntil) !== Boolean(previous.pausedUntil) || g.kind === "poker" && g.state?.phase === "between" !== (previous.state?.phase === "between");
+    if (g.status === "finished") this.active.delete(id2);
+    else this.active.set(id2, g);
+    await this.notify(g, directoryChanged, canvas).catch(this.onError);
+    this.schedule();
+  }
+  schedule() {
+    clearTimeout(this.timer);
+    if (this.closed || !this.active.size) return;
+    const nearest = Math.min(...[...this.active.values()].map((g) => this.deadline(g)));
+    this.timer = setTimeout(() => {
+      void this.tick().catch((e) => {
+        this.onError(e);
+        if (!this.closed) {
+          this.timer = setTimeout(() => this.schedule(), 1e3);
+          this.timer.unref();
+        }
+      });
+    }, Math.max(1, Math.min(2147483647, nearest - this.now())));
+    this.timer.unref();
+  }
+  async tickId(id2) {
+    const cached = this.active.get(id2);
+    if (!cached || this.deadline(cached) > this.now()) return;
+    const changed = await this.service.db.transaction(async (tx) => {
+      const row = await tx.one("SELECT state FROM game_sessions WHERE id=?", [id2]);
+      if (!row) return true;
+      const g = JSON.parse(row.state), now = this.now();
+      if (g.status === "finished" || this.deadline(g) > now) return false;
+      let roster = false;
+      if (g.status === "waiting" && now >= g.createdAt + 6e5) {
+        g.status = "finished";
+        g.result = "Lobby expired";
+      } else if (g.pausedUntil) {
+        for (let i = 0; i < g.seats.length; i++) {
+          const s = g.seats[i];
+          if (!s.left && s.missingAt && now >= s.missingAt + s.grace) {
+            this.remove(g, i, now);
+            roster = true;
+          }
+        }
+        this.reconcilePause(g, now);
+      } else if (g.state) {
+        timeout(g.kind, g.state, g.settings, now);
+        this.complete(g);
+      }
+      g.revision++;
+      await this.save(tx, g, roster);
+      return true;
+    });
+    if (changed) await this.changed(id2);
+  }
+  async tick() {
+    for (const id2 of [...this.active.keys()]) await this.tickId(id2);
+    this.schedule();
+  }
+};
+
 // apps/api/src/chess.ts
-var chessCreate = z4.object({ requestId: z4.string().uuid(), serverId: z4.string().min(1).max(100), channelId: z4.string().min(1).max(100).optional(), openSeat: z4.literal(true).optional(), opponentId: z4.string().min(1).max(100).optional(), difficulty: z4.enum(["Easy", "Medium", "Hard"]).optional(), mode: z4.enum(["standard", "elixer"]), minutes: z4.union([z4.literal(3), z4.literal(5), z4.literal(10), z4.literal(15)]), increment: z4.union([z4.literal(0), z4.literal(2), z4.literal(5), z4.literal(10)]) }).strict().refine((b) => [b.opponentId, b.difficulty, b.openSeat].filter(Boolean).length === 1 && (!b.openSeat || Boolean(b.channelId)) && (!b.channelId || !b.opponentId), "Choose an open voice seat or AI");
-var chessCommand = z4.object({ requestId: z4.string().uuid(), revision: z4.number().int().positive(), kind: z4.enum(["join", "accept", "decline", "cancel", "action", "resign", "offerDraw", "acceptDraw", "declineDraw", "claimDraw"]), action: z4.object({ from: z4.number().int().min(0).max(63).optional(), to: z4.number().int().min(0).max(63), buy: z4.enum(["p", "n", "b", "r", "q"]).optional(), promotion: z4.enum(["q", "r", "b", "n"]).optional() }).strict().optional() }).strict();
+var chessCreate = z5.object({ requestId: z5.string().uuid(), serverId: z5.string().min(1).max(100), channelId: z5.string().min(1).max(100).optional(), openSeat: z5.literal(true).optional(), opponentId: z5.string().min(1).max(100).optional(), difficulty: z5.enum(["Easy", "Medium", "Hard"]).optional(), mode: z5.enum(["standard", "elixer"]), minutes: z5.union([z5.literal(3), z5.literal(5), z5.literal(10), z5.literal(15)]), increment: z5.union([z5.literal(0), z5.literal(2), z5.literal(5), z5.literal(10)]) }).strict().refine((b) => [b.opponentId, b.difficulty, b.openSeat].filter(Boolean).length === 1 && (!b.openSeat || Boolean(b.channelId)) && (!b.channelId || !b.opponentId), "Choose an open voice seat or AI");
+var chessCommand = z5.object({ requestId: z5.string().uuid(), revision: z5.number().int().positive(), kind: z5.enum(["join", "accept", "decline", "cancel", "action", "resign", "offerDraw", "acceptDraw", "declineDraw", "claimDraw"]), action: z5.object({ from: z5.number().int().min(0).max(63).optional(), to: z5.number().int().min(0).max(63), buy: z5.enum(["p", "n", "b", "r", "q"]).optional(), promotion: z5.enum(["q", "r", "b", "n"]).optional() }).strict().optional() }).strict();
 var winner = (color, reason) => `${color === 0 ? "White" : "Black"} wins by ${reason}`;
 function chargeClock(g, now) {
   if (g.status !== "playing" || g.pausedUntil) return;
@@ -902,6 +1963,7 @@ var ChessService = class {
   }
   async create(uid, b) {
     const result = await this.service.mutate(uid, b.requestId, "chess.create", b, async (tx) => {
+      if (await arcadeBusy(tx, uid)) fail(409, "CAPACITY", "Finish or leave your existing game first.");
       if (b.channelId) {
         const channel = await this.requireVoice(tx, uid, b.channelId);
         if (channel.server_id !== b.serverId) fail(400, "INVALID_REQUEST", "The game must use your current voice channel.");
@@ -917,9 +1979,9 @@ var ChessService = class {
       if (b.opponentId && await tx.one("SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)", [uid, b.opponentId, b.opponentId, uid])) fail(403, "FORBIDDEN", "This challenge is unavailable.");
       const active = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [uid, uid]);
       const pending = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='pending' AND (white_id=? OR black_id=?)", [uid, uid]);
-      const total = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status<>'finished'");
+      const total = await tx.one("SELECT (SELECT COUNT(*) FROM chess_games WHERE status<>'finished')+(SELECT COUNT(*) FROM game_sessions WHERE status<>'finished') AS n");
       if (Number(active.n) >= 1 || Number(pending.n) >= 3 || Number(total.n) >= 60) fail(409, "CAPACITY", "Finish your current game or pending challenges first.");
-      const now = this.now(), g = { channelId: b.channelId || null, openSeat: Boolean(b.openSeat), id: randomUUID2(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || (b.openSeat ? "Open seat" : `${b.difficulty} AI`), difficulty: b.difficulty || null, status: b.opponentId || b.openSeat ? "pending" : "playing", position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 6e4, b.minutes * 6e4], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [3e4, 3e4], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
+      const now = this.now(), g = { channelId: b.channelId || null, openSeat: Boolean(b.openSeat), id: randomUUID3(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || (b.openSeat ? "Open seat" : `${b.difficulty} AI`), difficulty: b.difficulty || null, status: b.opponentId || b.openSeat ? "pending" : "playing", position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 6e4, b.minutes * 6e4], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [3e4, 3e4], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
       await tx.run("DELETE FROM chess_games WHERE id IN (SELECT id FROM chess_games WHERE status='finished' ORDER BY updated_at DESC LIMIT 10000 OFFSET 999)");
       await this.save(tx, g);
       return { id: g.id };
@@ -945,6 +2007,7 @@ var ChessService = class {
           if (g.pausedUntil) fail(409, "PAUSED", "Waiting for the host to return to voice.");
           await this.requireVoice(tx, g.whiteId, g.channelId);
           if (await tx.one("SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)", [uid, g.whiteId, g.whiteId, uid])) fail(403, "FORBIDDEN", "This challenge is unavailable.");
+          if (await arcadeBusy(tx, uid) || await arcadeBusy(tx, g.whiteId)) fail(409, "CAPACITY", "A player already has an active game.");
           for (const player of [uid, g.whiteId]) if (await tx.one("SELECT id FROM chess_games WHERE id<>? AND (white_id=? OR black_id=?) AND (status='playing' OR (status='pending' AND channel_id IS NOT NULL))", [id2, player, player])) fail(409, "CAPACITY", "A player already has an active match.");
           const user = await tx.one("SELECT display_name FROM users WHERE id=?", [uid]);
           g.blackId = uid;
@@ -954,6 +2017,7 @@ var ChessService = class {
           g.runningSince = now;
         } else if (b.kind === "accept" && uid === g.blackId) {
           if (!this.online(g.whiteId) || !this.online(g.blackId)) fail(409, "OFFLINE", "Both players must be online to start.");
+          if (await arcadeBusy(tx, uid) || await arcadeBusy(tx, g.whiteId)) fail(409, "CAPACITY", "A player already has an active game.");
           for (const player of [g.whiteId, g.blackId]) if (await tx.one("SELECT id FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [player, player])) fail(409, "CAPACITY", "A player already has an active match.");
           g.status = "playing";
           g.runningSince = now;
@@ -1158,6 +2222,9 @@ async function createApp(c = config(), options = {}) {
   const chess = new ChessService(service);
   chess.onError = (e) => app2.log.error({ err: e }, "Chess task failed");
   await chess.initialize();
+  const games = new GameService(service);
+  games.onError = (e) => app2.log.error({ err: e }, "Game task failed");
+  await games.initialize();
   const eventLoop = monitorEventLoopDelay({ resolution: 20 });
   eventLoop.enable();
   const realtime = { actions: {}, disconnects: {}, maintenance: { passes: 0, maxMs: 0, maxTimerDelayMs: 0 } };
@@ -1244,7 +2311,7 @@ async function createApp(c = config(), options = {}) {
     await db.transaction(async (tx) => {
       const old = await tx.all("SELECT id FROM sessions WHERE user_id=? ORDER BY created_at DESC", [userId]);
       for (const s of old.slice(2)) await tx.run("DELETE FROM sessions WHERE id=?", [s.id]);
-      await tx.run("INSERT INTO sessions(id,user_id,access_hash,refresh_hash,csrf,native,access_expires,expires_at,created_at,device_name,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [randomUUID3(), userId, hash(access), refresh ? hash(refresh) : null, csrf, Number(native), now + (native ? 15 * 6e4 : 30 * 864e5), now + 30 * 864e5, now, device.slice(0, 160), now]);
+      await tx.run("INSERT INTO sessions(id,user_id,access_hash,refresh_hash,csrf,native,access_expires,expires_at,created_at,device_name,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [randomUUID4(), userId, hash(access), refresh ? hash(refresh) : null, csrf, Number(native), now + (native ? 15 * 6e4 : 30 * 864e5), now + 30 * 864e5, now, device.slice(0, 160), now]);
     });
     const account = await db.one("SELECT * FROM users WHERE id=?", [userId]);
     if (!native) setCookie(reply, access);
@@ -1279,7 +2346,7 @@ async function createApp(c = config(), options = {}) {
       const count = await tx.one("SELECT COUNT(*) AS count FROM users");
       if (count.count >= c.maxUsers) fail(409, "ACCOUNT_LIMIT", "This instance has reached its account limit.");
       if (await tx.one("SELECT id FROM users WHERE username=?", [username])) fail(409, "USERNAME_TAKEN", "This username is unavailable.");
-      const userId2 = randomUUID3();
+      const userId2 = randomUUID4();
       await tx.run("INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)", [userId2, username, body.displayName, encoded, Date.now(), body.language || ""]);
       return userId2;
     });
@@ -1297,7 +2364,7 @@ async function createApp(c = config(), options = {}) {
     return sessionFor(user.id, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Unknown device"));
   });
   app2.post("/api/v1/auth/refresh", { config: authRate }, async (req) => {
-    const body = z5.object({ refreshToken: z5.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
+    const body = z6.object({ refreshToken: z6.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
     const outcome2 = await db.transaction(async (tx) => {
       const reused = await tx.one("SELECT session_id FROM used_refresh WHERE hash=?", [fingerprint]);
       if (reused) {
@@ -1319,6 +2386,13 @@ async function createApp(c = config(), options = {}) {
   await app2.register(async (api) => {
     api.addHook("preHandler", authenticate);
     protectedAccountRoutes(api, service, disconnectInvalidSessions);
+    api.get("/games", async (req) => {
+      const channelId = id.parse(req.query.channelId);
+      return { games: await games.list(req.account.id, channelId), chess: await chess.voiceGames(req.account.id, channelId) };
+    });
+    api.post("/games", { bodyLimit: 16384 }, async (req) => games.create(req.account.id, gameCreate.parse(req.body)));
+    api.get("/games/:id", async (req) => games.get(req.account.id, id.parse(req.params.id)));
+    api.post("/games/:id", { bodyLimit: 16384 }, async (req) => games.command(req.account.id, id.parse(req.params.id), gameCommand.parse(req.body)));
     api.get("/chess", async (req) => {
       const q = req.query;
       return { games: q.channelId ? await chess.voiceGames(req.account.id, id.parse(q.channelId)) : await chess.list(req.account.id, id.parse(q.serverId)) };
@@ -1328,7 +2402,7 @@ async function createApp(c = config(), options = {}) {
     api.post("/chess/:id", async (req) => chess.command(req.account.id, id.parse(req.params.id), chessCommand.parse(req.body)));
     attachments.register(api);
     api.post("/auth/renew", async (req, reply) => {
-      z5.object({ requestId }).parse(req.body);
+      z6.object({ requestId }).parse(req.body);
       if (req.session.native) fail(400, "NATIVE_REFRESH", "Use native credential renewal.");
       const access = token(), now = Date.now();
       await db.run("UPDATE sessions SET access_hash=?,access_expires=?,expires_at=?,last_seen=? WHERE id=?", [hash(access), now + 30 * 864e5, now + 30 * 864e5, now, req.session.id]);
@@ -1337,14 +2411,14 @@ async function createApp(c = config(), options = {}) {
     });
     api.get("/auth/me", async (req) => ({ user: publicUser(req.account), csrf: req.session.csrf }));
     api.post("/auth/logout", async (req, reply) => {
-      z5.object({ requestId }).parse(req.body);
+      z6.object({ requestId }).parse(req.body);
       await db.run("DELETE FROM sessions WHERE id=?", [req.session.id]);
       for (const s of io.sockets.sockets.values()) if (s.data.sessionId === req.session.id) s.disconnect(true);
       reply.clearCookie("dorham_session", { path: "/" });
       return { success: true };
     });
     api.post("/auth/password", async (req) => {
-      const b = z5.object({ currentPassword: z5.string().max(128), password: passwordSchema, requestId }).parse(req.body);
+      const b = z6.object({ currentPassword: z6.string().max(128), password: passwordSchema, requestId }).parse(req.body);
       if (req.account.guest || !await passwordVerify(req.account.password_hash, b.currentPassword)) fail(401, "INVALID_CREDENTIALS", "Current password is incorrect.");
       const encoded = await passwordHash(b.password);
       const result = await service.mutate(req.account.id, b.requestId, "password.change", { fingerprint: hash(b.password) }, async (tx) => {
@@ -1356,7 +2430,7 @@ async function createApp(c = config(), options = {}) {
       return result;
     });
     api.post("/admin/claim", async (req) => {
-      const b = z5.object({ secret: z5.string().max(256), requestId }).parse(req.body);
+      const b = z6.object({ secret: z6.string().max(256), requestId }).parse(req.body);
       if (!c.bootstrapSecret || !equal(c.bootstrapSecret, b.secret)) fail(403, "FORBIDDEN", "Bootstrap secret is invalid.");
       return service.mutate(req.account.id, b.requestId, "admin.claim", {}, async (tx) => {
         if (await tx.one("SELECT value FROM meta WHERE key='admin_claimed'")) fail(409, "ALREADY_CLAIMED", "Instance administration has already been claimed.");
@@ -1396,7 +2470,7 @@ async function createApp(c = config(), options = {}) {
         let size = 0;
         for (const f of await readdir(avatarDir)) size += (await stat3(path3.join(avatarDir, f))).size;
         if (size + image.length > c.maxAvatarsMiB * 1024 * 1024) fail(507, "AVATAR_QUOTA", "Avatar storage is full.");
-        const name = `${randomUUID3()}.webp`;
+        const name = `${randomUUID4()}.webp`;
         await writeFile(path3.join(avatarDir, name), image, { flag: "wx" });
         const old = await tx.one("SELECT avatar FROM users WHERE id=?", [req.account.id]);
         await tx.run("UPDATE users SET avatar=? WHERE id=?", [`/avatars/${name}`, req.account.id]);
@@ -1412,11 +2486,11 @@ async function createApp(c = config(), options = {}) {
     api.get("/channels/:id", async (req) => service.channel(db, req.account.id, id.parse(req.params.id)));
     api.get("/channels/:id/overrides", async (req) => service.channelOverrides(req.account.id, id.parse(req.params.id), schemas.role.parse(req.query.role)));
     api.post("/servers", async (req) => {
-      const b = z5.object({ name: schemas.name, requestId }).parse(req.body);
+      const b = z6.object({ name: schemas.name, requestId }).parse(req.body);
       return service.createServer(req.account.id, b.requestId, b.name);
     });
     api.patch("/servers/:id", async (req) => {
-      const b = z5.object({ name: schemas.name.optional(), delete: z5.boolean().optional(), allowGuests: z5.boolean().optional(), allowMemberInvites: z5.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
+      const b = z6.object({ name: schemas.name.optional(), delete: z6.boolean().optional(), allowGuests: z6.boolean().optional(), allowMemberInvites: z6.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
       return service.changeServer(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/channels", async (req) => {
@@ -1424,52 +2498,52 @@ async function createApp(c = config(), options = {}) {
       return service.createChannel(req.account.id, b.requestId, id.parse(req.params.id), b.name, b.kind);
     });
     api.patch("/channels/:id", async (req) => {
-      const b = z5.object({ name: schemas.name.optional(), delete: z5.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z5.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
+      const b = z6.object({ name: schemas.name.optional(), delete: z6.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z6.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
       return service.changeChannel(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/invites", async (req) => {
-      const b = z5.object({ hours: z5.number().int().min(1).max(168).default(24), uses: z5.number().int().min(1).max(100).default(10), requestId }).parse(req.body);
+      const b = z6.object({ hours: z6.number().int().min(1).max(168).default(24), uses: z6.number().int().min(1).max(100).default(10), requestId }).parse(req.body);
       return service.invite(req.account.id, b.requestId, id.parse(req.params.id), token(), b.hours, b.uses);
     });
     api.get("/servers/:id/invites", async (req) => service.invitations(req.account.id, id.parse(req.params.id)));
     api.delete("/servers/:id/invites/:code", async (req) => {
-      const b = z5.object({ requestId }).parse(req.body), p = req.params;
-      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z5.string().min(10).max(100).parse(p.code));
+      const b = z6.object({ requestId }).parse(req.body), p = req.params;
+      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z6.string().min(10).max(100).parse(p.code));
     });
     api.get("/servers/:id/roles", async (req) => service.customRoles(req.account.id, id.parse(req.params.id)));
     api.post("/servers/:id/roles", async (req) => {
-      const b = z5.object({ roleId: z5.string().uuid().optional(), name: z5.string().trim().min(1).max(32).optional(), color: z5.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z5.boolean().optional(), userId: id.optional(), assigned: z5.boolean().optional(), requestId }).strict().parse(req.body);
+      const b = z6.object({ roleId: z6.string().uuid().optional(), name: z6.string().trim().min(1).max(32).optional(), color: z6.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z6.boolean().optional(), userId: id.optional(), assigned: z6.boolean().optional(), requestId }).strict().parse(req.body);
       return service.changeCustomRole(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/invites/join", async (req) => {
-      const b = z5.object({ code: z5.string().min(10).max(100), requestId }).parse(req.body);
+      const b = z6.object({ code: z6.string().min(10).max(100), requestId }).parse(req.body);
       return service.joinInvite(req.account.id, b.requestId, b.code);
     });
     api.get("/servers/:id/members", async (req) => service.members(req.account.id, id.parse(req.params.id)));
     api.patch("/servers/:serverId/members/:userId", async (req) => {
-      const b = z5.object({ role: schemas.role.optional(), remove: z5.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
+      const b = z6.object({ role: schemas.role.optional(), remove: z6.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
       return service.changeMember(req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b);
     });
     api.post("/servers/:id/leave", async (req) => {
-      const b = z5.object({ requestId }).parse(req.body);
+      const b = z6.object({ requestId }).parse(req.body);
       return service.leaveServer(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/dms/:id/close", async (req) => {
-      const b = z5.object({ requestId }).parse(req.body);
+      const b = z6.object({ requestId }).parse(req.body);
       return service.closeDirectMessage(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/users/:id/block", async (req) => {
-      const b = z5.object({ blocked: z5.boolean(), requestId }).parse(req.body);
+      const b = z6.object({ blocked: z6.boolean(), requestId }).parse(req.body);
       return service.blockUser(req.account.id, b.requestId, id.parse(req.params.id), b.blocked);
     });
     api.post("/dms", async (req) => {
-      const b = z5.object({ userId: id, requestId }).parse(req.body);
+      const b = z6.object({ userId: id, requestId }).parse(req.body);
       const result = await service.dm(req.account.id, b.requestId, b.userId);
       await service.notify("state:changed", {});
       return result;
     });
     api.get("/conversations/:id/messages", async (req) => {
-      const b = z5.object({ before: z5.coerce.number().int().min(1).optional(), after: z5.coerce.number().int().min(0).optional() }).parse(req.query);
+      const b = z6.object({ before: z6.coerce.number().int().min(1).optional(), after: z6.coerce.number().int().min(0).optional() }).parse(req.query);
       return service.history(req.account.id, id.parse(req.params.id), b.before, b.after);
     });
     api.post("/messages", async (req) => {
@@ -1477,29 +2551,29 @@ async function createApp(c = config(), options = {}) {
       return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds);
     });
     api.patch("/messages/:id", async (req) => {
-      const b = z5.object({ content: z5.string().trim().min(1).max(4e3).optional(), delete: z5.boolean().optional(), emoji: z5.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z5.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
+      const b = z6.object({ content: z6.string().trim().min(1).max(4e3).optional(), delete: z6.boolean().optional(), emoji: z6.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z6.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
       return service.changeMessage(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/conversations/:id/read", async (req) => {
-      const b = z5.object({ sequence: z5.number().int().min(0), requestId }).parse(req.body);
+      const b = z6.object({ sequence: z6.number().int().min(0), requestId }).parse(req.body);
       return service.read(req.account.id, b.requestId, id.parse(req.params.id), b.sequence);
     });
     api.get("/voice/:id", async (req) => service.room(req.account.id, id.parse(req.params.id)));
     api.post("/voice/:id/moderate", async (req) => {
-      const b = z5.object({ userId: id, action: z5.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
+      const b = z6.object({ userId: id, action: z6.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
       return service.moderate(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.action);
     });
     api.patch("/voice/:id/policy", async (req) => {
-      const b = z5.object({ locked: z5.boolean(), userLimit: z5.number().int().min(1).max(c.maxVoice), tagMode: z5.enum(["ANY", "ALL"]), requiredTags: z5.array(z5.string().uuid()).max(32), requestId }).parse(req.body);
+      const b = z6.object({ locked: z6.boolean(), userLimit: z6.number().int().min(1).max(c.maxVoice), tagMode: z6.enum(["ANY", "ALL"]), requiredTags: z6.array(z6.string().uuid()).max(32), requestId }).parse(req.body);
       return service.voicePolicy(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/voice/:id/move", async (req) => {
-      const b = z5.object({ userId: id, channelId: id, requestId }).parse(req.body);
+      const b = z6.object({ userId: id, channelId: id, requestId }).parse(req.body);
       return service.moveVoice(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.channelId);
     });
     api.get("/servers/:id/tags", async (req) => ({ tags: await service.tags(req.account.id, id.parse(req.params.id)) }));
     api.post("/servers/:id/tags", async (req) => {
-      const b = z5.object({ tagId: z5.string().uuid().optional(), name: z5.string().trim().min(1).max(32).optional(), color: z5.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z5.boolean().optional(), userId: id.optional(), assigned: z5.boolean().optional(), requestId }).parse(req.body);
+      const b = z6.object({ tagId: z6.string().uuid().optional(), name: z6.string().trim().min(1).max(32).optional(), color: z6.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z6.boolean().optional(), userId: id.optional(), assigned: z6.boolean().optional(), requestId }).parse(req.body);
       return service.changeTag(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.get("/admin/metrics", async (req) => {
@@ -1514,6 +2588,16 @@ async function createApp(c = config(), options = {}) {
   }, { prefix: "/api/v1" });
   const io = new SocketServer(app2.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 12e4, skipMiddlewares: false }, pingInterval: 2e4, pingTimeout: 1e4, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
   mediaAdmission(app2, service, (socketId) => io.sockets.sockets.get(socketId)?.data.sessionId);
+  games.online = (uid) => [...io.sockets.sockets.values()].some((s) => s.data.userId === uid);
+  games.notify = async (g, directoryChanged, canvas) => {
+    const audience = new Set((await db.all("SELECT user_id FROM voice_members WHERE channel_id=?", [g.channelId])).map((r) => r.user_id));
+    g.seats.forEach((p) => audience.add(p.id));
+    for (const socket of io.sockets.sockets.values()) if (audience.has(socket.data.userId)) {
+      if (canvas) {
+        if (socket.data.gameWatching === g.id && (g.kind !== "telephone" || g.seats[canvas.seat]?.id === socket.data.userId)) socket.emit("game:canvas", canvas);
+      } else socket.emit("game:changed", { id: g.id, channelId: g.channelId, revision: g.revision, directoryChanged });
+    }
+  };
   chess.online = (uid) => [...io.sockets.sockets.values()].some((s) => s.data.userId === uid);
   chess.notify = async (g, directoryChanged) => {
     const members = new Set((await db.all("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [g.serverId])).map((r) => r.user_id));
@@ -1608,7 +2692,10 @@ async function createApp(c = config(), options = {}) {
       }
     } else if (kind === "voice:changed" || kind === "voice:state:changed") {
       await voiceRefresh.run();
-      if (kind === "voice:changed") await chess.reconcileVoice();
+      if (kind === "voice:changed") {
+        await chess.reconcileVoice();
+        await games.reconcileVoice();
+      }
       if (kind === "voice:changed" && sfu.client) try {
         await sfu.synchronize();
       } catch (err) {
@@ -1626,6 +2713,7 @@ async function createApp(c = config(), options = {}) {
     }
     io.emit("presence", { userId: socket.data.userId, online: true });
     void chess.presence(socket.data.userId, true).catch(chess.onError);
+    void games.reconcileVoice().catch(games.onError);
     void measureConnection(socket).then(() => {
       if (socket.connected) socket.emit("connection:latencies", connectionLatency.snapshot(io.sockets.sockets.values()));
     });
@@ -1657,32 +2745,42 @@ async function createApp(c = config(), options = {}) {
       const m = messageSchema.parse(b);
       return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds);
     });
+    handle("game:watch", async (b) => {
+      const gameId = id.parse(b.id);
+      const view = await games.get(socket.data.userId, gameId);
+      socket.data.gameWatching = gameId;
+      return view;
+    });
+    handle("game:unwatch", async (b) => {
+      if (socket.data.gameWatching === id.parse(b.id)) socket.data.gameWatching = null;
+      return {};
+    });
     handle("typing", async (b) => {
-      const v = z5.object({ conversationId: id, active: z5.boolean() }).parse(b);
+      const v = z6.object({ conversationId: id, active: z6.boolean() }).parse(b);
       const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter((s) => s.id !== socket.id).map((s) => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId);
       for (const id2 of audience) io.sockets.sockets.get(id2)?.emit("typing", { ...v, userId: socket.data.userId });
       return {};
     });
     handle("voice:join", async (b) => {
-      const v = z5.object({ channelId: id, eligible: z5.boolean() }).parse(b);
+      const v = z6.object({ channelId: id, eligible: z6.boolean() }).parse(b);
       const result = await service.joinVoice(socket.data.userId, socket.id, v.channelId, v.eligible);
       socket.data.voiceChannel = v.channelId;
       return result;
     });
     handle("voice:leave", async (b) => {
-      z5.object({ requestId }).parse(b);
+      z6.object({ requestId }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "leave");
       socket.data.voiceChannel = null;
       return result;
     });
     handle("voice:heartbeat", async (b) => {
-      const v = z5.object({ eligible: z5.boolean().optional() }).parse(b);
+      const v = z6.object({ eligible: z6.boolean().optional() }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "heartbeat", v);
       if ("room" in result) socket.emit("voice:room", result.room);
       return result;
     });
     handle("voice:state", async (b) => {
-      const v = z5.object({ muted: z5.boolean(), deafened: z5.boolean(), requestId }).parse(b);
+      const v = z6.object({ muted: z6.boolean(), deafened: z6.boolean(), requestId }).parse(b);
       return service.voiceAction(socket.data.userId, socket.id, "state", v);
     });
     handle("share:start", async (b) => {
@@ -1695,11 +2793,11 @@ async function createApp(c = config(), options = {}) {
       return service.updateShare(socket.data.userId, socket.id, v.requestId, v);
     });
     handle("share:stop", async (b) => {
-      const v = z5.object({ requestId }).parse(b);
+      const v = z6.object({ requestId }).parse(b);
       return service.share(socket.data.userId, socket.id, v.requestId, true);
     });
     handle("voice:sfu", async (b) => {
-      const v = z5.object({ channelId: id }).parse(b);
+      const v = z6.object({ channelId: id }).parse(b);
       return sfu.credentials(socket.data.userId, socket.id, v.channelId);
     });
     handle("voice:signal", async (b) => {
@@ -1723,6 +2821,7 @@ async function createApp(c = config(), options = {}) {
         if (vm) await service.voiceAction(socket.data.userId, socket.id, "leave");
         if (![...io.sockets.sockets.values()].some((s) => s.data.userId === socket.data.userId)) io.emit("presence", { userId: socket.data.userId, online: false });
         if (!chess.online(socket.data.userId)) await chess.presence(socket.data.userId, false);
+        await games.reconcileVoice();
       } catch (err) {
         app2.log.error({ err }, "Disconnect cleanup failed");
       }
@@ -1767,6 +2866,7 @@ async function createApp(c = config(), options = {}) {
   maintenance.unref();
   app2.addHook("preClose", async () => {
     chess.close();
+    games.close();
     clearInterval(maintenance);
     clearInterval(latencyTimer);
     io.engine.close();
@@ -1777,7 +2877,7 @@ async function createApp(c = config(), options = {}) {
     await db.close();
     if (existsSync(lockPath) && readFileSync(lockPath, "utf8") === String(process.pid)) unlinkSync(lockPath);
   });
-  return { app: app2, db, service, io, chess, attachments, config: c };
+  return { app: app2, db, service, io, chess, games, attachments, config: c };
 }
 
 // apps/api/src/index.ts
