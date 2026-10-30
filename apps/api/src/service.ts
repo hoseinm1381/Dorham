@@ -7,6 +7,7 @@ import { fail, hash } from './security';
 import { CloudflareTurn, cloudflareTurnTtl } from './turn';
 import { audit } from './accounts';
 import { readSnapshot } from './read-snapshot';
+import { reconcileShares, shareView } from './share-policy';
 
 export const publicUser = (u: Row): PublicUser => ({ id: u.id, username: u.username, displayName: u.display_name, bio: u.bio, avatar: u.avatar, status: u.status, instanceAdmin: Boolean(u.instance_admin), guest: Boolean(u.guest), banned: Boolean(u.banned), language: u.language === 'fa-IR' ? 'fa-IR' : u.language === 'en-US' ? 'en-US' : undefined, mustChangePassword: Boolean(u.must_change_password) });
 export class Service {
@@ -93,7 +94,7 @@ export class Service {
       const blockedPeers = new Set((await tx.all('SELECT user_id,blocked_id FROM user_blocks WHERE user_id=? OR blocked_id=?', [userId, userId])).map(b => b.user_id === userId ? b.blocked_id : b.user_id));
       const unread: Record<string, { sequence: number; readSequence: number }> = {};
       for (const conversationId of [...channels.map(c => c.conversationId).filter(Boolean), ...dms.map(d => d.conversation_id)]) {
-        const cv = await tx.one('SELECT sequence FROM conversations WHERE id=?', [conversationId]);
+        const cv = await tx.one('SELECT MAX(sequence) AS sequence FROM messages WHERE conversation_id=? AND deleted=0', [conversationId]);
         const read = await tx.one('SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?', [conversationId, userId]);
         unread[conversationId] = { sequence: Number(cv?.sequence || 0), readSequence: Number(read?.sequence || 0) };
       }
@@ -139,14 +140,25 @@ export class Service {
       return this.insertChannel(tx, serverId, name, kind);
     }); await this.notify('state:changed', {}); return result;
   }
-  async changeChannel(userId: string, requestId: string, channelId: string, body: { name?: string; delete?: boolean; role?: Role; permissions?: Partial<Record<Permission, boolean>> }) {
+  async channelOverrides(userId: string, channelId: string, role: Role) {
+    const ch = await this.channel(this.db, userId, channelId, 'manageChannels');
+    if (!canManage(ch.role, role)) fail(403, 'HIERARCHY', 'You cannot manage this role.');
+    const row = await this.db.one('SELECT permissions,revision FROM channel_overrides WHERE channel_id=? AND role=?', [channelId, role]);
+    return { channelId, role, revision: Number(row?.revision || 0), permissions: row ? JSON.parse(row.permissions) : {} };
+  }
+  async changeChannel(userId: string, requestId: string, channelId: string, body: { name?: string; delete?: boolean; role?: Role; permissions?: Partial<Record<Permission, boolean>>; expectedRevision?: number }) {
     const result = await this.mutate(userId, requestId, 'channel.change', { channelId, ...body }, async tx => {
       const ch = await this.channel(tx, userId, channelId, 'manageChannels');
       if (body.role && !canManage(ch.role, body.role)) fail(403, 'HIERARCHY', 'You cannot manage this role.');
       if (body.delete) { await tx.run('DELETE FROM channels WHERE id=?', [channelId]); if (ch.conversation_id) await tx.run('DELETE FROM conversations WHERE id=?', [ch.conversation_id]); }
       else {
         if (body.name) await tx.run('UPDATE channels SET name=? WHERE id=?', [body.name, channelId]);
-        if (body.role && body.permissions) await tx.run('INSERT INTO channel_overrides(channel_id,role,permissions) VALUES(?,?,?) ON CONFLICT(channel_id,role) DO UPDATE SET permissions=excluded.permissions', [channelId, body.role, JSON.stringify(body.permissions)]);
+        if (body.role && body.permissions) {
+          if (body.expectedRevision === undefined) fail(428, 'UPGRADE_REQUIRED', 'Update Dorham before editing channel permissions.');
+          const old = await tx.one('SELECT revision FROM channel_overrides WHERE channel_id=? AND role=?', [channelId, body.role]);
+          if (Number(old?.revision || 0) !== body.expectedRevision) fail(409, 'STALE_PERMISSIONS', 'Permissions changed. Reload them before saving.');
+          await tx.run('INSERT INTO channel_overrides(channel_id,role,permissions,revision) VALUES(?,?,?,?) ON CONFLICT(channel_id,role) DO UPDATE SET permissions=excluded.permissions,revision=excluded.revision', [channelId, body.role, JSON.stringify(body.permissions), body.expectedRevision! + 1]);
+        }
         for (const vm of await tx.all('SELECT * FROM voice_members WHERE channel_id=?', [channelId])) {
           try { await this.channel(tx, vm.user_id, channelId); } catch { await tx.run('DELETE FROM voice_members WHERE user_id=?', [vm.user_id]); continue; }
           try { await this.channel(tx, vm.user_id, channelId, 'speak'); } catch { await tx.run('UPDATE voice_members SET server_muted=1 WHERE user_id=?', [vm.user_id]); }
@@ -374,6 +386,7 @@ export class Service {
     const now = Date.now();
     await tx.run('DELETE FROM share_leases WHERE expires_at<?', [now]);
     await tx.run('DELETE FROM voice_members WHERE heartbeat<?', [now - 30000]);
+    await reconcileShares(tx, this.c);
     const current = await tx.one('SELECT * FROM coordinators WHERE channel_id=?', [channelId]);
     const candidate = await tx.one('SELECT user_id,heartbeat FROM voice_members WHERE channel_id=? AND eligible=1 AND heartbeat>=? ORDER BY joined_at,user_id LIMIT 1', [channelId, now - 15000]);
     const valid = current?.user_id && await tx.one('SELECT user_id,heartbeat FROM voice_members WHERE channel_id=? AND user_id=? AND eligible=1 AND heartbeat>=?', [channelId, current.user_id, now - 15000]);
@@ -397,6 +410,7 @@ export class Service {
   }
   async voiceSnapshot(viewers: { socketId: string; userId: string; channelId?: string | null }[]) {
     return this.db.transaction(async connection => {
+      await reconcileShares(connection, this.c);
       const tx = readSnapshot(connection), rooms = new Map<string, VoiceRoom>();
       const result = [];
       for (const viewer of viewers) {
@@ -422,7 +436,7 @@ export class Service {
       let canShare = false; try { canShare = (await this.channel(tx, vm.user_id, channelId, 'share')).permissions.share; } catch { /* permission removed */ }
       members.push({ user: publicUser({ ...vm, id: vm.user_id }), muted: Boolean(vm.muted), deafened: Boolean(vm.deafened), serverMuted: Boolean(vm.server_muted), serverDeafened: Boolean(vm.server_deafened), canShare, epoch: vm.epoch, eligible: Boolean(vm.eligible), joinedAt: Number(vm.joined_at) });
     }
-    const shares = (await tx.all('SELECT * FROM share_leases WHERE channel_id=? AND expires_at>=?', [channelId, Date.now()])).map(s => ({ id: s.id, channelId: s.channel_id, userId: s.user_id, expiresAt: Number(s.expires_at) }));
+    const shares = (await tx.all('SELECT * FROM share_leases WHERE channel_id=? AND expires_at>=? ORDER BY started_at,id', [channelId, Date.now()])).map(s => shareView(s, this.c));
     const coordinator = await tx.one('SELECT * FROM coordinators WHERE channel_id=?', [channelId]);
     return { channelId, members, shares, coordinatorId: coordinator?.user_id || null, coordinatorEpoch: Number(coordinator?.epoch || 0), transport: this.c.mediaTransport };
   }
@@ -473,18 +487,34 @@ export class Service {
       return { room: await this.roomView(tx, vm!.channel_id) };
     }); if (action !== 'heartbeat') await this.notify('voice:changed', {}); return result;
   }
-  async share(userId: string, socketId: string, requestId: string, stop = false) {
-    const result = await this.mutate(userId, requestId, stop ? 'share.stop' : 'share.start', {}, async tx => {
+  async share(userId: string, socketId: string, requestId: string, stop = false, includeAudio = false) {
+    const result = await this.mutate(userId, requestId, stop ? 'share.stop' : 'share.start', { includeAudio: stop ? false : includeAudio }, async tx => {
       const vm = await tx.one('SELECT * FROM voice_members WHERE user_id=? AND socket_id=?', [userId, socketId]);
       if (!vm) fail(409, 'NOT_IN_VOICE', 'Join voice before sharing.');
-      if (stop) { await tx.run('DELETE FROM share_leases WHERE user_id=?', [userId]); return { lease: null }; }
+      if (stop) { await tx.run('DELETE FROM share_leases WHERE user_id=?', [userId]); await reconcileShares(tx, this.c); return { lease: null }; }
       await this.channel(tx, userId, vm!.channel_id, 'share'); await this.maintainRoom(tx, vm!.channel_id);
       const old = await tx.one('SELECT * FROM share_leases WHERE user_id=?', [userId]);
-      if (old) return { lease: { id: old.id, channelId: old.channel_id, userId, expiresAt: Number(old.expires_at) } };
+      if (old) return { lease: shareView(old, this.c) };
       const global = await tx.one('SELECT COUNT(*) AS count FROM share_leases'), room = await tx.one('SELECT COUNT(*) AS count FROM share_leases WHERE channel_id=?', [vm!.channel_id]);
       if ((this.c.globalShares > 0 && global!.count >= this.c.globalShares) || (this.c.roomShares > 0 && room!.count >= this.c.roomShares)) fail(409, 'SHARE_LIMIT', 'Screen-sharing capacity is full.');
-      const lease = { id: randomUUID(), channelId: vm!.channel_id, userId, expiresAt: Date.now() + 30000 };
-      await tx.run('INSERT INTO share_leases(id,user_id,channel_id,expires_at) VALUES(?,?,?,?)', [lease.id, userId, lease.channelId, lease.expiresAt]); return { lease };
+      const standard = await tx.one("SELECT COUNT(*) AS count FROM share_leases WHERE tier='standard'");
+      const tier = Number(standard!.count) < this.c.standardShareSlots ? 'standard' : 'fallback';
+      if (tier === 'fallback' && Number(room!.count) > 0) fail(409, 'SHARE_LIMIT', 'All three 30fps slots are occupied. This room already has a screen.');
+      const now = Date.now(), leaseId = randomUUID();
+      await tx.run('INSERT INTO share_leases(id,user_id,channel_id,expires_at,tier,started_at,requested_fps,include_audio,policy_revision) VALUES(?,?,?,?,?,?,15,?,1)', [leaseId, userId, vm!.channel_id, now + 30000, tier, now, Number(includeAudio)]);
+      return { lease: shareView((await tx.one('SELECT * FROM share_leases WHERE id=?', [leaseId]))!, this.c) };
+    }); await this.notify('voice:changed', {}); return result;
+  }
+  async updateShare(userId: string, socketId: string, requestId: string, body: { leaseId: string; expectedRevision: number; frameRate?: number; includeAudio?: false }) {
+    const result = await this.mutate(userId, requestId, 'share.update', body, async tx => {
+      await reconcileShares(tx, this.c);
+      const row = await tx.one('SELECT s.* FROM share_leases s JOIN voice_members v ON v.user_id=s.user_id WHERE s.id=? AND s.user_id=? AND v.socket_id=? AND s.expires_at>=?', [body.leaseId, userId, socketId, Date.now()]);
+      if (!row) fail(409, 'SHARE_EXPIRED', 'Screen sharing has stopped.');
+      await this.channel(tx, userId, row!.channel_id, 'share');
+      if (Number(row!.policy_revision) !== body.expectedRevision) fail(409, 'STALE_SHARE', 'Sharing limits changed. Try again.');
+      if (body.frameRate && body.frameRate > shareView(row!, this.c).maxFrameRate!) fail(409, 'SHARE_TIER', '30fps is not available for this share yet.');
+      await tx.run('UPDATE share_leases SET requested_fps=?,include_audio=?,policy_revision=policy_revision+1 WHERE id=?', [body.frameRate ?? row!.requested_fps, body.includeAudio === false ? 0 : row!.include_audio, row!.id]);
+      return { lease: shareView((await tx.one('SELECT * FROM share_leases WHERE id=?', [row!.id]))!, this.c) };
     }); await this.notify('voice:changed', {}); return result;
   }
   async moderate(userId: string, requestId: string, channelId: string, targetId: string, action: string) {

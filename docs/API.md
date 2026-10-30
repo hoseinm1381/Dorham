@@ -91,3 +91,17 @@ All unsafe JSON requests carry `requestId`; cookie requests also require allowed
 Message mutations may include `attachmentIds`; files must be ready, owned by the sender, in the same conversation, and not previously attached. Message/event views include metadata and availability, never direct public filesystem paths.
 
 `voice:move` asks the target media adapter to leave and join the authorized destination. `voice:changed` refreshes server deafening, restrictions and share state. Session invalidation disconnects sockets. The private `/internal/media/admission` endpoint is available only to the trusted signaling proxy; block `/internal/*` at every public origin. Its credentials must never be sent to a client.
+
+## 0.5.0 candidate contracts
+
+Schema 4 preserves existing rows and adds `channel_overrides.revision` plus allocation metadata on `share_leases`.
+
+- `GET /channels/:id/overrides?role=member|moderator|administrator` requires authorized channel management. Returns `{channelId, role, revision, permissions}`; revision zero represents no saved document.
+- `PATCH /channels/:id` permission saves require `{requestId, role, permissions, expectedRevision}`. The document replaces the hydrated override set. Unversioned writes fail 428/`UPGRADE_REQUIRED`; stale writes fail 409/`STALE_PERMISSIONS`.
+- Socket `share:start` requires `{requestId, protocolVersion:2, includeAudio:false|true}`. Protocol 1/missing version fails 428. It commits allocation before acknowledging publication eligibility.
+- `Share` includes `tier`, `startedAt`, `requestedFrameRate`, `maxFrameRate`, `includeAudio`, `policyRevision` alongside existing identifiers/expiry. Optional typing preserves older fixtures/read consumers; new server responses populate these fields.
+- Socket `share:update` accepts `{requestId, leaseId, expectedRevision, frameRate?:15|30, includeAudio?:false}`. Enabling sound requires a new explicit capture/publication. Returns the authoritative lease. Stale policy revisions fail `STALE_SHARE`. A fallback cannot select 30fps. Repeating an identical request ID deduplicates through the existing receipt window.
+- GET `/attachments/:id/status` validates a sender-owned, unbound, unexpired ready attachment and current write access before draft restoration.
+- Bootstrap unread `.sequence` is the latest undeleted message sequence, while replay history `.sequence` remains the conversation-event position. Message edits/deletions must not advance the read cursor implicitly.
+
+All ordinary HTTP requests accept cancellation/deadlines in the official client. A timed-out mutation is never silently resent. Screen audio grants require an active opted-in share lease; stream watching is an explicit client subscription. Authoritative grants and lease limits do not guarantee a billing ceiling against modified clients.

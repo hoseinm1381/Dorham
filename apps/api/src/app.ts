@@ -8,11 +8,12 @@ import staticPlugin from '@fastify/static';
 import { Server as SocketServer, type Socket } from 'socket.io';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from 'node:fs';
 import { mkdir, writeFile, unlink, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { registerSchema, credentialsSchema, messageSchema, passwordSchema, requestId, id, signalSchema } from '@dorham/contracts';
+import { registerSchema, credentialsSchema, messageSchema, passwordSchema, requestId, id, signalSchema, shareStartSchema, shareUpdateSchema } from '@dorham/contracts';
 import { config, type Config } from './config';
 import { openDatabase, type Row } from './db';
 import { Service, schemas, publicUser } from './service';
@@ -27,7 +28,7 @@ import { publicAccountRoutes, protectedAccountRoutes, audit } from './accounts';
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
 export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean } = {}) {
   const logging = options.logger ?? !process.env.VITEST;
-  const app = Fastify({ logger: logging ? { serializers: { req: req => ({ method: req.method, url: String(req.url).split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) } } : false, bodyLimit: 128 * 1024, trustProxy: false, requestTimeout: 900000, connectionTimeout: 30000 });
+  const app = Fastify({ logger: logging ? { serializers: { req: req => ({ method: req.method, url: String(req.url).split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) } } : false, bodyLimit: 128 * 1024, trustProxy: c.trustedProxies.length ? c.trustedProxies : false, requestTimeout: 900000, connectionTimeout: 30000 });
   await mkdir(c.dataDir, { recursive: true });
   const lockPath = path.join(c.dataDir, 'instance.lock');
   if (existsSync(lockPath)) {
@@ -37,6 +38,8 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }
   const lock = openSync(lockPath, 'wx'); writeSync(lock, String(process.pid)); closeSync(lock);
   const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service);
+  const eventLoop = monitorEventLoopDelay({ resolution: 20 }); eventLoop.enable();
+  app.addHook('onClose', async () => { eventLoop.disable(); });
   await attachments.initialize();
   // Voice is transient. Restart fences every previous signaling epoch.
   await db.transaction(async tx => { await tx.run('DELETE FROM voice_members'); await tx.run('UPDATE coordinators SET user_id=NULL,epoch=epoch+1,expires_at=0'); });
@@ -55,7 +58,15 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   const allowed = (origin: string | undefined) => !origin || c.origins.includes(origin);
   await app.register(cors, { origin: (origin, cb) => cb(null, allowed(origin)), credentials: true, methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Request-Id', 'X-Dorham-Native', 'Range'], exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'] });
   await app.register(helmet, { contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'data:', 'blob:'], connectSrc: ["'self'", 'https:', 'wss:', ...(c.production ? [] : ['http:', 'ws:'])], mediaSrc: ["'self'", 'blob:'], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false });
-  await app.register(rateLimit, { global: options.rateLimit !== false, max: 600, timeWindow: '1 minute' });
+  await app.register(rateLimit, { global: options.rateLimit !== false, max: 600, timeWindow: '1 minute', keyGenerator: async req => {
+    const raw = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : req.cookies.dorham_session;
+    const identity = raw ? await resolveSession(raw) : undefined;
+    return identity ? `account:${identity.account.id}` : `source:${req.ip}`;
+  } });
+  if (options.rateLimit !== false) {
+    const sourceBudget = app.createRateLimit({ max: 6000, timeWindow: '1 minute', keyGenerator: req => `source-budget:${req.ip}` });
+    app.addHook('onRequest', async (req, reply) => { const limit = await sourceBudget(req); if (!limit.isAllowed && limit.isExceeded) return reply.header('Retry-After', limit.ttlInSeconds).code(429).send({ error: { code: 'RATE_LIMIT', message: 'Too many requests from this address.' } }); });
+  }
   await app.register(multipart, { limits: { fileSize: 256 * 1024, files: 1, fields: 0 } });
   app.setErrorHandler((error: any, _req, reply) => {
     if (error instanceof ZodError) return reply.code(400).send({ error: { code: 'VALIDATION', message: error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ').slice(0, 400) } });
@@ -109,7 +120,15 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/ready', async () => { await db.one('SELECT version FROM schema_migrations LIMIT 1'); return { status: 'ready', database: db.dialect }; });
   app.get('/api/v1/config', async () => ({ registrationOpen: c.registrationOpen, mediaTransport: c.mediaTransport, publicUrl: c.publicUrl, guestsEnabled: c.guestsEnabled }));
-  const authRate: FastifyContextConfig = options.rateLimit === false ? {} : { rateLimit: { max: 60, timeWindow: '15 minutes' } };
+  const authRate: FastifyContextConfig = options.rateLimit === false ? {} : { rateLimit: { max: 60, timeWindow: '15 minutes', keyGenerator: (req: FastifyRequest) => req.ip } };
+  const accountAttempts = new Map<string, { count: number; until: number }>();
+  app.addHook('preHandler', async req => {
+    if (options.rateLimit === false || req.method !== 'POST' || !['/api/v1/auth/login', '/api/v1/auth/register', '/api/v1/auth/recover'].includes(req.url.split('?')[0])) return;
+    const username = (req.body as any)?.username; if (typeof username !== 'string' || username.length > 32) return;
+    const key = hash(username.toLowerCase()), now = Date.now(); let item = accountAttempts.get(key);
+    if (!item || item.until < now) { item = { count: 0, until: now + 15 * 60000 }; if (accountAttempts.size >= 1000) accountAttempts.delete(accountAttempts.keys().next().value!); accountAttempts.set(key, item); }
+    if (++item.count > 60) fail(429, 'RATE_LIMIT', 'Too many authentication attempts. Try again later.');
+  });
   app.post('/api/v1/auth/register', { config: authRate }, async (req, reply) => {
     if (!c.registrationOpen) fail(403, 'REGISTRATION_CLOSED', 'Registration is closed.');
     const body = registerSchema.parse(req.body), username = body.username.toLowerCase();
@@ -199,10 +218,11 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       }); if (retiredAvatar) await unlink(path.join(avatarDir, path.basename(retiredAvatar))).catch(() => {}); await service.notify('state:changed', {}); await service.notify('voice:changed', {}); return result;
     });
     api.get('/channels/:id', async req => service.channel(db, req.account.id, id.parse((req.params as any).id)));
+    api.get('/channels/:id/overrides', async req => service.channelOverrides(req.account.id, id.parse((req.params as any).id), schemas.role.parse((req.query as any).role)));
     api.post('/servers', async req => { const b = z.object({ name: schemas.name, requestId }).parse(req.body); return service.createServer(req.account.id, b.requestId, b.name); });
     api.patch('/servers/:id', async req => { const b = z.object({ name: schemas.name.optional(), delete: z.boolean().optional(), allowGuests: z.boolean().optional(), requestId }).refine(b => b.name || b.delete || b.allowGuests !== undefined).parse(req.body); return service.changeServer(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/servers/:id/channels', async req => { const b = schemas.channel.parse(req.body); return service.createChannel(req.account.id, b.requestId, id.parse((req.params as any).id), b.name, b.kind); });
-    api.patch('/channels/:id', async req => { const b = z.object({ name: schemas.name.optional(), delete: z.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), requestId }).refine(b => b.name || b.delete || (b.role && b.permissions)).parse(req.body); return service.changeChannel(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
+    api.patch('/channels/:id', async req => { const b = z.object({ name: schemas.name.optional(), delete: z.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z.number().int().min(0).optional(), requestId }).refine(b => b.name || b.delete || (b.role && b.permissions)).parse(req.body); return service.changeChannel(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/servers/:id/invites', async req => { const b = z.object({ hours: z.number().int().min(1).max(168).default(24), uses: z.number().int().min(1).max(100).default(10), requestId }).parse(req.body); return service.invite(req.account.id, b.requestId, id.parse((req.params as any).id), token(), b.hours, b.uses); });
     api.get('/servers/:id/invites', async req => service.invitations(req.account.id, id.parse((req.params as any).id)));
     api.delete('/servers/:id/invites/:code', async req => { const b = z.object({ requestId }).parse(req.body), p = req.params as any; return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z.string().min(10).max(100).parse(p.code)); });
@@ -228,7 +248,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.get('/admin/metrics', async req => {
       if (!req.account.instance_admin) fail(403, 'FORBIDDEN', 'Instance administrator required.');
       let disk = 0; for (const f of await readdir(c.dataDir)) { const s = await stat(path.join(c.dataDir, f)); if (s.isFile()) disk += s.size; }
-      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map(s => s.data.userId)).size, accounts: (await db.one('SELECT COUNT(*) AS count FROM users'))!.count, messages: (await db.one('SELECT COUNT(*) AS count FROM messages'))!.count, shares: (await db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count };
+      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map(s => s.data.userId)).size, accounts: (await db.one('SELECT COUNT(*) AS count FROM users'))!.count, messages: (await db.one('SELECT COUNT(*) AS count FROM messages'))!.count, shares: (await db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count };
     });
   }, { prefix: '/api/v1' });
   const io = new SocketServer(app.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 120000, skipMiddlewares: false }, pingInterval: 20000, pingTimeout: 10000, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
@@ -303,7 +323,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
         if (Date.now() - windowStart > 10000) { windowStart = Date.now(); eventCount = 0; }
         if (++eventCount > 400) fail(429, 'RATE_LIMIT', 'Too many real-time actions.');
         await validSocket(socket); const result = await fn(body); ack({ ok: true, data: result });
-      } catch (e: any) { ack({ ok: false, error: { code: e.code || 'INVALID_REQUEST', message: e instanceof ZodError ? 'Invalid real-time payload.' : ((e.status && e.status < 500) || e.code === 'TURN_UNAVAILABLE' ? e.message : 'Real-time action failed.') } }); }
+      } catch (e: any) { ack({ ok: false, error: { code: e.code || 'INVALID_REQUEST', message: e instanceof ZodError ? 'Invalid real-time payload.' : (e instanceof AppError || e.code === 'TURN_UNAVAILABLE' ? e.message : 'Real-time action failed.') } }); }
     });
     handle('message:send', async b => { const m = messageSchema.parse(b); return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds); });
     handle('typing', async b => { const v = z.object({ conversationId: id, active: z.boolean() }).parse(b); await service.conversation(db, socket.data.userId, v.conversationId, true); for (const s of io.sockets.sockets.values()) { if (s.id === socket.id) continue; try { await service.conversation(db, s.data.userId, v.conversationId); s.emit('typing', { ...v, userId: socket.data.userId }); } catch { /* private */ } } return {}; });
@@ -311,7 +331,8 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     handle('voice:leave', async b => { z.object({ requestId }).parse(b); const result = await service.voiceAction(socket.data.userId, socket.id!, 'leave'); socket.data.voiceChannel = null; return result; });
     handle('voice:heartbeat', async b => { const v = z.object({ eligible: z.boolean().optional() }).parse(b); const result = await service.voiceAction(socket.data.userId, socket.id!, 'heartbeat', v); if ('room' in result) socket.emit('voice:room', result.room); return result; });
     handle('voice:state', async b => { const v = z.object({ muted: z.boolean(), deafened: z.boolean(), requestId }).parse(b); return service.voiceAction(socket.data.userId, socket.id!, 'state', v); });
-    handle('share:start', async b => { const v = z.object({ requestId }).parse(b); return service.share(socket.data.userId, socket.id!, v.requestId); });
+    handle('share:start', async b => { if (b?.protocolVersion !== 2) fail(428, 'UPGRADE_REQUIRED', 'Update Dorham to 0.5.0 before sharing your screen.'); const v = shareStartSchema.parse(b); return service.share(socket.data.userId, socket.id!, v.requestId, false, v.includeAudio); });
+    handle('share:update', async b => { const v = shareUpdateSchema.parse(b); return service.updateShare(socket.data.userId, socket.id!, v.requestId, v); });
     handle('share:stop', async b => { const v = z.object({ requestId }).parse(b); return service.share(socket.data.userId, socket.id!, v.requestId, true); });
     handle('voice:sfu', async b => { const v = z.object({ channelId: id }).parse(b); return sfu.credentials(socket.data.userId, socket.id!, v.channelId); });
     handle('voice:signal', async b => {

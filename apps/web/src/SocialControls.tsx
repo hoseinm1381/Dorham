@@ -4,9 +4,10 @@ import { request } from './api';
 import { t as tr, currentLanguage } from './i18n';
 import { soundPreferences, saveSoundPreferences, unlockSounds, playCue } from './notifications';
 declare const __APP_VERSION__: string;
+export function AppVersion() { return <p className="app-version">Dorham · {tr('Version')} <strong>{__APP_VERSION__}</strong></p>; }
 export function NotificationSettings() {
   const [preferences, setPreferences] = useState(soundPreferences);
-  return <section className="notification-settings"><p className="app-version">Dorham · {tr('Version')} <strong>{__APP_VERSION__}</strong></p><h3>{tr('Notification sounds')}</h3>{(['messages', 'voice'] as const).map(key => <label className="check-row" key={key}><input type="checkbox" checked={preferences[key]} onChange={e => { const next = { ...preferences, [key]: e.target.checked }; setPreferences(next); saveSoundPreferences(next); }}/>{tr(key === 'messages' ? 'Direct message sounds' : 'Voice join and leave sounds')}</label>)}<button type="button" className="secondary" onClick={() => { unlockSounds(); playCue('message'); }}>{tr('Preview notification sound')}</button><small>{tr('Do not disturb silences notification sounds. Sound starts after interacting with the app.')}</small></section>;
+  return <section className="notification-settings"><h3>{tr('Notification sounds')}</h3>{(['messages', 'voice'] as const).map(key => <label className="check-row" key={key}><input type="checkbox" checked={preferences[key]} onChange={e => { const next = { ...preferences, [key]: e.target.checked }; setPreferences(next); saveSoundPreferences(next); }}/>{tr(key === 'messages' ? 'Direct message sounds' : 'Voice join and leave sounds')}</label>)}<button type="button" className="secondary" onClick={() => { unlockSounds(); playCue('message'); }}>{tr('Preview notification sound')}</button><small>{tr('Do not disturb silences notification sounds. Sound starts after interacting with the app.')}</small></section>;
 }
 type Invite = { code: string; url: string; expiresAt: number; remaining: number };
 export function InvitationManager({ serverId, error }: { serverId: string; error: (e: unknown) => void }) {

@@ -2,11 +2,11 @@
 
 ## Storage and retention
 
-Default limits: 100 users, 20 online users and 16 voice members per channel. Fixed room/global publisher caps default to zero (disabled), retaining one publication per account and expiring leases. Existing installations must update old environment values to remove their caps. Retention defaults to 90 days and 50,000 stored messages; reaching the message ceiling prunes a bounded batch of the oldest messages. Replay events retain seven days with a global 50,000-event ceiling; mutation receipts retain one day. Pruning runs in bounded maintenance transactions. Deletion leaves replayable tombstones until normal retention removes them. The [Iranian pilot](NINECRAFT.md) also has incoming-traffic monitoring and reduced publishing settings.
+Default limits: 100 users, 20 online users and 16 voice members per channel. The 0.5.0 candidate allocates three standard shares globally and one room-first fallback when standard slots fill, retaining one publication per account and expiring leases. Set legacy MAX_ROOM_SHARES/MAX_GLOBAL_SHARES to zero and STANDARD_SHARE_SLOTS to three together; see GAMING-0.5.0.md. The pilot remains on 0.4.4 until its acceptance gates pass. Retention defaults to 90 days and 50,000 stored messages; reaching the message ceiling prunes a bounded batch of the oldest messages. Replay events retain seven days with a global 50,000-event ceiling; mutation receipts retain one day. Pruning runs in bounded maintenance transactions. Deletion leaves replayable tombstones until normal retention removes them. The [Iranian pilot](NINECRAFT.md) also has incoming-traffic monitoring and reduced publishing settings.
 
 SQLite uses a 256 MiB page ceiling and a bounded WAL journal policy; avatars have a separate 16 MiB quota. Uploads are decoded with pixel limits and re-encoded to 128px WebP, at most 96 KiB each. General attachments use a separate 2 GiB budget and 2 GiB free-space reserve; see [attachment limits and expiry](ATTACHMENTS.md). Logs go to stdout/stderr; configure provider log rotation/retention. Keep the production deployment plus data below 80% of the actual disk allocation and include temporary backup space in that calculation. SQLite disk-full errors return a storage-specific 507 response.
 
-`GET /api/v1/admin/metrics` requires instance administration and reports process RSS, CPU time, uptime, connected users, messages, share leases, database-file bytes, and storage warnings. Maintenance checks SQLite and avatar budgets every minute and logs a warning when either crosses 80%. CPU is cumulative; compare two samples over an interval. These are application budgets, not a provider resource meter; monitor actual disk allocation and backup space separately. PostgreSQL storage remains an operator-managed external budget.
+`GET /api/v1/admin/metrics` requires instance administration and reports process RSS, CPU time, event-loop delay, uptime, connected users, messages, share leases, database-file bytes, and storage warnings. Maintenance checks SQLite and avatar budgets every minute and logs a warning when either crosses 80%. CPU is cumulative; compare two samples over an interval. These are application budgets, not a provider resource meter; monitor actual disk allocation and backup space separately. PostgreSQL storage remains an operator-managed external budget.
 
 ## Backups
 
@@ -53,3 +53,7 @@ Release signing reads `DORHAM_KEYSTORE`, `DORHAM_STORE_PASSWORD`, and `DORHAM_KE
 - Test backups and monitor the actual shared hosting budget.
 - Verify cross-network TURN/SFU behavior and physical native audio/capture before promising it to users.
 - Publish the instance's privacy/retention information before admitting public registrations.
+
+## Proxy trust for 0.5.0
+
+See [the explicit HAProxy/Caddy trust path](PROXY-0.5.0.md). Keep the backend on loopback and overwrite client forwarding metadata. Do not configure unrestricted trust or infer deployment verification from injection tests.

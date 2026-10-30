@@ -29,7 +29,7 @@ export function useVoiceInput(transport: RefObject<MediaTransport | null>, activ
       if (event.type === 'error') { fault.current = true; state.current.release(); applyRef.current(); onError.current(new Error(event.message)); return; }
       if (event.type === 'release') state.current.release();
       else if (event.type === 'up') state.current.up();
-      else if (activeRef.current && !fault.current && !editable()) state.current.down();
+      else if (activeRef.current && !fault.current && ((event.background ?? !document.hasFocus()) || !editable())) state.current.down();
       applyRef.current();
     });
     const down = (e: KeyboardEvent) => {

@@ -32,6 +32,7 @@ export function mediaAdmission(app: FastifyInstance, service: Service, sessionFo
         // TypeScript return type does not convert those JWT strings back.
         if ((source === TrackSource.MICROPHONE || String(source) === 'microphone') && ch.permissions.speak && !vm!.server_muted && !vm!.server_deafened) continue;
         if ((source === TrackSource.SCREEN_SHARE || String(source) === 'screen_share') && ch.permissions.share && await db.one('SELECT id FROM share_leases WHERE user_id=? AND channel_id=? AND expires_at>?', [userId, vm!.channel_id, Date.now()])) continue;
+        if ((source === TrackSource.SCREEN_SHARE_AUDIO || String(source) === 'screen_share_audio') && ch.permissions.share && await db.one('SELECT id FROM share_leases WHERE user_id=? AND channel_id=? AND expires_at>? AND include_audio=1', [userId, vm!.channel_id, Date.now()])) continue;
         fail(403, 'FORBIDDEN', 'Media admission denied.');
       }
     }

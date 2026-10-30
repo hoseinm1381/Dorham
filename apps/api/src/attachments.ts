@@ -112,6 +112,12 @@ export class Attachments {
         return reply.send(createReadStream(this.file(uploadId)));
       } catch (e) { release(); throw e; }
     });
+    api.get('/attachments/:id/status', async req => {
+      const file = await db.one("SELECT * FROM attachments WHERE id=? AND user_id=? AND message_id IS NULL AND state='ready' AND expires_at>?", [(req.params as any).id, req.account.id, Date.now()]);
+      if (!file) fail(410, 'FILE_UNAVAILABLE', 'This draft attachment has expired or is unavailable.');
+      await this.service.conversation(db, req.account.id, file!.conversation_id, true);
+      return { id: file!.id, name: file!.name, size: Number(file!.size), expiresAt: Number(file!.expires_at), available: true };
+    });
     api.get('/uploads/usage', async req => ({ usedBytes: Number((await db.one('SELECT COALESCE(SUM(bytes),0) AS bytes FROM attachment_usage WHERE user_id=? AND created_at>?', [req.account.id, Date.now() - 86400000]))!.bytes), limitBytes: req.account.guest ? 0 : 300 * MiB, maxFileBytes: 100 * MiB, sharedUsedBytes: Number((await db.one('SELECT COALESCE(SUM(bytes),0) AS bytes FROM attachment_usage WHERE created_at>?', [Date.now() - 86400000]))!.bytes), softBytes: c.uploadSoftMiB * MiB, hardBytes: c.uploadHardMiB * MiB, smallFileBytes: c.uploadSmallMiB * MiB }));
   }
   async cleanup(requiredBytes = 0) {

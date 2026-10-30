@@ -50,7 +50,7 @@ it('SFU deafen silences every audio source before waiting for control-plane ackn
     f.transport.setVolume('friend', 2); expect(participant.setVolume).toHaveBeenLastCalledWith(0, 'screen_share_audio');
     await vi.waitFor(() => expect(release).toBeTypeOf('function')); release(); await pending;
     const previousReply = release;
-    const restore = f.transport.setDeafened(false); expect(participant.setVolume).toHaveBeenLastCalledWith(2, 'screen_share_audio');
+    const restore = f.transport.setDeafened(false); expect(participant.setVolume).toHaveBeenCalledWith(2, 'microphone'); expect(participant.setVolume).toHaveBeenLastCalledWith(0, 'screen_share_audio');
     await vi.waitFor(() => expect(release).not.toBe(previousReply)); release(); await restore;
   } finally { (f.socket as any).connected = false; await f.transport.destroy(); }
 });

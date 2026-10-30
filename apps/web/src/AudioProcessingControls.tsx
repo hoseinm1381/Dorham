@@ -1,6 +1,7 @@
 import { t as tr } from './i18n';
 import { useState } from 'react';
-import { defaultAudioProcessing, browserAudioProcessing, type AudioProcessing, type MediaTransport } from '@dorham/media';
+import { defaultAudioProcessing, browserAudioProcessing, type AudioProcessing } from '../../../packages/media/src/audio-processing';
+import type { MediaTransport } from '@dorham/media';
 import './audio-processing.css';
 
 const preferenceKey = 'dorham.audioProcessing.v1';

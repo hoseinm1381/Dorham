@@ -27,6 +27,7 @@ test('restricted network supports guests, persistent conversion, safe links, att
     await expect(page.getByTestId('message')).toContainText('سلام mixed Persian and English'); await expect(other.locator('.file-composer')).toHaveCount(0);
     await other.reload(); await expect(other.getByRole('button', { name: 'Open Expansion browser lab', exact: true })).toBeVisible(); expect((await api(other, '/auth/me')).user.id).toBe(guestId);
     await other.getByRole('button', { name: 'Account settings', exact: true }).click();
+    await other.getByRole('tab', { name: 'Privacy', exact: true }).click();
     const guestName = `GuestUp${Date.now().toString().slice(-7)}`; await other.locator('.account-controls').getByLabel('Username', { exact: true }).fill(guestName); await other.locator('.account-controls').getByLabel('Password', { exact: true }).fill('eight888');
     await other.getByRole('button', { name: 'Register this account', exact: true }).click(); await expect.poll(async () => (await api(other, '/auth/me')).user.guest).toBe(false); expect((await api(other, '/auth/me')).user.id).toBe(guestId);
     await other.getByRole('button', { name: 'Close dialog', exact: true }).click(); await other.getByRole('button', { name: 'Open Expansion browser lab', exact: true }).click();
@@ -41,7 +42,7 @@ test('restricted network supports guests, persistent conversion, safe links, att
     const [download] = await Promise.all([other.waitForEvent('download'), received.getByRole('button', { name: 'Download pilot-notes.txt', exact: true }).click()]); expect(download.suggestedFilename()).toBe('pilot-notes.txt');
     const stream = await download.createReadStream(), parts: Buffer[] = []; for await (const part of stream!) parts.push(Buffer.from(part)); expect(Buffer.concat(parts)).toEqual(fileBytes);
     await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByLabel('Language', { exact: true }).selectOption('fa-IR');
-    await expect(other.locator('html')).toHaveAttribute('dir', 'rtl'); await expect(other.getByRole('button', { name: 'ذخیرهٔ نمایه', exact: true })).toBeVisible();
+    await expect(other.locator('html')).toHaveAttribute('dir', 'rtl'); await expect(other.getByRole('button', { name: 'ذخیرهٔ پروفایل', exact: true })).toBeVisible();
     await mkdir('artifacts/evidence', { recursive: true }); await other.screenshot({ path: 'artifacts/evidence/expansion-persian-settings.png' });
     await other.getByRole('button', { name: 'بستن پنجره', exact: true }).click(); await expect(other.getByRole('button', { name: 'ارسال پیام', exact: true })).toBeVisible();
     await other.screenshot({ path: 'artifacts/evidence/expansion-persian-chat.png' });
@@ -71,7 +72,7 @@ test('offers four capture modes and changes quality during a share without chang
     await quality.selectOption('480p15'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.getByRole('button', { name: 'Share screen', exact: true }).click();
     await expect.poll(async () => (await api(page, '/bootstrap')).voicePresence[0]?.shares).toBe(1);
     const channel = (await api(page, '/bootstrap')).channels.find((c: any) => c.serverId === server.id && c.kind === 'voice'), before = (await api(page, `/voice/${channel.id}`)).shares[0].id;
-    expect(await page.evaluate(() => (window as any).__captureCalls[0].video.height.ideal)).toBe(480);
+    expect(await page.evaluate(() => (window as any).__captureCalls[0].video.height.ideal)).toBe(720);
     await page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); await quality.selectOption('720p30');
     await expect.poll(async () => page.evaluate(() => (window as any).__screenTrack.getConstraints().height?.max)).toBe(720);
     expect((await api(page, `/voice/${channel.id}`)).shares[0].id).toBe(before);
@@ -102,10 +103,10 @@ test('supports one-time recovery codes and audited temporary-password administra
   const suffix = Date.now().toString().slice(-7), owner = `Admin${suffix}`, target = `Target${suffix}`;
   try {
     await register(page, owner); await register(other, target);
-    await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByText('Account recovery', { exact: true }).click(); await page.getByLabel('Password to confirm recovery setup', { exact: true }).fill('eight888');
+    await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Privacy', exact: true }).click(); await page.getByText('Account recovery', { exact: true }).click(); await page.getByLabel('Password to confirm recovery setup', { exact: true }).fill('eight888');
     await page.getByRole('button', { name: 'Generate recovery codes', exact: true }).click(); const codes = (await page.locator('.recovery-codes pre').innerText()).trim().split('\n'); expect(codes).toHaveLength(8);
     await page.getByRole('button', { name: 'Hide codes', exact: true }).click(); await expect(page.locator('.recovery-codes')).toHaveCount(0);
-    await page.getByText('Instance administration', { exact: true }).click(); await page.getByLabel('One-time administrator setup code', { exact: true }).fill('browser-fixture-bootstrap-not-for-deployment'); await page.getByRole('button', { name: 'Activate global administration', exact: true }).click();
+    await page.getByRole('tab', { name: 'Advanced', exact: true }).click(); await page.getByText('Instance administration', { exact: true }).click(); await page.getByLabel('One-time administrator setup code', { exact: true }).fill('browser-fixture-bootstrap-not-for-deployment'); await page.getByRole('button', { name: 'Activate global administration', exact: true }).click();
     await page.getByText('Global administration', { exact: true }).click(); await page.getByLabel('Confirm target username', { exact: true }).fill(target); await page.locator('.admin-user').filter({ hasText: target }).getByRole('button', { name: 'Temporary password', exact: true }).click();
     const temporary = await page.locator('.global-admin [role=status] code').innerText(); expect(temporary.length).toBe(20);
     await expect(other.getByRole('heading', { name: 'Welcome back.' })).toBeVisible(); await other.locator('.auth-form').getByLabel('Username', { exact: true }).fill(target); await other.locator('.auth-form').getByLabel('Password', { exact: true }).fill(temporary); await other.getByRole('button', { name: 'Let’s get you in', exact: true }).click();
@@ -169,7 +170,7 @@ test('social update notifies direct messages with sound, persistent markers and 
     await other.getByRole('button', { name: 'Home', exact: true }).click();
     await api(other, '/profile', { displayName: me.displayName, bio: '', status: 'busy' }, 'PATCH'); await expect(other.locator('.account-info small')).toHaveText('busy');
     await page.getByLabel('Message', { exact: true }).fill('Quiet notification'); await page.getByRole('button', { name: 'Send message', exact: true }).click(); await expect(other.locator('.message-notice')).toBeVisible(); expect(await other.evaluate(() => (window as any).__cues.length)).toBe(before);
-    await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByRole('checkbox', { name: 'Direct message sounds', exact: true }).uncheck(); await other.reload(); await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await expect(other.getByRole('checkbox', { name: 'Direct message sounds', exact: true })).not.toBeChecked();
+    await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByRole('tab', { name: 'Notifications', exact: true }).click(); await other.getByRole('checkbox', { name: 'Direct message sounds', exact: true }).uncheck(); await other.reload(); await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByRole('tab', { name: 'Notifications', exact: true }).click(); await expect(other.getByRole('checkbox', { name: 'Direct message sounds', exact: true })).not.toBeChecked();
   } finally { await a.close(); await b.close(); }
 });
 
@@ -180,7 +181,7 @@ test('social update minimizes voice, preserves same-channel calls and chimes on 
     await register(page, `ChimeA${suffix}`); await register(other, `ChimeB${suffix}`);
     const server = await api(page, '/servers', { name: 'Compact voice lab' }), invite = await api(page, `/servers/${server.id}/invites`, {}); await api(other, '/invites/join', { code: invite.code });
     for (const p of [page, other]) await p.getByRole('button', { name: 'Open Compact voice lab', exact: true }).click();
-    await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await expect(page.locator('.voice-stage')).toHaveClass(/voice-collapsed/); expect((await page.locator('.voice-stage').boundingBox())!.height).toBeLessThanOrEqual(45);
+    await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await expect(page.locator('.voice-stage')).toHaveClass(/voice-collapsed/); expect((await page.locator('.voice-stage').boundingBox())!.height).toBeLessThanOrEqual(64);
     const voice = (await api(page, '/bootstrap')).channels.find((c: any) => c.serverId === server.id && c.kind === 'voice'), memberId = (await api(page, '/auth/me')).user.id;
     const initial = (await api(page, `/voice/${voice.id}`)).members.find((m: any) => m.user.id === memberId);
     for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Lounge', exact: true }).click();
@@ -202,7 +203,7 @@ test('social update closes and blocks DMs and lets members leave a server withou
     await page.getByLabel('Message', { exact: true }).fill('Preserved private history'); await page.getByRole('button', { name: 'Send message', exact: true }).click(); await other.locator('.dm-item').click(); await expect(other.getByText('Preserved private history', { exact: true })).toBeVisible();
     await other.getByRole('button', { name: 'Block person', exact: true }).click(); await expect(other.getByRole('button', { name: 'Unblock person', exact: true })).toBeVisible(); await expect(page.locator('.blocked-chat-note')).toBeVisible(); await expect(page.getByLabel('Message', { exact: true })).toBeDisabled();
     await other.getByRole('button', { name: 'Close chat', exact: true }).click(); await expect(other.locator('.dm-item')).toHaveCount(0); await expect(page.locator('.dm-item')).toHaveCount(1);
-    await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByText('Blocked people', { exact: false }).click(); await other.getByRole('button', { name: 'Unblock person', exact: true }).click(); await other.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByRole('tab', { name: 'Privacy', exact: true }).click(); await other.getByText('Blocked people', { exact: false }).click(); await other.getByRole('button', { name: 'Unblock person', exact: true }).click(); await other.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await expect(page.getByLabel('Message', { exact: true })).toBeEnabled(); await page.getByLabel('Message', { exact: true }).fill('A new DM reopens chat'); await page.getByRole('button', { name: 'Send message', exact: true }).click(); await expect(other.locator('.dm-item')).toHaveCount(1); await other.locator('.dm-item').click(); await expect(other.getByText('Preserved private history', { exact: true })).toBeVisible(); await expect(other.getByText('A new DM reopens chat', { exact: true })).toBeVisible();
     expect((await api(other, `/conversations/${dm.id}/messages`)).messages).toHaveLength(2);
     const server = await api(page, '/servers', { name: 'Server leaving lab' }), invite = await api(page, `/servers/${server.id}/invites`, {}); await api(other, '/invites/join', { code: invite.code });

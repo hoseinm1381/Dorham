@@ -1,3 +1,5 @@
+Candidate: **0.5.0** — [gaming and reliability](GAMING-0.5.0.md). Live remains **0.4.4**; the required ten-user media hold failed, so rollout is held. [Current measurements](GAMING-0.5.0-MEASUREMENTS.md).
+
 Current update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
 
 Current audio-controls update: **0.4.3**. See [AUDIO-FIX-0.4.3.md](AUDIO-FIX-0.4.3.md).
@@ -37,7 +39,7 @@ Audio follow-up: the operator confirmed the relay-assisted call worked. Web/Wind
 | External TURN on the public backend and Windows client | Configured, tested with synthetic sources | Free ExpressTURN; both clients forced through relay, selected relay pairs, decoded audio and two non-black screen streams; physical remote call remains open |
 | Perfect negotiation, trickle ICE and restart/reconnect paths | Implemented; partly tested | Ordinary real peer negotiation passes; forced ICE failure and long network interruption untested |
 | Share allocation/expiry and coordinator fencing/election | Implemented, tested | Concurrent share requests, stale epochs, heartbeat-expiry election and lease cleanup |
-| 20 online clients, 16 primary-room members, no fixed publisher caps | Implemented locally, control plane tested | 20 actual sockets and 20 screen leases; excess user/room member rejected and duplicate publication prevented; old deployments require environment changes; no media generated |
+| Historical pre-0.5 control-plane capacity | Implemented locally, control plane tested | 20 actual sockets and 20 screen leases; excess user/room member rejected and duplicate publication prevented; old deployments require environment changes; no media generated |
 | Sustained 16-person media quality | Untested, blocked | Large browser run interrupted for memory pressure; distributed or larger test environment required |
 | PWA application-shell caching | Implemented, tested | First-install offline reload works; private API, socket and avatar responses excluded |
 | Windows x64 NSIS installation and app shell | Implemented, tested | Install/uninstall exit 0; installed rendering/registration, encrypted credentials, sandbox/isolation and tray-close checks |

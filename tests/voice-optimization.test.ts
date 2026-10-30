@@ -45,6 +45,9 @@ it('keeps voice snapshots private, returns lightweight SFU heartbeats, and only 
     await sfu.synchronize(); expect(update).toHaveBeenCalledTimes(1);
     await h.api(owner,`/voice/${voice.id}/moderate`,{userId:member.id,action:'deafen'}); await sfu.synchronize(); expect(participant.permission).toMatchObject({canSubscribe:false}); expect(participant.permission.canPublishSources).not.toContain(TrackSource.MICROPHONE);
     await h.api(owner,`/voice/${voice.id}/moderate`,{userId:member.id,action:'kick'}); await sfu.synchronize(); expect(remove).toHaveBeenCalledTimes(1);
+    remove.mockRejectedValueOnce({ code: 'not_found' }); await expect(sfu.synchronize()).resolves.toBeUndefined();
+    sfu.client!.listParticipants = vi.fn().mockRejectedValueOnce({ code: 'not_found' }).mockRejectedValueOnce({ code: 'permission_denied' });
+    await expect(sfu.synchronize()).resolves.toBeUndefined(); await expect(sfu.synchronize()).rejects.toMatchObject({ code: 'permission_denied' });
   } finally { await h.close(); }
 });
 it('push-to-talk and toggle modes fail closed and ignore key-repeat transitions', () => {

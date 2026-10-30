@@ -126,7 +126,7 @@ describe('messages and membership', () => {
   });
 });
 describe('real-time voice control', () => {
-  it('allows six concurrent publishers across rooms with fixed caps disabled, retaining lease ownership', async () => {
+  it('allows three standard publishers and first fallback shares in additional rooms, retaining lease ownership', async () => {
     h = await harness({ roomShares: 0, globalShares: 0 });
     const users = [];
     for (let i = 0; i < 6; i++) users.push(await h.register(`publisher${i}`));
@@ -135,12 +135,13 @@ describe('real-time voice control', () => {
     for (const user of users.slice(1)) await h.api(user, '/invites/join', { code: invite.code });
     const first = (await h.api(users[0], '/bootstrap')).json().channels.find((c: any) => c.kind === 'voice');
     const second = (await h.api(users[0], `/servers/${server.id}/channels`, { name: 'Second voice', kind: 'voice' })).json();
+    const extra = [second.id]; for (let i = 0; i < 2; i++) extra.push((await h.api(users[0], `/servers/${server.id}/channels`, { name: `Fallback ${i}`, kind: 'voice' })).json().id);
     const sockets = [];
-    for (let i = 0; i < users.length; i++) { const socket = await h.connect(users[i]); sockets.push(socket); await event(socket, 'voice:join', { channelId: i < 3 ? first.id : second.id, eligible: true }); }
+    for (let i = 0; i < users.length; i++) { const socket = await h.connect(users[i]); sockets.push(socket); await event(socket, 'voice:join', { channelId: i < 3 ? first.id : extra[i - 3], eligible: true }); }
     const publications = await Promise.all(sockets.map(socket => event(socket, 'share:start', { requestId: randomUUID() })));
     expect(new Set(publications.map(p => p.lease.id)).size).toBe(6);
     expect((await h.service.room(users[0].id, first.id)).shares).toHaveLength(3);
-    expect((await h.service.room(users[0].id, second.id)).shares).toHaveLength(3);
+    expect((await h.service.room(users[0].id, second.id)).shares).toHaveLength(1);
     await event(sockets[0], 'share:start', { requestId: randomUUID() });
     expect((await h.db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count).toBe(6);
     await event(sockets[0], 'voice:leave', { requestId: randomUUID() });

@@ -64,6 +64,7 @@ test('Persian typography, mixed messages, Arabic-keyboard search, ping badges an
     await other.getByRole('textbox', { name: 'Find a person', exact: true }).fill('علی کریمی');
     await expect(other.locator('.person-row')).toHaveCount(1); await expect(other.locator('.person-row')).toContainText(originalName);
     await first.getByRole('button', { name: translate('Account settings'), exact: true }).click();
+    await first.getByRole('tab', { name: translate('Audio'), exact: true }).click();
     await expect(first.getByRole('heading', { name: translate('Voice input & hotkeys'), exact: true })).toBeVisible();
     await first.getByLabel(translate('Voice input mode'), { exact: true }).selectOption('push');
     await expect(first.getByRole('button', { name: translate('Record talk hotkey'), exact: true })).toBeVisible();

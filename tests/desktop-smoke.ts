@@ -2,7 +2,7 @@ import sharp from 'sharp';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { makeVideo } from './media-fixtures';
 import { _electron as electron } from '@playwright/test';
-import { mkdtemp, readFile, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
@@ -22,6 +22,7 @@ const testResolveIp = process.env.DORHAM_TEST_RESOLVE_IP;
 if (testResolveIp && (!liveServer || !isIP(testResolveIp))) throw new Error('A test DNS override requires a live server and a valid IP.');
 const instance = JSON.parse(await readFile('apps/web/src/instance.json', 'utf8'));
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'dorham-desktop-test-'));
+if (path.dirname(path.resolve(temporary)) !== path.resolve(os.tmpdir()) || !path.basename(temporary).startsWith('dorham-desktop-test-')) throw new Error('Unexpected desktop fixture directory');
 const backend = liveServer ? null : await createApp(config({ dataDir: path.join(temporary, 'server'), origins: ['dorham://app'], databaseUrl: '' }), { logger: false, rateLimit: false });
 if (backend) await backend.app.listen({ host: '127.0.0.1', port: 0 });
 const address = liveServer || `http://127.0.0.1:${(backend!.app.server.address() as any).port}`;
@@ -91,11 +92,11 @@ try {
     await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('video[aria-label="Play video: desktop-movie.mp4"]'); return v && v.getVideoPlaybackQuality().totalVideoFrames > 1; }); await page.getByLabel('Play video: desktop-movie.mp4', { exact: true }).evaluate((v: HTMLVideoElement) => v.pause());
     await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/v04-windows-inline.png' });
     await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await page.getByRole('checkbox', { name: 'Preview my screen', exact: true }).check();
-    await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('.own-screen-preview video'); return v && v.videoWidth === 640 && v.getVideoPlaybackQuality().totalVideoFrames > 1; });
-    await page.getByRole('button', { name: 'Hide my screen preview', exact: true }).click(); assert.equal(await page.evaluate(() => (window as any).__desktopCapture.readyState), 'live'); await page.getByRole('button', { name: 'Stop sharing', exact: true }).waitFor();
+    await page.waitForFunction(() => { const v = document.querySelector<HTMLVideoElement>('.screen video'); return v && v.videoWidth === 640 && v.getVideoPlaybackQuality().totalVideoFrames > 1; });
+    await page.getByRole('button', { name: 'Stop watching stream', exact: true }).click(); assert.equal(await page.evaluate(() => (window as any).__desktopCapture.readyState), 'live'); await page.getByRole('button', { name: 'Stop sharing', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await page.getByRole('button', { name: 'Account settings', exact: true }).click();
-    await page.getByRole('checkbox', { name: 'Noise suppression', exact: true }).uncheck(); await expect(page.locator('.audio-processing div').filter({ hasText: 'Noise suppression' }).getByRole('status')).toHaveText('Microphone: Off');
-    await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await expect(page.locator('.voice-card')).toContainText('Microphone muted');
+    await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.getByRole('checkbox', { name: 'Noise suppression', exact: true }).uncheck(); await expect(page.locator('.audio-processing div').filter({ hasText: 'Noise suppression' }).getByRole('status')).toHaveText('Microphone: Off');
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.getByRole('button', { name: 'Voice controls', exact: true }).click(); await expect(page.locator('.voice-card')).toContainText('Microphone muted');
     await page.getByRole('button', { name: 'Unmute microphone', exact: true }).click();
     await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
     console.log('Installed Windows decoded inline image/video and optional own screen preview; hiding preview preserved capture.');
@@ -104,19 +105,23 @@ try {
       // Keep each injected state observable for several 20 ms native polls.
       // Back-to-back process injections can otherwise release/repress between polls.
       const key = async (value: 'down' | 'up') => { await exec(sender, [value], { windowsHide: true }); await new Promise(resolve => setTimeout(resolve, 80)); };
-      await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('push'); await page.getByRole('button', { name: 'Record talk hotkey', exact: true }).click(); await page.keyboard.press('F9'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+      await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('push'); await page.getByRole('button', { name: 'Record talk hotkey', exact: true }).click(); await page.keyboard.press('F9'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
       await page.getByRole('button', { name: 'Lounge', exact: true }).click();
       const microphone = async () => backend!.db.one('SELECT muted FROM voice_members WHERE user_id=(SELECT id FROM users WHERE username=?)', [username]);
       await expect.poll(async () => (await microphone())?.muted).toBe(1);
+      // A background game must still receive PTT even if the last focused
+      // Dorham control was its composer. Foreground typing remains excluded.
+      await page.getByRole('textbox', { name: 'Message', exact: true }).focus();
       const fixtureId = await desktop.evaluate(({ BrowserWindow }) => { const fixture = new BrowserWindow({ width: 420, height: 220, title: 'Dorham background hotkey test', webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } }); void fixture.loadURL('data:text/html,<title>Hotkey test</title><p>Isolated background input target</p>'); fixture.focus(); return fixture.id; });
       try {
+        await expect.poll(() => desktop.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isFocused(), fixtureId)).toBe(true);
         await key('up'); await new Promise(resolve => setTimeout(resolve, 1200)); await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up'); await expect.poll(async () => (await microphone())?.muted).toBe(1);
         await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0);
         const parent = await desktop.evaluate(() => process.pid);
         await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'VoiceHotkey.exe' -and $_.ParentProcessId -eq ${parent} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`], { windowsHide: true });
         await expect.poll(async () => (await microphone())?.muted).toBe(1); await key('up');
         await desktop.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id)?.destroy(); BrowserWindow.getAllWindows()[0].show(); }, fixtureId);
-        await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('toggle'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+        await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('toggle'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
         await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide()); await new Promise(resolve => setTimeout(resolve, 1200));
         await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(1); await key('up');
         await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up');
@@ -133,7 +138,7 @@ try {
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
   await page.evaluate(() => document.fonts.load('16px Vazirmatn', 'فارسی در ویندوز'));
   assert.equal(await page.evaluate(() => document.fonts.check('16px Vazirmatn', 'فارسی در ویندوز')), true);
-  await expect(page.getByRole('heading', { name: 'ورودی صدا و کلیدهای میان‌بر', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'صدا', exact: true }).click(); await expect(page.getByRole('heading', { name: 'ورودی صدا و کلیدهای میان‌بر', exact: true })).toBeVisible(); await page.getByRole('tab', { name: 'پروفایل', exact: true }).click();
   await page.screenshot({ path: 'artifacts/evidence/windows-persian-0.4.2.png' });
   await page.getByLabel('زبان', { exact: true }).selectOption('en-US');
   await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
@@ -155,4 +160,5 @@ try {
   await desktop.close();
   if (backend && process.env.DORHAM_SFU_ISOLATED_TEST === '1' && backend.config.mediaTransport === 'livekit') { const client = new RoomServiceClient(backend.config.livekitApiUrl, backend.config.livekitKey, backend.config.livekitSecret); for (const channel of await backend.db.all("SELECT id FROM channels WHERE kind='voice'")) await client.deleteRoom(channel.id).catch(() => {}); }
   await backend?.app.close();
+  await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 }

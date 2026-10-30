@@ -1,0 +1,53 @@
+.gaming-voice { padding:8px 14px; flex:0 0 auto; max-height:36vh; overflow:auto; background:#171a23; }
+.gaming-voice-header,.gaming-voice-header>span { display:flex; align-items:center; gap:10px; }
+.gaming-voice-header { justify-content:space-between; min-height:34px; }
+.gaming-voice-header strong { font-size:13px; }
+.gaming-voice-header small { font-size:11px; color:#97a0b5; }
+.gaming-voice-header button { min-height:32px; padding:5px 9px; border:1px solid #ffffff15; border-radius:6px; display:inline-flex; align-items:center; gap:5px; }
+.gaming-voice-header .check-row { margin:0; font-size:11px; }
+.gaming-voice .share-list { margin:6px 0 0; display:flex; gap:8px; flex-wrap:wrap; }
+.gaming-voice .share-list>div { display:flex; gap:10px; padding:7px 10px; border:1px solid #ffffff10; background:#222633; border-radius:8px; align-items:center; }
+.gaming-voice .share-list>div>span:first-of-type { display:flex; align-items:center; gap:6px; font-size:12px; }
+.gaming-voice .watch-stream { min-height:36px; padding:8px 17px; background:#7567d8; color:#fff; border-radius:7px; font-size:13px; font-weight:650; }
+.gaming-voice .watch-stream:hover { background:#897bec; }
+.gaming-voice .live-badge { background:#b93955; color:white; border-radius:4px; padding:2px 4px; font-size:9px; }
+.gaming-voice .share-tier { color:#c1b8f6; font-size:11px; }
+.main.stream-viewer-active .gaming-voice { flex:1 1 0; max-height:none; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.stream-viewer-active .gaming-voice-header,.stream-viewer-active .share-list { flex-shrink:0; }
+.gaming-voice .screens { flex:1 1 0; min-height:0; margin-top:8px; overflow:auto; display:grid; gap:8px; grid-template-columns:minmax(0,1fr); grid-auto-rows:minmax(0,1fr); }
+.gaming-voice .screens.multi-streams { grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr)); }
+.gaming-voice .stream-view,.gaming-voice .screen { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; }
+.gaming-voice .screen video { flex:1 1 0; min-height:0; height:100%; max-height:none; object-fit:contain; background:#0b0d12; width:100%; }
+.gaming-voice .screen>div { flex-shrink:0; min-height:30px; padding:3px 8px; }
+.gaming-voice .screen button { min-width:32px; min-height:30px; }
+.stream-connecting { flex:1; display:flex; align-items:center; justify-content:center; gap:15px; background:#0b0d12; }
+.stream-volume { display:flex; flex-direction:row; align-items:center; gap:8px; font-size:11px; padding:5px 8px; }
+.stream-volume input { width:100px; }
+.main.stream-viewer-active:not(.chat-drawer-open)>.message-scroll,.main.stream-viewer-active:not(.chat-drawer-open)>.composer-wrap { display:none; }
+.main.stream-viewer-active.chat-drawer-open>.message-scroll { flex:0 1 180px; min-height:60px; border-top:1px solid #ffffff20; }
+.main.stream-viewer-active.chat-drawer-open>.composer-wrap { flex-shrink:0; padding-block:6px; }
+.stream-viewer-active .conversation-start { display:none; }
+.voice-panel { padding:7px 10px; }
+.voice-panel .voice-signal { font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:185px; }
+.voice-panel .voice-location { font-size:10px; margin-block:4px; }
+.voice-panel .share-audio-choice { font-size:11px; margin-block:4px; }
+.voice-panel .voice-panel-actions>button { min-height:32px; }
+.settings-categories { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:18px; }
+.settings-categories button { padding:8px 12px; border-radius:6px; min-height:36px; color:#aab2c5; }
+.settings-categories button[aria-selected=true] { color:white; background:#7567d840; }
+.audio-device-settings { border-block:1px solid #ffffff16; margin-block:15px; padding-block:15px; }
+.audio-device-settings h3 { margin-bottom:15px; }
+.audio-device-settings label { margin-block:12px; }
+.audio-test-actions { display:flex; gap:8px; margin-block:12px; }
+.audio-device-settings meter { width:100%; height:16px; }
+.pending-send { display:flex; gap:12px; align-items:center; font-size:12px; margin-bottom:7px; padding:8px; background:#b7675718; border-radius:6px; }
+.pending-send button { text-decoration:underline; min-height:30px; }
+.jump-latest { position:sticky; bottom:7px; display:block; margin-inline:auto; background:#7567d8; color:white; padding:8px 16px; border-radius:20px; z-index:2; }
+.unread-divider { display:flex; align-items:center; gap:10px; color:#e591a4; font-size:12px; margin:8px 20px; }
+.unread-divider:before,.unread-divider:after { content:''; flex:1; height:1px; background:#e591a477; }
+.permission-effective { font-size:10px; font-weight:400; }
+.modal-backdrop .modal { outline:none; }
+dialog.modal-backdrop { padding:0; border:0; margin:0; max-width:none; max-height:none; width:100vw; height:100dvh; color:inherit; }
+dialog.modal-backdrop::backdrop { background:#0009; }
+@media(max-width:700px) { .gaming-voice { padding:6px 8px; } .gaming-voice-header { flex-wrap:wrap; gap:5px; } .gaming-voice-header>span { gap:5px; flex-wrap:wrap; } .gaming-voice .share-list>div { flex-wrap:wrap; width:100%; } .gaming-voice .watch-stream { margin-inline-start:auto; } .gaming-voice .screens.multi-streams { grid-template-columns:1fr; grid-auto-rows:minmax(150px,1fr); } .main.stream-viewer-active.chat-drawer-open>.message-scroll { flex-basis:100px; } .icon-button { min-width:34px; min-height:34px; } }
+@media(prefers-reduced-motion:reduce) { *,*:before,*:after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }

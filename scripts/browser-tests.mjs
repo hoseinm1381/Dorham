@@ -1,9 +1,14 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 const exec = promisify(execFile);
 const capacity = process.argv.includes('--capacity');
+const gamingCapacity = process.argv.includes('--gaming-capacity');
+if (gamingCapacity && (process.env.DORHAM_GAMING_CAPACITY !== '1' || process.env.DORHAM_SFU_ISOLATED_TEST !== '1')) throw new Error('Gaming capacity requires explicit isolated SFU test flags.');
+const budgetMiB = gamingCapacity ? 6144 : 4096, stopThresholdMiB = gamingCapacity ? 5500 : 3500, ownThresholdMiB = gamingCapacity ? 5200 : 2800;
 const desktopIndex = process.argv.indexOf('--desktop');
 const desktop = desktopIndex === -1 ? '' : process.argv[desktopIndex + 1];
 if (desktopIndex !== -1 && (!desktop || desktop.startsWith('--'))) throw new Error('Pass the installed Dorham.exe path after --desktop.');
@@ -11,6 +16,10 @@ const mediaUi = process.argv.includes('--media-ui');
 const persian = process.argv.includes('--persian');
 const audioControls = process.argv.includes('--audio-controls');
 const clipboard = process.argv.includes('--clipboard');
+const gaming = process.argv.includes('--gaming');
+const gamingAudio = process.argv.includes('--gaming-audio');
+const windowsSfu = process.argv.includes('--windows-sfu');
+const rtcLocal = process.argv.includes('--rtc-local');
 const expansion = process.argv.includes('--expansion');
 const hostedRelay = process.argv.includes('--hosted-relay');
 const hostedSfu = process.argv.includes('--hosted-sfu');
@@ -28,8 +37,10 @@ if (capacity && process.env.DORHAM_LARGE_MEDIA_TEST !== '1') { console.error('La
 if (process.platform !== 'win32') { console.error('This guarded launcher currently measures Windows process memory. Use an OS memory limit before running browser tests on another platform.'); process.exit(2); }
 async function usage(pid = 0) { const { stdout } = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', path.resolve('scripts/browser-usage.ps1'), '-RootPid', String(pid)], { windowsHide: true }); return JSON.parse(stdout.trim()); }
 const baseline = await usage();
-if (baseline.totalMiB > 2800) { console.error(`Browser tests were not started: existing Chrome/Edge uses ${baseline.totalMiB} MiB. Keeping headroom below the user's 4 GiB limit.`); process.exit(2); }
-const child = spawn(process.execPath, desktop ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-smoke.ts', path.resolve(desktop)] : ['node_modules/@playwright/test/cli.js', 'test', hostedSfu ? 'tests/browser/sfu.spec.ts' : relay ? 'tests/browser/relay.spec.ts' : capacity ? 'tests/browser/capacity.spec.ts' : clipboard ? 'tests/browser/clipboard.spec.ts' : audioControls ? 'tests/browser/audio-controls.spec.ts' : persian ? 'tests/browser/persian-ping.spec.ts' : mediaUi ? 'tests/browser/media-layout.spec.ts' : expansion ? 'tests/browser/expansion.spec.ts' : 'tests/browser/application.spec.ts', ...filter], { stdio: 'inherit', windowsHide: true, env: { ...process.env, DORHAM_SFU_BASE_URL: hostedSfu ? process.env.DORHAM_SFU_BASE_URL : '', DORHAM_RELAY_TEST: relay ? '1' : '0', DORHAM_RELAY_BASE_URL: hostedRelay ? process.env.DORHAM_RELAY_BASE_URL : '' } });
+if (baseline.totalMiB > (gamingCapacity ? 4200 : 2800)) { console.error(`Browser tests were not started: existing Chrome/Edge uses ${baseline.totalMiB} MiB. Keeping headroom below the user's 4 GiB limit.`); process.exit(2); }
+const fixtureNonce = randomUUID(), fixtureManifest = path.resolve('.tools', `browser-fixture-${fixtureNonce}.json`);
+process.env.DORHAM_FIXTURE_NONCE = fixtureNonce; process.env.DORHAM_FIXTURE_MANIFEST = fixtureManifest;
+const child = spawn(process.execPath, desktop ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-smoke.ts', path.resolve(desktop)] : ['node_modules/@playwright/test/cli.js', 'test', windowsSfu ? 'tests/browser/windows-sfu.spec.ts' : rtcLocal ? 'tests/browser/rtc-local.spec.ts' : gamingCapacity ? 'tests/browser/gaming-capacity.spec.ts' : gamingAudio ? 'tests/browser/gaming-audio.spec.ts' : gaming ? 'tests/browser/gaming.spec.ts' : hostedSfu ? 'tests/browser/sfu.spec.ts' : relay ? 'tests/browser/relay.spec.ts' : capacity ? 'tests/browser/capacity.spec.ts' : clipboard ? 'tests/browser/clipboard.spec.ts' : audioControls ? 'tests/browser/audio-controls.spec.ts' : persian ? 'tests/browser/persian-ping.spec.ts' : mediaUi ? 'tests/browser/media-layout.spec.ts' : expansion ? 'tests/browser/expansion.spec.ts' : 'tests/browser/application.spec.ts', ...filter], { stdio: 'inherit', windowsHide: true, env: { ...process.env, DORHAM_SFU_BASE_URL: hostedSfu ? process.env.DORHAM_SFU_BASE_URL : '', DORHAM_RELAY_TEST: relay ? '1' : '0', DORHAM_RELAY_BASE_URL: hostedRelay ? process.env.DORHAM_RELAY_BASE_URL : '' } });
 const known = new Set(); const samples = [baseline]; let polling = false, limited = false;
 async function stopOwnBrowsers() {
   // End the entire test tree, including the fixture API, before its parent exits.
@@ -43,11 +54,28 @@ const timer = setInterval(async () => {
   try {
     const value = await usage(child.pid); samples.push(value); value.ownedBrowserIds.forEach(pid => known.add(pid));
     // Stop well before 4 GiB; never close the user's unrelated browser windows.
-    if (value.totalMiB > 3500 || value.ownedMiB > 2800) { limited = true; console.error('Browser test stopped before the 4 GiB budget was reached.'); await stopOwnBrowsers(); }
+    if (value.totalMiB > stopThresholdMiB || value.ownedMiB > ownThresholdMiB) { limited = true; console.error(`Browser test stopped before the ${budgetMiB} MiB budget was reached.`); await stopOwnBrowsers(); }
   } catch { limited = true; console.error('Browser memory monitoring failed; stopping this test.'); await stopOwnBrowsers(); }
   finally { polling = false; }
 }, 750);
 const code = await new Promise(resolve => child.once('exit', (code) => resolve(code ?? 1)));
 clearInterval(timer); await mkdir('artifacts/evidence', { recursive: true });
-await writeFile('artifacts/evidence/browser-memory.json', JSON.stringify({ measuredAt: new Date().toISOString(), budgetMiB: 4096, stopThresholdMiB: 3500, limited, peakTotalBrowserMiB: Math.max(...samples.map(s => s.totalMiB)), peakOwnedBrowserMiB: Math.max(...samples.map(s => s.ownedMiB)), samples }, null, 2));
-if (limited) await stopOwnBrowsers(); process.exit(limited ? 2 : code);
+await writeFile('artifacts/evidence/browser-memory.json', JSON.stringify({ measuredAt: new Date().toISOString(), budgetMiB, stopThresholdMiB, limited, peakTotalBrowserMiB: Math.max(...samples.map(s => s.totalMiB)), peakOwnedBrowserMiB: Math.max(...samples.map(s => s.ownedMiB)), samples }, null, 2));
+if (limited) await stopOwnBrowsers();
+let cleanupFailed = false;
+try {
+  const owned = JSON.parse(await readFile(fixtureManifest, 'utf8'));
+  const target = path.resolve(owned.dataDir), temp = path.resolve(os.tmpdir());
+  if (owned.nonce !== fixtureNonce || path.dirname(target) !== temp || !path.basename(target).startsWith('dorham-browser-')) throw new Error('Fixture ownership verification failed');
+  // This directory was created for this nonce, never a shared/live data folder.
+  if (process.env.DORHAM_SFU_ISOLATED_TEST === '1') {
+    const { default: Database } = await import('better-sqlite3'); const { RoomServiceClient } = await import('livekit-server-sdk');
+    const db = new Database(path.join(target, 'dorham.sqlite'), { readonly: true, fileMustExist: true });
+    const rooms = db.prepare("SELECT id FROM channels WHERE kind='voice'").all(); db.close();
+    const client = new RoomServiceClient(process.env.LIVEKIT_API_URL, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
+    for (const room of rooms) if (/^[a-f0-9-]{36}$/.test(room.id)) await client.deleteRoom(room.id).catch(e => { if (e.code !== 'not_found' && !/not found|does not exist/i.test(String(e))) throw e; });
+  }
+  await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); await rm(fixtureManifest);
+  console.log('Removed the manifest-owned local test database, accounts, servers and files.');
+} catch (e) { if (e.code !== 'ENOENT') { cleanupFailed = true; console.error('Owned fixture cleanup failed:', e.message); } }
+process.exit(limited ? 2 : cleanupFailed ? 1 : code);

@@ -1,7 +1,8 @@
 import { screenSettings, type ScreenQuality } from './screen-quality';
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type { Share, VoiceRoom, Signal } from '@dorham/contracts';
-import { ack, type MediaOptions, type MediaTransport } from './index';
+import { ack } from './signaling';
+import type { MediaOptions, MediaTransport } from './index';
 export const NativeMedia = registerPlugin<any>('DorhamMedia');
 export class NativeTransport implements MediaTransport {
   getCapabilities() { return { audio: true, screenCapture: true, nativeVideo: true, amplification: true }; }

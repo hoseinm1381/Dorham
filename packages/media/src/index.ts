@@ -1,5 +1,5 @@
 import type { Socket } from 'socket.io-client';
-import type { VoiceRoom, Signal, Result, Share } from '@dorham/contracts';
+import type { VoiceRoom, Signal, Share } from '@dorham/contracts';
 import type { AudioProcessing, AudioProcessingState } from './audio-processing';
 import type { ScreenQuality } from './screen-quality';
 export { screenQualities, screenSettings } from './screen-quality';
@@ -7,10 +7,10 @@ export type { ScreenQuality };
 export { defaultAudioProcessing, browserAudioProcessing } from './audio-processing';
 export type { AudioProcessing, AudioProcessingState };
 export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream; attach?: (element: HTMLVideoElement) => () => void };
-export type MediaEvents = { room: VoiceRoom | null; localScreen: RemoteScreen | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };
+export type MediaEvents = { room: VoiceRoom | null; localScreen: RemoteScreen | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; notice: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };
 export type ScreenPolicy = { maxBitrate: number; maxFrameRate: number };
 export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; screenPolicy?: ScreenPolicy; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
-export type MediaCapabilities = { audio: boolean; screenCapture: boolean; nativeVideo: boolean; amplification: boolean };
+export type MediaCapabilities = { audio: boolean; screenCapture: boolean; nativeVideo: boolean; amplification: boolean; sharedAudio?: boolean; outputSelection?: boolean };
 export interface MediaTransport {
   room: VoiceRoom | null;
   getCapabilities(): MediaCapabilities; reconnect(): Promise<void>;
@@ -18,18 +18,13 @@ export interface MediaTransport {
   setMuted(value: boolean): Promise<void>; setDeafened(value: boolean): Promise<void>;
   setVolume(userId: string, value: number): void; setDevice(deviceId: string): Promise<void>;
   getAudioProcessing?(): AudioProcessingState; setAudioProcessing?(settings: AudioProcessing): Promise<void>;
-  startShare(quality?: ScreenQuality): Promise<void>; setShareQuality(quality: ScreenQuality): Promise<void>; stopShare(): Promise<void>;
+  startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean }): Promise<void>; setShareQuality(quality: ScreenQuality): Promise<void>; stopShare(): Promise<void>;
+  setOutputDevice?(deviceId: string): Promise<void>; setStreamVolume?(leaseId: string, value: number): void;
+  getLocalAudioStream?(): MediaStream | null;
   subscribe(share: Share, enabled: boolean): Promise<void>;
   getStats(): Promise<Record<string, any>>; destroy(): Promise<void>;
 }
-export function ack<T = any>(socket: Socket, event: string, body: unknown): Promise<T> {
-  const payload = body && typeof body === 'object' ? { requestId: crypto.randomUUID(), ...body } : body;
-  return new Promise((resolve, reject) => socket.timeout(10000).emit(event, payload, (err: Error | null, result: Result<T>) => {
-    if (err) reject(new Error('Connection timed out. Retry after reconnecting.'));
-    else if (!result?.ok) reject(new Error(result?.error.message || 'Action failed.'));
-    else resolve(result.data);
-  }));
-}
+export { ack } from './signaling';
 export { MeshTransport } from './mesh';
 export { LiveKitTransport } from './livekit';
 export { NativeTransport, NativeMedia } from './native';

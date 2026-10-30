@@ -52,5 +52,16 @@ export async function migrateExpansion(db: Database) {
     await tx.run('CREATE TABLE member_roles (server_id TEXT NOT NULL, user_id TEXT NOT NULL, role_id TEXT NOT NULL REFERENCES custom_roles(id) ON DELETE CASCADE, PRIMARY KEY(server_id,user_id,role_id), FOREIGN KEY(server_id,user_id) REFERENCES members(server_id,user_id) ON DELETE CASCADE)');
     await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(3,?)', [Date.now()]);
   });
-
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=4')) return;
+    for (const query of [
+      'ALTER TABLE channel_overrides ADD COLUMN revision INTEGER NOT NULL DEFAULT 1',
+      "ALTER TABLE share_leases ADD COLUMN tier TEXT NOT NULL DEFAULT 'fallback'",
+      'ALTER TABLE share_leases ADD COLUMN started_at BIGINT NOT NULL DEFAULT 0',
+      'ALTER TABLE share_leases ADD COLUMN requested_fps INTEGER NOT NULL DEFAULT 15',
+      'ALTER TABLE share_leases ADD COLUMN include_audio INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE share_leases ADD COLUMN policy_revision INTEGER NOT NULL DEFAULT 1'
+    ]) await tx.run(query);
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(4,?)', [Date.now()]);
+  });
 }
