@@ -1,0 +1,107 @@
+# API and events
+
+HTTP responses return data directly. Errors use `{ error: { code, message } }` with an appropriate HTTP status. JSON mutation bodies include a UUID `requestId`. Durable service mutations deduplicate that identifier for 24 hours. Authentication/refresh and ephemeral media handshakes are deliberately separate from durable message deduplication.
+
+Use `Authorization: Bearer <access>` on native HTTP calls. Web calls use the session cookie plus `X-CSRF-Token` on unsafe methods and an allowed `Origin`. Native login/register sends `X-Dorham-Native: 1`. Native tokens must never be placed in localStorage or URLs. `/auth/me` returns the current public user and CSRF token.
+
+The v0.3 invitation, custom-role, DM closing/blocking and server-leaving routes are documented in [social update API additions](SOCIAL-UPDATE.md#api-additions).
+
+The v0.4 authenticated inline-media preview and range routes are documented in [MEDIA-UPDATE.md](MEDIA-UPDATE.md).
+
+## Routes under `/api/v1`
+
+| Method | Route | Input / behavior |
+| --- | --- | --- |
+| GET | `/config` | Public registration and transport configuration |
+| POST | `/auth/register` | username, displayName, password; transactional account cap |
+| POST | `/auth/login` | username, password; create session |
+| POST | `/auth/refresh` | refreshToken; rotate native access/refresh credentials |
+| GET | `/auth/me` | Current user and CSRF proof |
+| POST | `/auth/logout` | Revoke current session and its sockets |
+| POST | `/auth/password` | currentPassword, password; revoke other sessions |
+| POST | `/admin/claim` | Single-use bootstrap secret |
+| GET | `/bootstrap` | Authorized servers/channels/DMs, public directory, unread cursors |
+| GET | `/presence` | Currently connected user identifiers |
+| PATCH | `/profile` | displayName, bio, status |
+| POST | `/profile/avatar` | One PNG/JPEG/WebP multipart file, ≤256 KiB; `X-Request-Id` header |
+| POST | `/servers` | name; create server and default text/voice channels |
+| PATCH | `/servers/:id` | name or delete=true; owner-only deletion |
+| POST | `/servers/:id/channels` | name, kind=text/voice |
+| PATCH | `/channels/:id` | name, delete=true, or role + permissions |
+| POST | `/servers/:id/invites` | hours=1..168, uses=1..100 |
+| POST | `/invites/join` | code; transactional use decrement |
+| GET | `/servers/:id/members` | Authorized membership directory |
+| PATCH | `/servers/:serverId/members/:userId` | role or remove=true; hierarchy enforced |
+| POST | `/dms` | userId; unique two-party conversation |
+| GET | `/conversations/:id/messages` | `before` sequence: 50-message history page |
+| GET | `/conversations/:id/messages?after=N` | Up to 200 replay events or reset=true |
+| POST | `/messages` | conversationId, content, optional replyTo |
+| PATCH | `/messages/:id` | content, delete=true, or emoji + optional removeReaction |
+| POST | `/conversations/:id/read` | sequence; monotonic, clamped to committed sequence |
+| GET | `/voice/:id` | Authorized current room state |
+| POST | `/voice/:id/moderate` | userId, action=mute/unmute/kick/stopShare |
+| GET | `/admin/metrics` | Instance-admin-only process, capacity, and storage metrics |
+
+Public `/health` checks process availability; `/ready` also queries schema readiness. Avatars have randomized public image URLs, contain no supplied filename, and are decoded/re-encoded to WebP. Message content is plain text, 1–4000 characters. Supported reactions are 👍 ❤️ 😂 🎉 👀 ✅.
+
+## Socket.IO
+
+Handshake auth is `{ csrf }` with the web cookie, or `{ token }` for native clients. Every acknowledged event returns `{ ok: true, data }` or `{ ok: false, error: { code, message } }`. Authentication validity is checked again for each action; recovery never bypasses middleware.
+
+| Client event | Payload |
+| --- | --- |
+| `message:send` | Same as POST `/messages`; same deduplication identifier |
+| `typing` | conversationId, active |
+| `voice:join` | channelId, eligible; returns fenced epoch, room, ICE servers |
+| `voice:leave` | requestId |
+| `voice:heartbeat` | eligible; refresh own active membership/share |
+| `voice:state` | muted, deafened, requestId |
+| `voice:signal` | channelId, to, epoch, description/candidate/streams/subscription |
+| `share:start`, `share:stop` | requestId; reserve/release own screen lease |
+| `voice:sfu` | channelId; short-lived source-scoped LiveKit credentials |
+
+Server events: `conversation:event`, `state:changed`, `presence`, `typing`, `voice:room`, `voice:signal`, `voice:removed`, and `capacity`. Conversation events carry conversationId, sequence, kind, and payload. Clients discard duplicates and request replay on gaps. A successful replay may need multiple pages; reset means load a fresh authorized snapshot.
+
+Since 0.4.2, the authenticated `/api/v1/presence` response also includes `latencies`, an array of `{userId, milliseconds: number|null, measuredAt: number|null}`. The same array arrives in `connection:latencies` Socket.IO events. The server sends `connection:probe` with `{version:1}`; clients acknowledge with exactly `{version:1}`. No client timing or mutation identifier is accepted. Server-clock RTT is sampled initially and every 15 seconds, times out at 5 seconds, and expires after 45 seconds. Offline users disappear; missing/legacy responses have null measurements. Multiple sessions use the fastest fresh sample. This is public account-presence telemetry for authenticated users, not voice latency, media quality, or a private conversation subscription. Schemas are in `packages/contracts/src/connection.ts`.
+
+Permission defaults and types are defined in `packages/contracts`. Channel overrides apply to role defaults; server owners retain all rights. Managing a member requires a strictly higher role. Channel access requires both view and the requested capability. DM history and events are limited to its two members.
+
+## Expansion routes (v0.2, same `/api/v1` version)
+
+All unsafe JSON requests carry `requestId`; cookie requests also require allowed Origin and CSRF proof. Binary content uses its previously authorized reservation ID.
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| POST | `/auth/guest` | displayName, invite code, optional language; shared account cap |
+| POST | `/auth/upgrade` | convert the existing guest ID using registration fields |
+| POST | `/auth/renew` | rotate/extend a web session, CSRF required |
+| GET / POST | `/auth/sessions`, `/auth/sessions/revoke` | own device list; revoke sessionId or all |
+| GET / POST | `/auth/recovery`, `/auth/recovery-codes`, `/auth/recovery-question` | settings, one-time code issuance, optional supporting question |
+| POST | `/auth/recover` | username, code, password; no question-only recovery |
+| GET | `/admin/users`, `/admin/audit` | global administrator only |
+| POST | `/admin/users/:id` | ban/unban/revoke/resetPassword; hierarchy/audit |
+| GET | `/channels/:id` | authorized internal link resolution |
+| POST / PATCH | `/servers/:id/tags`, `/voice/:id/policy` | scoped tags and ANY/ALL gates, lock and limit |
+| POST | `/voice/:id/moderate`, `/voice/:id/move` | persistent mute/deafen/sharing restriction, kick/stopShare, room move |
+| POST | `/attachments` | conversationId, name, size; reserve rolling quota atomically |
+| POST | `/attachments/:id/content` | raw octet stream, exact reserved byte count |
+| DELETE | `/attachments/:id` | cancel an unpublished reservation; quota not refunded |
+| GET | `/attachments/:id/download`, `/uploads/usage` | authorized forced download; rolling usage |
+
+Message mutations may include `attachmentIds`; files must be ready, owned by the sender, in the same conversation, and not previously attached. Message/event views include metadata and availability, never direct public filesystem paths.
+
+`voice:move` asks the target media adapter to leave and join the authorized destination. `voice:changed` refreshes server deafening, restrictions and share state. Session invalidation disconnects sockets. The private `/internal/media/admission` endpoint is available only to the trusted signaling proxy; block `/internal/*` at every public origin. Its credentials must never be sent to a client.
+
+## 0.5.0 candidate contracts
+
+Schema 4 preserves existing rows and adds `channel_overrides.revision` plus allocation metadata on `share_leases`.
+
+- `GET /channels/:id/overrides?role=member|moderator|administrator` requires authorized channel management. Returns `{channelId, role, revision, permissions}`; revision zero represents no saved document.
+- `PATCH /channels/:id` permission saves require `{requestId, role, permissions, expectedRevision}`. The document replaces the hydrated override set. Unversioned writes fail 428/`UPGRADE_REQUIRED`; stale writes fail 409/`STALE_PERMISSIONS`.
+- Socket `share:start` requires `{requestId, protocolVersion:2, includeAudio:false|true}`. Protocol 1/missing version fails 428. It commits allocation before acknowledging publication eligibility.
+- `Share` includes `tier`, `startedAt`, `requestedFrameRate`, `maxFrameRate`, `includeAudio`, `policyRevision` alongside existing identifiers/expiry. Optional typing preserves older fixtures/read consumers; new server responses populate these fields.
+- Socket `share:update` accepts `{requestId, leaseId, expectedRevision, frameRate?:15|30, includeAudio?:false}`. Enabling sound requires a new explicit capture/publication. Returns the authoritative lease. Stale policy revisions fail `STALE_SHARE`. A fallback cannot select 30fps. Repeating an identical request ID deduplicates through the existing receipt window.
+- GET `/attachments/:id/status` validates a sender-owned, unbound, unexpired ready attachment and current write access before draft restoration.
+- Bootstrap unread `.sequence` is the latest undeleted message sequence, while replay history `.sequence` remains the conversation-event position. Message edits/deletions must not advance the read cursor implicitly.
+
+All ordinary HTTP requests accept cancellation/deadlines in the official client. A timed-out mutation is never silently resent. Screen audio grants require an active opted-in share lease; stream watching is an explicit client subscription. Authoritative grants and lease limits do not guarantee a billing ceiling against modified clients.

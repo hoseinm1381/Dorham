@@ -1,0 +1,30 @@
+# Import inside the existing voice-host handle, BEFORE reverse_proxy.
+# Replace the placeholder in a root/caddy-readable private configuration file.
+# Never publish the actual header value. API port 3001 must remain private.
+@media_signaling path /rtc /rtc/*
+forward_auth @media_signaling 127.0.0.1:3001 {
+    uri /internal/media/admission
+    # Authentication is HTTP, even when the original request upgrades to WSS.
+    header_up -Upgrade
+    header_up -Connection
+    header_up X-Dorham-Media-Gate REPLACE_WITH_PRIVATE_MEDIA_ADMISSION_SECRET
+}
+# Block this path on BOTH public website and voice hosts.
+@private_paths path /internal/*
+respond @private_paths 404
+
+# In Caddy's GLOBAL options block, redact query credentials in runtime error logs:
+# log default {
+#     format filter {
+#         wrap json
+#         fields {
+#             request>uri query {
+#                 replace access_token REDACTED
+#                 replace join_request REDACTED
+#                 replace media_ticket REDACTED
+#             }
+#             request>headers>Authorization delete
+#             request>headers>X-Dorham-Media-Gate delete
+#         }
+#     }
+# }
