@@ -1,6 +1,8 @@
-**Current release: 0.6.0** — Standard and Elixer Chess: user challenges, shared-server spectators, authoritative clocks, reconnect grace and bounded Easy/Medium/Hard AI. Expert is disabled. The game loads on demand without a separate engine or new dependency. See [chess](docs/CHESS.md) and [release verification](docs/RELEASE-0.6.0.md).
+**Current release: 0.6.1** — Games beside Share screen; voice-channel Chess with open seats, watch-first joining, atomic Play and reconnect recovery. Standard/Elixer, clocks and bounded AI remain available. See [games and chess](docs/CHESS.md) and [release verification](docs/RELEASE-0.6.1.md).
 
-**Previous release: 0.5.4** — personal microphone feedback: a descending mute tone and a rising unmute tone, including talk hotkeys. The sounds play locally and follow the voice-sound setting. Lint, types, 89 unit/API tests, production builds, seven browser regression scenarios and the dedicated local-audio cue test pass. See [release verification](docs/RELEASE-0.5.4.md).
+Previous release: **0.6.0** — [Standard and Elixer Chess integration](docs/RELEASE-0.6.0.md).
+
+**Earlier release: 0.5.4** — personal microphone feedback: a descending mute tone and a rising unmute tone, including talk hotkeys. The sounds play locally and follow the voice-sound setting. Lint, types, 89 unit/API tests, production builds, seven browser regression scenarios and the dedicated local-audio cue test pass. See [release verification](docs/RELEASE-0.5.4.md).
 
 Previous release: **0.5.3** — [outgoing microphone gain from 50% to 250%](docs/RELEASE-0.5.3.md).
 

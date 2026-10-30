@@ -77,4 +77,10 @@ export async function migrateExpansion(db: Database) {
     await tx.run('CREATE INDEX chess_black ON chess_games(black_id,status)');
     await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(6,?)', [Date.now()]);
   });
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=7')) return;
+    await tx.run('ALTER TABLE chess_games ADD COLUMN channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE');
+    await tx.run('CREATE INDEX chess_voice ON chess_games(channel_id,status,updated_at)');
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(7,?)', [Date.now()]);
+  });
 }

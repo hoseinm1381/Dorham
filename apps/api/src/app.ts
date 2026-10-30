@@ -172,7 +172,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   await app.register(async api => {
     api.addHook('preHandler', authenticate);
     protectedAccountRoutes(api, service, disconnectInvalidSessions);
-    api.get('/chess', async req => ({ games: await chess.list(req.account.id, z.string().min(1).max(100).parse((req.query as any).serverId)) }));
+    api.get('/chess', async req => { const q = req.query as any; return { games: q.channelId ? await chess.voiceGames(req.account.id, id.parse(q.channelId)) : await chess.list(req.account.id, id.parse(q.serverId)) }; });
     api.post('/chess', async req => chess.create(req.account.id, chessCreate.parse(req.body)));
     api.get('/chess/:id', async req => chess.get(req.account.id, id.parse((req.params as any).id)));
     api.post('/chess/:id', async req => chess.command(req.account.id, id.parse((req.params as any).id), chessCommand.parse(req.body)));
@@ -262,10 +262,11 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   const io = new SocketServer(app.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 120000, skipMiddlewares: false }, pingInterval: 20000, pingTimeout: 10000, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
   mediaAdmission(app, service, socketId => io.sockets.sockets.get(socketId)?.data.sessionId);
   chess.online = uid => [...io.sockets.sockets.values()].some(s => s.data.userId === uid);
-  chess.notify = async g => {
+  chess.notify = async (g, directoryChanged) => {
     const members = new Set((await db.all('SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)', [g.serverId])).map(r => r.user_id));
     if (!members.has(g.whiteId) || (g.blackId && !members.has(g.blackId))) return;
-    for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId)) s.emit('chess:changed', { id: g.id, serverId: g.serverId, challengeTo: g.status === 'pending' ? g.blackId : null });
+    const voice = g.channelId ? new Set((await db.all('SELECT user_id FROM voice_members WHERE channel_id=?', [g.channelId])).map(r => r.user_id)) : null;
+    for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId) && (!voice || voice.has(s.data.userId) || s.data.userId === g.whiteId || s.data.userId === g.blackId)) s.emit('chess:changed', { id: g.id, serverId: g.serverId, channelId: g.channelId || null, directoryChanged, challengeTo: g.status === 'pending' ? g.blackId : null });
   };
   io.use(async (socket, next) => {
     try {
@@ -319,6 +320,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     } else if (kind === 'voice:move') { const target = io.sockets.sockets.get(payload.socketId); if (target) { target.data.voiceChannel = null; target.emit('voice:move', { channelId: payload.channelId }); }
     } else if (kind === 'voice:changed' || kind === 'voice:state:changed') {
       await voiceRefresh.run();
+      if (kind === 'voice:changed') await chess.reconcileVoice();
       // Local microphone/PTT/deafen state changes do not alter SFU grants.
       // Membership, leases, permissions and moderation retain confirmed enforcement.
       if (kind === 'voice:changed' && sfu.client) try { await sfu.synchronize(); }

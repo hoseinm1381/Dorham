@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { applyAction, advanceLegalAction, costs, inCheck, canMateOnTimeout, legalActions, initialPosition, outcome, repetitionCount, squareName, type Color, type ChessAction, type ChessGame, type ChessView, type ChessPosition } from '../../../packages/contracts/src/chess';
+import { applyAction, advanceLegalAction, costs, inCheck, canMateOnTimeout, legalActions, initialPosition, outcome, repetitionCount, squareName, type Color, type ChessAction, type ChessGame, type ChessView, type ChessPosition, type VoiceGame } from '../../../packages/contracts/src/chess';
 import type { Service } from './service';
 import type { Connection } from './db';
 import { fail } from './security';
 
-export const chessCreate = z.object({ requestId: z.string().uuid(), serverId: z.string().min(1).max(100), opponentId: z.string().min(1).max(100).optional(), difficulty: z.enum(['Easy', 'Medium', 'Hard']).optional(), mode: z.enum(['standard', 'elixer']), minutes: z.union([z.literal(3), z.literal(5), z.literal(10), z.literal(15)]), increment: z.union([z.literal(0), z.literal(2), z.literal(5), z.literal(10)]) }).strict().refine(b => Boolean(b.opponentId) !== Boolean(b.difficulty), 'Choose a person or AI');
-export const chessCommand = z.object({ requestId: z.string().uuid(), revision: z.number().int().positive(), kind: z.enum(['accept', 'decline', 'cancel', 'action', 'resign', 'offerDraw', 'acceptDraw', 'declineDraw', 'claimDraw']), action: z.object({ from: z.number().int().min(0).max(63).optional(), to: z.number().int().min(0).max(63), buy: z.enum(['p', 'n', 'b', 'r', 'q']).optional(), promotion: z.enum(['q', 'r', 'b', 'n']).optional() }).strict().optional() }).strict();
+export const chessCreate = z.object({ requestId: z.string().uuid(), serverId: z.string().min(1).max(100), channelId: z.string().min(1).max(100).optional(), openSeat: z.literal(true).optional(), opponentId: z.string().min(1).max(100).optional(), difficulty: z.enum(['Easy', 'Medium', 'Hard']).optional(), mode: z.enum(['standard', 'elixer']), minutes: z.union([z.literal(3), z.literal(5), z.literal(10), z.literal(15)]), increment: z.union([z.literal(0), z.literal(2), z.literal(5), z.literal(10)]) }).strict().refine(b => [b.opponentId, b.difficulty, b.openSeat].filter(Boolean).length === 1 && (!b.openSeat || Boolean(b.channelId)) && (!b.channelId || !b.opponentId), 'Choose an open voice seat or AI');
+export const chessCommand = z.object({ requestId: z.string().uuid(), revision: z.number().int().positive(), kind: z.enum(['join', 'accept', 'decline', 'cancel', 'action', 'resign', 'offerDraw', 'acceptDraw', 'declineDraw', 'claimDraw']), action: z.object({ from: z.number().int().min(0).max(63).optional(), to: z.number().int().min(0).max(63), buy: z.enum(['p', 'n', 'b', 'r', 'q']).optional(), promotion: z.enum(['q', 'r', 'b', 'n']).optional() }).strict().optional() }).strict();
 type Create = z.infer<typeof chessCreate>; type Command = z.infer<typeof chessCommand>;
 const winner = (color: number, reason: string) => `${color === 0 ? 'White' : 'Black'} wins by ${reason}`;
 export function chargeClock(g: ChessGame, now: number) {
@@ -40,7 +40,7 @@ export class ChessService {
   private closed = false;
   private readonly epoch = Date.now(); private readonly monotonic = performance.now();
   now = () => this.epoch + performance.now() - this.monotonic;
-  notify: (g: ChessGame) => Promise<void> = async () => {};
+  notify: (g: ChessGame, directoryChanged: boolean) => Promise<void> = async () => {};
   online: (id: string) => boolean = () => true;
   onError: (e: unknown) => void = () => {};
   constructor(private service: Service) {}
@@ -62,15 +62,29 @@ export class ChessService {
     // Spectators must still share this server with both players.
     const ids = [g.whiteId, ...(g.blackId ? [g.blackId] : [])];
     for (const id of ids) if (!await tx.one('SELECT user_id FROM members WHERE server_id=? AND user_id=?', [g.serverId, id])) fail(403, 'FORBIDDEN', 'A player has left the match server.');
+    if (g.channelId && uid !== g.whiteId && uid !== g.blackId) await this.requireVoice(tx, uid, g.channelId);
+  }
+  private async requireVoice(tx: Connection, uid: string, channelId: string) {
+    const channel = await this.service.channel(tx, uid, channelId);
+    if (channel.kind !== 'voice' || !await tx.one('SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?', [uid, channelId])) fail(403, 'VOICE_REQUIRED', 'Join this voice channel to play or watch.');
+    return channel;
   }
   private async load(tx: Connection, id: string): Promise<ChessGame> { const row = await tx.one('SELECT state FROM chess_games WHERE id=?', [id]); if (!row) fail(404, 'NOT_FOUND', 'Chess match not found.'); return JSON.parse(row!.state); }
-  private async save(tx: Connection, g: ChessGame) { g.updatedAt = this.now(); await tx.run('INSERT INTO chess_games(id,server_id,white_id,black_id,status,updated_at,state) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,state=excluded.state', [g.id, g.serverId, g.whiteId, g.blackId, g.status, g.updatedAt, JSON.stringify(g)]); }
+  private async save(tx: Connection, g: ChessGame) { g.updatedAt = this.now(); await tx.run('INSERT INTO chess_games(id,server_id,white_id,black_id,status,updated_at,state,channel_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET black_id=excluded.black_id,channel_id=excluded.channel_id,status=excluded.status,updated_at=excluded.updated_at,state=excluded.state', [g.id, g.serverId, g.whiteId, g.blackId, g.status, g.updatedAt, JSON.stringify(g), g.channelId || null]); }
   async get(uid: string, id: string): Promise<ChessView> {
     return this.service.db.transaction(async tx => {
       const g = await this.load(tx, id); await this.allowed(tx, uid, g); const now = this.now();
       const view = structuredClone(g); chargeClock(view, now);
       const ownTurn = (view.position.turn === 0 ? view.whiteId : view.blackId) === uid;
-      return { ...view, serverNow: now, actions: view.status === 'playing' && !view.pausedUntil && ownTurn ? legalActions(view.position) : [], check: inCheck(view.position), canClaimDraw: view.position.mode === 'standard' && (view.position.half >= 100 || repetitionCount(view.position) >= 3) };
+      const inVoice = !g.channelId || Boolean(await tx.one('SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?', [uid, g.channelId]));
+      return { ...view, serverNow: now, actions: view.status === 'playing' && !view.pausedUntil && ownTurn && inVoice ? legalActions(view.position) : [], canPlay: Boolean(g.openSeat && g.status === 'pending' && !g.blackId && uid !== g.whiteId && inVoice && !g.pausedUntil), check: inCheck(view.position), canClaimDraw: view.position.mode === 'standard' && (view.position.half >= 100 || repetitionCount(view.position) >= 3) };
+    });
+  }
+  async voiceGames(uid: string, channelId: string): Promise<VoiceGame[]> {
+    return this.service.db.transaction(async tx => {
+      const channel = await this.requireVoice(tx, uid, channelId);
+      const rows = await tx.all("SELECT state FROM chess_games WHERE status<>'finished' AND (channel_id=? OR (channel_id IS NULL AND server_id=? AND (white_id=? OR black_id=?))) ORDER BY updated_at DESC LIMIT 60", [channelId, channel.server_id, uid, uid]);
+      return rows.map(r => JSON.parse(r.state) as ChessGame).map(g => ({ id: g.id, channelId, hostName: g.whiteName, whiteId: g.whiteId, blackId: g.blackId, status: g.status, openSeat: Boolean(g.openSeat && !g.blackId && g.status === 'pending'), mode: g.position.mode, minutes: g.minutes, increment: g.increment, paused: Boolean(g.pausedUntil), legacy: !g.channelId }));
     });
   }
   async list(uid: string, serverId: string) {
@@ -80,6 +94,11 @@ export class ChessService {
   }
   async create(uid: string, b: Create) {
     const result = await this.service.mutate(uid, b.requestId, 'chess.create', b, async tx => {
+      if (b.channelId) {
+        const channel = await this.requireVoice(tx, uid, b.channelId);
+        if (channel.server_id !== b.serverId) fail(400, 'INVALID_REQUEST', 'The game must use your current voice channel.');
+        if (await tx.one("SELECT id FROM chess_games WHERE white_id=? AND channel_id IS NOT NULL AND status<>'finished'", [uid])) fail(409, 'CAPACITY', 'Open your existing game or close it before creating another.');
+      }
       const names = [];
       for (const userId of [uid, ...(b.opponentId ? [b.opponentId] : [])]) {
         const row = await tx.one('SELECT u.display_name FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND m.user_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)', [b.serverId, userId]);
@@ -91,21 +110,33 @@ export class ChessService {
       const pending = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='pending' AND (white_id=? OR black_id=?)", [uid, uid]);
       const total = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status<>'finished'");
       if (Number(active!.n) >= 1 || Number(pending!.n) >= 3 || Number(total!.n) >= 60) fail(409, 'CAPACITY', 'Finish your current game or pending challenges first.');
-      const now = this.now(), g: ChessGame = { id: randomUUID(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || `${b.difficulty} AI`, difficulty: b.difficulty || null, status: b.opponentId ? 'pending' : 'playing', position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 60000, b.minutes * 60000], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [30000, 30000], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
+      const now = this.now(), g: ChessGame = { channelId: b.channelId || null, openSeat: Boolean(b.openSeat), id: randomUUID(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || (b.openSeat ? 'Open seat' : `${b.difficulty} AI`), difficulty: b.difficulty || null, status: b.opponentId || b.openSeat ? 'pending' : 'playing', position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 60000, b.minutes * 60000], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [30000, 30000], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
       await tx.run("DELETE FROM chess_games WHERE id IN (SELECT id FROM chess_games WHERE status='finished' ORDER BY updated_at DESC LIMIT 10000 OFFSET 999)");
       await this.save(tx, g); return { id: g.id };
     });
-    await this.changed(result.id); return this.get(uid, result.id);
+    await this.changed(result.id);
+    if (b.channelId) await this.presence(uid, this.online(uid));
+    return this.get(uid, result.id);
   }
   async command(uid: string, id: string, b: Command) {
     const result = await this.service.mutate(uid, b.requestId, 'chess.command', { id, ...b }, async tx => {
       const g = await this.load(tx, id); await this.allowed(tx, uid, g);
-      if (uid !== g.whiteId && uid !== g.blackId) fail(403, 'FORBIDDEN', 'Spectators cannot change a match.');
+      const joining = b.kind === 'join' && g.openSeat && g.status === 'pending' && !g.blackId && uid !== g.whiteId;
+      if (b.kind === 'join' && !joining) fail(409, 'SEAT_TAKEN', 'The seat is no longer open. You can keep watching.');
+      if (!joining && uid !== g.whiteId && uid !== g.blackId) fail(403, 'FORBIDDEN', 'Spectators cannot change a match.');
       if (g.revision !== b.revision) fail(409, 'STALE_GAME', 'The board changed. Review the latest position.');
       const now = this.now(); this.expire(g, now);
       if (g.status === 'finished') fail(409, 'GAME_FINISHED', 'The match has ended.');
+      if (g.channelId && !['resign', 'cancel'].includes(b.kind)) await this.requireVoice(tx, uid, g.channelId);
       if (g.status === 'pending') {
-        if (b.kind === 'accept' && uid === g.blackId) {
+        if (joining) {
+          if (g.pausedUntil) fail(409, 'PAUSED', 'Waiting for the host to return to voice.');
+          await this.requireVoice(tx, g.whiteId, g.channelId!);
+          if (await tx.one('SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)', [uid, g.whiteId, g.whiteId, uid])) fail(403, 'FORBIDDEN', 'This challenge is unavailable.');
+          for (const player of [uid, g.whiteId]) if (await tx.one("SELECT id FROM chess_games WHERE id<>? AND (white_id=? OR black_id=?) AND (status='playing' OR (status='pending' AND channel_id IS NOT NULL))", [id, player, player])) fail(409, 'CAPACITY', 'A player already has an active match.');
+          const user = await tx.one('SELECT display_name FROM users WHERE id=?', [uid]);
+          g.blackId = uid; g.blackName = user!.display_name; g.openSeat = false; g.status = 'playing'; g.runningSince = now;
+        } else if (b.kind === 'accept' && uid === g.blackId) {
           if (!this.online(g.whiteId) || !this.online(g.blackId!)) fail(409, 'OFFLINE', 'Both players must be online to start.');
           for (const player of [g.whiteId, g.blackId]) if (await tx.one("SELECT id FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [player, player])) fail(409, 'CAPACITY', 'A player already has an active match.');
           g.status = 'playing'; g.runningSince = now;
@@ -126,7 +157,9 @@ export class ChessService {
       }
       g.revision++; await this.save(tx, g); return { id };
     });
-    await this.changed(result.id); return this.get(uid, result.id);
+    await this.changed(result.id);
+    if (b.kind === 'join') await this.reconcileVoice();
+    return this.get(uid, result.id);
   }
   private move(g: ChessGame, a: ChessAction) {
     const color = g.position.turn;
@@ -136,19 +169,21 @@ export class ChessService {
     const result = outcome(g.position); if (result) { g.status = 'finished'; g.result = result; }
   }
   private expire(g: ChessGame, now: number) {
-    if (g.status === 'pending' && now >= g.createdAt + 120000) { g.status = 'finished'; g.result = 'Challenge expired'; }
+    if (g.status === 'pending' && (now >= g.createdAt + (g.openSeat ? 600000 : 120000) || (g.pausedUntil && now >= g.pausedUntil))) { g.status = 'finished'; g.result = 'Challenge expired'; }
     if (g.status !== 'playing') return;
     if (g.pausedUntil && now >= g.pausedUntil) { g.status = 'finished'; g.result = g.missing.length > 1 ? 'Draw after both players disconnected' : winner(g.missing[0] === g.whiteId ? 1 : 0, 'disconnection'); }
     else chargeClock(g, now);
   }
   async presence(uid: string, online: boolean) {
-    const ids = [...this.active.values()].filter(g => g.status === 'playing' && (g.whiteId === uid || g.blackId === uid)).map(g => g.id);
+    const ids = [...this.active.values()].filter(g => (g.status === 'playing' || (g.status === 'pending' && g.channelId)) && (g.whiteId === uid || g.blackId === uid)).map(g => g.id);
     for (const id of ids) {
       const changed = await this.service.db.transaction(async tx => {
-        const g = await this.load(tx, id), now = this.now(); if (g.status !== 'playing') return false;
+        const row = await tx.one('SELECT state FROM chess_games WHERE id=?', [id]); if (!row) { this.active.delete(id); return false; }
+        const g = JSON.parse(row.state) as ChessGame, now = this.now(); if (g.status === 'finished') return false;
+        const present = online && (!g.channelId || Boolean(await tx.one('SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?', [uid, g.channelId])));
         this.expire(g, now); const color = uid === g.whiteId ? 0 : 1;
-        if (online && g.missing.includes(uid)) { g.grace[color] = Math.max(0, g.grace[color] - (now - g.missingAt[uid])); g.missing = g.missing.filter(v => v !== uid); delete g.missingAt[uid]; }
-        else if (!online && !g.missing.includes(uid)) { g.missing.push(uid); g.missingAt[uid] = now; }
+        if (present && g.missing.includes(uid)) { g.grace[color] = Math.max(0, g.grace[color] - (now - g.missingAt[uid])); g.missing = g.missing.filter(v => v !== uid); delete g.missingAt[uid]; }
+        else if (!present && !g.missing.includes(uid)) { g.missing.push(uid); g.missingAt[uid] = now; }
         else return false;
         g.pausedUntil = g.missing.length ? Math.min(...g.missing.map(v => g.missingAt[v] + g.grace[v === g.whiteId ? 0 : 1])) : 0;
         if (!g.pausedUntil) g.runningSince = now;
@@ -157,18 +192,29 @@ export class ChessService {
       if (changed) await this.changed(id);
     }
   }
+  async reconcileVoice() {
+    const games = [...this.active.values()].filter(g => g.channelId);
+    if (!games.length) return;
+    const voice = new Map((await this.service.db.all('SELECT user_id,channel_id FROM voice_members')).map(r => [r.user_id, r.channel_id]));
+    for (const g of games) for (const uid of [g.whiteId, ...(g.blackId ? [g.blackId] : [])]) {
+      const present = voice.get(uid) === g.channelId && this.online(uid);
+      if (present === g.missing.includes(uid)) await this.presence(uid, present);
+    }
+  }
   private async changed(id: string) {
     if (this.closed) return;
     const row = await this.service.db.one('SELECT state FROM chess_games WHERE id=?', [id]);
     if (!row) { this.active.delete(id); this.schedule(); return; }
     const g = JSON.parse(row.state) as ChessGame;
+    const previous = this.active.get(id);
+    const directoryChanged = !previous || previous.status !== g.status || previous.blackId !== g.blackId || Boolean(previous.pausedUntil) !== Boolean(g.pausedUntil);
     if (g.status === 'finished') this.active.delete(id); else this.active.set(id, g);
-    await this.notify(g).catch(this.onError); this.schedule();
-    if (g.status === 'playing' && !g.pausedUntil && !g.blackId && g.position.turn === 1) setImmediate(() => { if (!this.closed) void this.bot(id, g.revision).catch(this.onError); });
+    await this.notify(g, directoryChanged).catch(this.onError); this.schedule();
+    if (g.status === 'playing' && !g.pausedUntil && g.difficulty && !g.blackId && g.position.turn === 1) setImmediate(() => { if (!this.closed) void this.bot(id, g.revision).catch(this.onError); });
   }
   private async bot(id: string, revision: number) {
     await this.service.db.transaction(async tx => {
-      const g = await this.load(tx, id); if (g.revision !== revision || g.status !== 'playing' || g.pausedUntil || g.blackId || g.position.turn !== 1) return;
+      const g = await this.load(tx, id); if (g.revision !== revision || g.status !== 'playing' || g.pausedUntil || !g.difficulty || g.blackId || g.position.turn !== 1) return;
       const now = this.now(); this.expire(g, now);
       if (g.status === 'playing') { const a = chooseAi(g.position, g.difficulty!); if (a) { chargeClock(g, this.now()); if (g.status === 'playing') this.move(g, a); } }
       g.revision++; await this.save(tx, g);
@@ -176,7 +222,7 @@ export class ChessService {
   }
   private schedule() {
     clearTimeout(this.timer); if (this.closed || !this.active.size) return;
-    const deadline = Math.min(...[...this.active.values()].map(g => g.status === 'pending' ? g.createdAt + 120000 : g.pausedUntil || g.runningSince + g.remaining[g.position.turn]));
+    const deadline = Math.min(...[...this.active.values()].map(g => g.status === 'pending' ? Math.min(g.createdAt + (g.openSeat ? 600000 : 120000), g.pausedUntil || Infinity) : g.pausedUntil || g.runningSince + g.remaining[g.position.turn]));
     this.timer = setTimeout(() => { void this.tick().catch(e => { this.onError(e); if (!this.closed) { this.timer = setTimeout(() => { this.schedule(); }, 1000); this.timer.unref(); } }); }, Math.max(1, Math.ceil(deadline - this.now()))); this.timer.unref();
   }
   async tick() {
