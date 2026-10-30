@@ -1,6 +1,6 @@
-Current release: **0.5.3**, deployed through the authorized Iranian pilot workflow. **Account settings → Audio → My microphone gain** adjusts outgoing voice from 50% to 250%, defaults to 100%, saves on this device, and survives rejoin/reload. Lint, types, 89 unit/API tests, production builds, seven core browser scenarios, direct/SFU decoded-gain tests, SFU talk/processing checks and installed Windows/background-hotkey checks pass. Public Chrome/Windows tests verify outgoing gain in both directions, voice/screens, invite controls and playback gain. Data/schema/configuration preservation and independent backup checks pass. See [release verification](RELEASE-0.5.3.md). The failed ten-user media hold remains unresolved; see [capacity limitations](CAPACITY-RETEST-2026-10-30.md).
+Current release: **0.5.4**, deployed through the authorized Iranian pilot workflow. Personal mute/unmute sounds work with the microphone button and talk hotkeys, remain local, respect the voice-sound setting, and avoid duplicates on unchanged state. Lint, types, 89 unit/API tests, production builds, seven core browser scenarios and the dedicated local-audio cue test pass. The installed Windows/background-hotkey test verifies cues while hidden. Public Chrome/Windows cue/media checks and deployment data/configuration preservation also pass. See [release verification](RELEASE-0.5.4.md). Existing capacity limitations remain open.
 
-Previous release: **0.5.2** — [member invitations and browser voice volume](RELEASE-0.5.2.md).
+Previous release: **0.5.3** — [outgoing microphone gain](RELEASE-0.5.3.md).
 
 Previous release: **0.5.0** — [release verification](RELEASE-0.5.0.md) and [features](GAMING-0.5.0.md). Paragraphs below retain historical checkpoints.
 

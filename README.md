@@ -1,6 +1,6 @@
-**Current release: 0.5.3** — adjust your outgoing microphone gain from 50% to 250% in **Account settings → Audio**. The setting applies live and survives rejoin/reload. Chrome, SFU relay and installed Windows checks verify the audio received by another user; all 89 unit/API tests and seven core browser scenarios pass. The website and Windows installer are updated. See [release verification and limitations](docs/RELEASE-0.5.3.md). The earlier failed ten-user media capacity gate remains unresolved.
+**Current release: 0.5.4** — personal microphone feedback: a descending mute tone and a rising unmute tone, including talk hotkeys. The sounds play locally and follow the voice-sound setting. Lint, types, 89 unit/API tests, production builds, seven browser regression scenarios and the dedicated local-audio cue test pass. See [release verification](docs/RELEASE-0.5.4.md).
 
-Previous release: **0.5.2** — [member invitations and browser voice volume](docs/RELEASE-0.5.2.md).
+Previous release: **0.5.3** — [outgoing microphone gain from 50% to 250%](docs/RELEASE-0.5.3.md).
 
 Earlier release: **0.5.0** — [gaming voice/viewer and reliability](docs/RELEASE-0.5.0.md).
 
