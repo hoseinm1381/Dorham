@@ -1573,8 +1573,7 @@ var GameService = class {
     return channel;
   }
   async allowed(tx, uid, g) {
-    const m = await tx.one("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.user_id=? AND m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [uid, g.serverId]);
-    if (!m) fail(403, "FORBIDDEN", "Join the game server to play or watch.");
+    await this.service.member(tx, uid, g.serverId);
     if (!g.seats.some((s) => s.id === uid && !s.left)) await this.requireVoice(tx, uid, g.channelId);
   }
   async load(tx, id2) {
@@ -1917,10 +1916,9 @@ var ChessService = class {
     clearTimeout(this.timer);
   }
   async allowed(tx, uid, g) {
-    const member = await tx.one("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.user_id=? AND m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [uid, g.serverId]);
-    if (!member) fail(403, "FORBIDDEN", "Join the match server to play or watch.");
+    await this.service.member(tx, uid, g.serverId);
     const ids = [g.whiteId, ...g.blackId ? [g.blackId] : []];
-    for (const id2 of ids) if (!await tx.one("SELECT user_id FROM members WHERE server_id=? AND user_id=?", [g.serverId, id2])) fail(403, "FORBIDDEN", "A player has left the match server.");
+    for (const id2 of ids) await this.service.member(tx, id2, g.serverId);
     if (g.channelId && uid !== g.whiteId && uid !== g.blackId) await this.requireVoice(tx, uid, g.channelId);
   }
   async requireVoice(tx, uid, channelId) {
@@ -1957,7 +1955,7 @@ var ChessService = class {
     });
   }
   async list(uid, serverId) {
-    if (!await this.service.db.one("SELECT user_id FROM members WHERE server_id=? AND user_id=?", [serverId, uid])) fail(403, "FORBIDDEN", "Server membership required.");
+    await this.service.member(this.service.db, uid, serverId);
     const rows = await this.service.db.all("SELECT state FROM chess_games WHERE server_id=? ORDER BY updated_at DESC LIMIT 30", [serverId]);
     return rows.map((r) => JSON.parse(r.state)).map(({ id: id2, whiteId, blackId, whiteName, blackName, status, position, minutes, increment, result }) => ({ id: id2, whiteId, blackId, whiteName, blackName, status, mode: position.mode, minutes, increment, result }));
   }
@@ -1971,8 +1969,8 @@ var ChessService = class {
       }
       const names = [];
       for (const userId of [uid, ...b.opponentId ? [b.opponentId] : []]) {
-        const row = await tx.one("SELECT u.display_name FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND m.user_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [b.serverId, userId]);
-        if (!row) fail(403, "FORBIDDEN", "Both players must belong to this server.");
+        await this.service.member(tx, userId, b.serverId);
+        const row = await tx.one("SELECT display_name FROM users WHERE id=?", [userId]);
         names.push(row.display_name);
       }
       if (b.opponentId === uid) fail(400, "INVALID_REQUEST", "Choose another player.");
@@ -2600,7 +2598,7 @@ async function createApp(c = config(), options = {}) {
   };
   chess.online = (uid) => [...io.sockets.sockets.values()].some((s) => s.data.userId === uid);
   chess.notify = async (g, directoryChanged) => {
-    const members = new Set((await db.all("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [g.serverId])).map((r) => r.user_id));
+    const members = new Set((await db.all("SELECT u.id AS user_id FROM users u JOIN servers s ON s.id=? LEFT JOIN members m ON m.server_id=s.id AND m.user_id=u.id WHERE u.banned=0 AND (u.instance_admin=1 OR (m.user_id IS NOT NULL AND (u.guest=0 OR s.allow_guests=1)))", [g.serverId])).map((r) => r.user_id));
     if (!members.has(g.whiteId) || g.blackId && !members.has(g.blackId)) return;
     const voice = g.channelId ? new Set((await db.all("SELECT user_id FROM voice_members WHERE channel_id=?", [g.channelId])).map((r) => r.user_id)) : null;
     for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId) && (!voice || voice.has(s.data.userId) || s.data.userId === g.whiteId || s.data.userId === g.blackId)) s.emit("chess:changed", { id: g.id, serverId: g.serverId, channelId: g.channelId || null, directoryChanged, challengeTo: g.status === "pending" ? g.blackId : null });

@@ -1,5 +1,7 @@
 # Dorham 0.7.0 - seven new voice-channel games
 
+Server-only hotfix on 2026-10-30: instance administrators without an explicit server-membership row can now watch, join and host games using their existing server access. See [cause, fix and targeted verification](GAME-ADMIN-ACCESS-FIX.md). The original release evidence below remains the baseline; hotfix evidence and packages are separate.
+
 Adds play-chip Texas Hold'em, Draw/Block Dominoes, Drawing Telephone, Draw & Guess, Team Word Clues, Ludo and Four in a Row alongside Chess. Every game card identifies its supported player range; active lobbies identify occupied/available seats. Games use the existing voice-channel Watch/Play flow, with explicit host start, private player/spectator views and reconnect/host-departure handling. See [rules and limits](GAMES-0.7.0.md).
 
 The screens load on demand. Drawing uses bounded canvas deltas and snapshot recovery. No new dependency, game engine, external hosting or paid API is required. The seven new rules/UI implementations are native to Dorham; no third-party game code or assets were imported. Expert Chess AI remains disabled. Schema 8 is additive and retains existing Chess and application data.
