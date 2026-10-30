@@ -1,4 +1,6 @@
-Current release: **0.5.0**, deployed on the operator’s explicit instruction after the failed capacity retest. See [release verification](RELEASE-0.5.0.md), [features](GAMING-0.5.0.md) and [capacity limitations](CAPACITY-RETEST-2026-10-30.md). The stress tests are not reclassified as passes.
+Current release: **0.5.1**, deployed on the operator’s explicit instruction. Server control-plane SQL work is reduced; PTT recovers after microphone clicks and toggle-to-talk survives switching tabs/apps. Lint, types, 84 unit/API tests, production builds, core browser and installed Windows/background-hotkey checks pass. See [release verification](RELEASE-0.5.1.md) and [measurements](PERFORMANCE-0.5.1.md). The failed ten-user media hold remains failed; see [capacity limitations](CAPACITY-RETEST-2026-10-30.md).
+
+Previous release: **0.5.0** — [release verification](RELEASE-0.5.0.md) and [features](GAMING-0.5.0.md). Paragraphs below retain historical checkpoints.
 
 Previous update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
 

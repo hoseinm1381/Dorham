@@ -41,7 +41,7 @@ test('cookie renewal retries an overlapping member request without logging the u
   await expect(page.getByRole('heading', { name: 'Welcome back.', exact: true })).toBeVisible();
 });
 
-test('push-to-talk and toggle bindings gate the actual microphone, persist, and release on focus loss', async ({ browser }) => {
+test('talk bindings preserve toggle across tab switches, recover PTT after mic clicks, and release held keys', async ({ browser }) => {
   const context = await browser.newContext({permissions:['microphone']}), page = await context.newPage();
   try {
     await instrument(page); await register(page, `Hotkey${Date.now().toString().slice(-7)}`); await api(page,'/servers',{name:'Hotkey lab'});
@@ -50,11 +50,20 @@ test('push-to-talk and toggle bindings gate the actual microphone, persist, and 
     await page.getByRole('button',{name:'Lounge',exact:true}).click(); await expect(page.locator('.voice-stage')).toBeVisible();
     const mic = () => page.evaluate(() => (window as any).__microphones.flatMap((s:MediaStream)=>s.getAudioTracks()).filter((t:MediaStreamTrack)=>t.readyState==='live').map((t:MediaStreamTrack)=>t.enabled));
     await expect.poll(mic).toEqual([false]); await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.up('F9'); await expect.poll(mic).toEqual([false]);
-    await page.getByRole('button',{name:'Lock microphone',exact:true}).click(); await page.keyboard.down('F9'); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9'); await page.getByRole('button',{name:'Unlock push to talk',exact:true}).click();
+    await page.getByRole('button',{name:'Push to talk ready',exact:true}).click(); await expect.poll(mic).toEqual([false]);
+    await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]);
+    await page.getByRole('button',{name:'Mute microphone',exact:true}).click(); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9');
+    await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.up('F9'); await expect.poll(mic).toEqual([false]);
     await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.evaluate(()=>window.dispatchEvent(new Event('blur'))); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9');
     await page.getByRole('button',{name:'Account settings',exact:true}).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.getByLabel('Voice input mode',{exact:true}).selectOption('toggle'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
     await page.keyboard.press('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.press('F9'); await expect.poll(mic).toEqual([false]);
-    await page.getByRole('textbox',{name:'Message',exact:true}).focus(); await page.keyboard.press('F9'); await expect.poll(mic).toEqual([false]);
+    await page.getByRole('textbox',{name:'Message',exact:true}).focus(); await page.keyboard.press('F9'); await expect.poll(mic).toEqual([true]);
+    const other = await context.newPage(); await other.goto('/'); await other.bringToFront(); await page.evaluate(() => window.dispatchEvent(new Event('blur'))); await expect.poll(mic).toEqual([true]); await other.close(); await page.bringToFront();
+    await page.keyboard.press('F9'); await expect.poll(mic).toEqual([false]);
+    // Plain letters remain text when composing, unlike safe function-key bindings.
+    await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('dorham-voice-input')!); localStorage.setItem('dorham-voice-input', JSON.stringify({ ...p, binding: { code: 'KeyV', ctrl: false, alt: false, shift: false } })); window.dispatchEvent(new Event('dorham-voice-input-changed')); });
+    await page.getByRole('textbox',{name:'Message',exact:true}).focus(); await page.keyboard.press('v'); await expect.poll(mic).toEqual([false]); await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('v');
+    await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('dorham-voice-input')!); localStorage.setItem('dorham-voice-input', JSON.stringify({ ...p, binding: { code: 'F9', ctrl: false, alt: false, shift: false } })); window.dispatchEvent(new Event('dorham-voice-input-changed')); });
     await page.reload(); await page.getByRole('button',{name:'Account settings',exact:true}).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await expect(page.getByLabel('Voice input mode',{exact:true})).toHaveValue('toggle'); await expect(page.getByRole('button',{name:'Record talk hotkey',exact:true})).toHaveText('F9');
   } finally { await context.close(); }
 });

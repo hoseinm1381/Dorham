@@ -181,7 +181,18 @@ export class MeshTransport implements MediaTransport {
   }
   private attachMicMeter() { this.micSource?.disconnect(); if (!this.context || !this.mic) return; this.micSource = this.context.createMediaStreamSource(this.mic); this.micAnalyser = this.context.createAnalyser(); this.micAnalyser.fftSize = 512; this.micSource.connect(this.micAnalyser); this.micMeter = new AudioActivityMeter(this.micAnalyser); }
   private removePeer(userId: string) { const p = this.peers.get(userId); if (p) { clearTimeout(p.connectionTimer); p.pc.onconnectionstatechange = null; p.pc.onicecandidateerror = null; p.pc.onnegotiationneeded = null; p.pc.onicecandidate = null; p.pc.close(); p.audio?.source.disconnect(); p.audio?.gain.disconnect(); p.audio?.meterSource.disconnect(); p.audio?.analyser.disconnect(); this.options.emit('speaking', { userId, speaking: false }); if (p.audio) { p.audio.element.pause(); p.audio.element.srcObject = null; p.audio.element.remove(); } for (const s of p.streams) if (s.leaseId) this.options.emit('screenRemoved', s.leaseId); this.peers.delete(userId); } }
-  private async publishState() { if (this.room) await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); }
+  private publishedState = ''; private stateTask: Promise<void> | null = null;
+  private publishState(): Promise<void> {
+    if (!this.room) { this.publishedState = ''; return Promise.resolve(); }
+    if (!this.stateTask) this.stateTask = Promise.resolve().then(async () => {
+      while (this.room) {
+        const key = JSON.stringify([this.room.channelId, this.epoch, this.generation, this.muted, this.deafened]);
+        if (key === this.publishedState) break;
+        await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); this.publishedState = key;
+      }
+    }).finally(() => { this.stateTask = null; });
+    return this.stateTask;
+  }
   async setMuted(value: boolean) { this.muted = value; for (const t of this.mic?.getAudioTracks() || []) t.enabled = !value && !this.deafened && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverMuted && !this.room?.members.find(m => m.user.id === this.options.userId)?.serverDeafened; await this.publishState(); }
   async setDeafened(value: boolean) { this.deafened = value; for (const userId of this.peers.keys()) this.applyVolume(userId); await this.setMuted(this.muted); }
   setVolume(userId: string, value: number) { this.volumes.set(userId, Math.max(0, Math.min(2, value))); this.applyVolume(userId); }

@@ -35,6 +35,20 @@ it('a cancelled pending join cannot resurrect a voice room or start its heartbea
   const f = fixture(); const joining = f.transport.join('room'); const rejected = expect(joining).rejects.toThrow('cancelled');
   await f.transport.leave(); f.release(); await rejected; expect(f.transport.room).toBeNull(); expect(f.events).not.toContain('voice:sfu'); await f.transport.destroy();
 });
+it('coalesces overlapping microphone state acknowledgements without losing the final mute', async () => {
+  const f = fixture();
+  try {
+    const joining = f.transport.join('room'); f.release(); await joining;
+    const writes: { muted: boolean; reply: () => void }[] = [];
+    (f.socket as any).timeout = () => ({ emit: (name: string, body: any, reply: any) => {
+      if (name === 'voice:state') writes.push({ muted: body.muted, reply: () => reply(null, { ok: true, data: {} }) });
+      else reply(null, { ok: true, data: {} });
+    } });
+    const muted = f.transport.setMuted(true); await vi.waitFor(() => expect(writes).toHaveLength(1));
+    const open = f.transport.setMuted(false), final = f.transport.setMuted(true);
+    writes[0].reply(); await Promise.all([muted, open, final]); expect(writes.map(w => w.muted)).toEqual([true]);
+  } finally { await f.transport.destroy(); }
+});
 
 it('SFU deafen silences every audio source before waiting for control-plane acknowledgement', async () => {
   const f = fixture();

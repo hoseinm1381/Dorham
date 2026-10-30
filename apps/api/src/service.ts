@@ -79,8 +79,29 @@ export class Service {
     }
     return cv!;
   }
+  async conversationAudience(viewers: { socketId: string; userId: string }[], conversationId: string, writerId?: string) {
+    // Authorization is shared only inside this fresh serialized snapshot. Never
+    // cache audiences across commits: role changes/blocking must apply immediately.
+    return this.db.transaction(async connection => {
+      const tx = readSnapshot(connection), allowed = new Map<string, boolean>();
+      if (writerId) await this.conversation(tx, writerId, conversationId, true);
+      const audience: string[] = [];
+      for (const viewer of viewers) {
+        if (!allowed.has(viewer.userId)) {
+          try {
+            const user = await tx.one('SELECT * FROM users WHERE id=? AND banned=0', [viewer.userId]);
+            if (!user || user.must_change_password) fail(403, 'FORBIDDEN', 'Account access is unavailable.');
+            await this.conversation(tx, viewer.userId, conversationId); allowed.set(viewer.userId, true);
+          } catch { allowed.set(viewer.userId, false); }
+        }
+        if (allowed.get(viewer.userId)) audience.push(viewer.socketId);
+      }
+      return audience;
+    });
+  }
   async bootstrap(userId: string) {
-    return this.db.transaction(async tx => {
+    return this.db.transaction(async connection => {
+      const tx = readSnapshot(connection);
       const me = await tx.one('SELECT * FROM users WHERE id=?', [userId]);
       const servers = (await tx.all('SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at', [userId, me!.instance_admin])).map(s => ({ id: s.id, name: s.name, ownerId: s.owner_id, role: me!.instance_admin ? 'owner' : s.role, allowGuests: Boolean(s.allow_guests) }));
       for (const server of servers) Object.assign(server, { permissions: await this.memberPermissions(tx, server.role as Role, userId, server.id) });
@@ -382,21 +403,24 @@ export class Service {
       await tx.run('INSERT INTO read_cursors(conversation_id,user_id,sequence) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET sequence=excluded.sequence', [conversationId, userId, Math.max(Number(old?.sequence || 0), Math.min(sequence, Number(cv.sequence)))]); return { success: true };
     });
   }
-  async maintainRoom(tx: Connection, channelId: string) {
-    const now = Date.now();
-    await tx.run('DELETE FROM share_leases WHERE expires_at<?', [now]);
+  private async expireVoice(tx: Connection, now: number) {
     await tx.run('DELETE FROM voice_members WHERE heartbeat<?', [now - 30000]);
     await reconcileShares(tx, this.c);
+  }
+  async maintainRoom(tx: Connection, channelId: string, sweep = true) {
+    const now = Date.now();
+    if (sweep) await this.expireVoice(tx, now);
     const current = await tx.one('SELECT * FROM coordinators WHERE channel_id=?', [channelId]);
-    const candidate = await tx.one('SELECT user_id,heartbeat FROM voice_members WHERE channel_id=? AND eligible=1 AND heartbeat>=? ORDER BY joined_at,user_id LIMIT 1', [channelId, now - 15000]);
     const valid = current?.user_id && await tx.one('SELECT user_id,heartbeat FROM voice_members WHERE channel_id=? AND user_id=? AND eligible=1 AND heartbeat>=?', [channelId, current.user_id, now - 15000]);
-    const chosen = valid || candidate;
+    const chosen = valid || await tx.one('SELECT user_id,heartbeat FROM voice_members WHERE channel_id=? AND eligible=1 AND heartbeat>=? ORDER BY joined_at,user_id LIMIT 1', [channelId, now - 15000]);
+    if (!current && !chosen) return;
     const changed = (current?.user_id || null) !== (chosen?.user_id || null) || (current && current.expires_at < now && chosen);
     const epoch = Number(current?.epoch || 0) + (changed || !current ? 1 : 0);
+    if (current && current.user_id === (chosen?.user_id || null) && Number(current.epoch) === epoch && Number(current.expires_at) === (chosen ? Number(chosen.heartbeat) + 15000 : 0)) return;
     await tx.run('INSERT INTO coordinators(channel_id,user_id,epoch,expires_at) VALUES(?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET user_id=excluded.user_id,epoch=excluded.epoch,expires_at=excluded.expires_at', [channelId, chosen?.user_id || null, epoch, chosen ? Number(chosen.heartbeat) + 15000 : 0]);
   }
-  async voiceDirectory(userId: string, tx: Connection = this.db): Promise<VoicePresence[]> {
-    const rooms: VoicePresence[] = [], now = Date.now();
+  async voiceDirectory(userId: string, tx: Connection = this.db, now = Date.now()): Promise<VoicePresence[]> {
+    const rooms: VoicePresence[] = [];
     for (const ch of await tx.all('SELECT DISTINCT channel_id FROM voice_members WHERE heartbeat>=?', [now - 30000])) {
       try { await this.channel(tx, userId, ch.channel_id); } catch { continue; }
       const members = (await tx.all('SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? AND v.heartbeat>=? ORDER BY v.joined_at', [ch.channel_id, now - 30000])).map(vm => ({ user: publicUser({ ...vm, id: vm.user_id }), muted: Boolean(vm.muted), deafened: Boolean(vm.deafened), serverMuted: Boolean(vm.server_muted) }));
@@ -411,10 +435,10 @@ export class Service {
   async voiceSnapshot(viewers: { socketId: string; userId: string; channelId?: string | null }[]) {
     return this.db.transaction(async connection => {
       await reconcileShares(connection, this.c);
-      const tx = readSnapshot(connection), rooms = new Map<string, VoiceRoom>();
+      const tx = readSnapshot(connection), rooms = new Map<string, VoiceRoom>(), now = Date.now();
       const result = [];
       for (const viewer of viewers) {
-        const directory = await this.voiceDirectory(viewer.userId, tx);
+        const directory = await this.voiceDirectory(viewer.userId, tx, now);
         let room: VoiceRoom | null | undefined;
         if (viewer.channelId) {
           const vm = await tx.one('SELECT channel_id FROM voice_members WHERE user_id=? AND socket_id=?', [viewer.userId, viewer.socketId]);
@@ -471,21 +495,29 @@ export class Service {
     } return servers;
   }
   async voiceAction(userId: string, socketId: string, action: 'heartbeat' | 'leave' | 'state', body: { muted?: boolean; deafened?: boolean; eligible?: boolean } = {}) {
+    let changed = action === 'leave', removed = false;
     const result = await this.db.transaction(async tx => {
       const vm = await tx.one('SELECT * FROM voice_members WHERE user_id=? AND socket_id=?', [userId, socketId]);
       if (!vm) fail(409, 'NOT_IN_VOICE', 'Voice session is no longer active.');
       if (action === 'leave') await tx.run('DELETE FROM voice_members WHERE user_id=?', [userId]);
       else {
-        try { await this.channel(tx, userId, vm!.channel_id); } catch { await tx.run('DELETE FROM voice_members WHERE user_id=?', [userId]); return { removed: true }; }
+        try { await this.channel(tx, userId, vm!.channel_id); } catch { await tx.run('DELETE FROM voice_members WHERE user_id=?', [userId]); removed = true; return { removed: true }; }
+        changed = (body.muted !== undefined && Number(body.muted) !== vm!.muted) || (body.deafened !== undefined && Number(body.deafened) !== vm!.deafened) || (body.eligible !== undefined && Number(body.eligible) !== vm!.eligible);
         await tx.run('UPDATE voice_members SET heartbeat=?,muted=?,deafened=?,eligible=? WHERE user_id=?', [Date.now(), body.muted === undefined ? vm!.muted : Number(body.muted), body.deafened === undefined ? vm!.deafened : Number(body.deafened), body.eligible === undefined ? vm!.eligible : Number(body.eligible), userId]);
         await tx.run('UPDATE share_leases SET expires_at=? WHERE user_id=? AND expires_at>=?', [Date.now() + 30000, userId, Date.now()]);
       }
-      await this.maintainRoom(tx, vm!.channel_id);
-      // SFU heartbeats keep leases alive; topology is published on changes.
+      // Liveness refreshes only this membership/lease. The existing five-second
+      // maintenance and topology mutations perform the global expiry sweep.
+      await this.maintainRoom(tx, vm!.channel_id, this.c.mediaTransport !== 'livekit' || action === 'leave');
+      // SFU acknowledgements carry liveness only; the authorized room is pushed
+      // once on a real change instead of rebuilding it again for every PTT ack.
       // Mesh still receives snapshots for its epoch/negotiation recovery path.
-      if (action === 'heartbeat' && this.c.mediaTransport === 'livekit') return { alive: true };
+      if (action !== 'leave' && this.c.mediaTransport === 'livekit') return { alive: true };
       return { room: await this.roomView(tx, vm!.channel_id) };
-    }); if (action !== 'heartbeat') await this.notify('voice:changed', {}); return result;
+    });
+    if (removed || action === 'leave') await this.notify('voice:changed', {});
+    else if (action === 'state' && changed) await this.notify('voice:state:changed', {});
+    return result;
   }
   async share(userId: string, socketId: string, requestId: string, stop = false, includeAudio = false) {
     const result = await this.mutate(userId, requestId, stop ? 'share.stop' : 'share.start', { includeAudio: stop ? false : includeAudio }, async tx => {
@@ -615,7 +647,9 @@ export class Service {
       await tx.run('DELETE FROM mutations WHERE created_at<?', [now - 86400000]);
       await tx.run('DELETE FROM events WHERE id IN (SELECT id FROM events WHERE created_at<? ORDER BY created_at LIMIT 1000)', [now - 7 * 86400000]);
       await tx.run('DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE created_at<? ORDER BY created_at LIMIT 500)', [now - this.c.retentionDays * 86400000]);
-      for (const ch of await tx.all("SELECT id FROM channels WHERE kind='voice'")) await this.maintainRoom(tx, ch.id);
+      await this.expireVoice(tx, now);
+      // Empty channels need no work; retain coordinator rows/epochs for fencing.
+      for (const ch of await tx.all('SELECT channel_id AS id FROM voice_members UNION SELECT channel_id AS id FROM coordinators WHERE user_id IS NOT NULL')) await this.maintainRoom(tx, ch.id, false);
     });
   }
 }

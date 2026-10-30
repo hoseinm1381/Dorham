@@ -5,7 +5,7 @@ import { SingleFlight } from '../apps/api/src/single-flight';
 import { readSnapshot } from '../apps/api/src/read-snapshot';
 import { Sfu } from '../apps/api/src/sfu';
 import { harness, event } from './helpers';
-import { VoiceInputState, matchesBinding, validBinding } from '../packages/contracts/src/voice-hotkeys';
+import { VoiceInputState, matchesBinding, validBinding, allowedWhileTyping } from '../packages/contracts/src/voice-hotkeys';
 import { waitForCondition } from '../packages/media/src/wait-condition';
 
 it('coalesces concurrent work but reruns a mutation arriving during an active pass', async () => {
@@ -56,6 +56,19 @@ it('push-to-talk and toggle modes fail closed and ignore key-repeat transitions'
   s.configure('toggle'); s.down(); expect(s.muted).toBe(false); s.down(); expect(s.muted).toBe(false); s.up(); expect(s.muted).toBe(false); s.down(); expect(s.muted).toBe(true); s.up(); s.down(); s.release(); expect(s.muted).toBe(true);
   const binding = {code:'KeyV',ctrl:true,shift:true,alt:false}; expect(validBinding(binding)).toBe(true); expect(validBinding({...binding,code:'__proto__'})).toBe(false); expect(validBinding({...binding,code:'F4',alt:true})).toBe(false);
   expect(matchesBinding(binding,{code:'KeyV',ctrlKey:true,shiftKey:true,altKey:false,metaKey:false})).toBe(true); expect(matchesBinding(binding,{code:'KeyV',ctrlKey:true,shiftKey:false,altKey:false,metaKey:false})).toBe(false);
+});
+it('keeps toggle-to-talk latched across focus changes but releases PTT and safety events', () => {
+  const s = new VoiceInputState(); s.configure('toggle'); s.down(); s.up(); s.blur(); expect(s.muted).toBe(false);
+  s.down(); s.up(); expect(s.muted).toBe(true); s.down(); s.up(); s.release(); expect(s.muted).toBe(true);
+  s.configure('push'); s.down(); s.blur(); expect(s.muted).toBe(true); s.down(); expect(s.muted).toBe(false);
+});
+it('never traps PTT in manual mute, never opens it from an idle mic click, and clears old mode locks', () => {
+  const s = new VoiceInputState(); s.configure('push'); s.manual(); expect(s.muted).toBe(true); expect(s.locked).toBe(false);
+  s.down(); expect(s.muted).toBe(false); s.manual(); expect(s.muted).toBe(true); expect(s.locked).toBe(true);
+  s.up(); s.down(); expect(s.muted).toBe(false); s.up(); expect(s.muted).toBe(true);
+  s.configure('open'); s.manual(); expect(s.muted).toBe(true); s.configure('push'); s.down(); expect(s.muted).toBe(false);
+  expect(allowedWhileTyping({ code: 'F9', ctrl: false, alt: false, shift: false })).toBe(true);
+  expect(allowedWhileTyping({ code: 'KeyV', ctrl: false, alt: false, shift: false })).toBe(false);
 });
 it('waits for asynchronous SFU publishing permission and cleans up on success, timeout and cancellation', async () => {
   let ready = false, check = () => {}; const unsubscribe = vi.fn(), subscribe = (listener: () => void) => { check = listener; return unsubscribe; };

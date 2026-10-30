@@ -90,7 +90,18 @@ export class LiveKitTransport implements MediaTransport {
     const userId = participant.identity.split(':')[0], share = this.room?.shares.find(s => s.userId === userId);
     if (share && this.watchedShares.has(share.id) && !this.deliveredScreens.has(share.id) && !this.hiddenScreens.has(share.id)) { this.deliveredScreens.add(share.id); this.options.emit('screen', { userId, leaseId: share.id, stream: new MediaStream([track.mediaStreamTrack]), attach: element => { track.attach(element); return () => { track.detach(element); }; } }); }
   }
-  private async state() { await this.applyMicrophone(); await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); }
+  private publishedState = ''; private stateTask: Promise<void> | null = null;
+  private async state() {
+    await this.applyMicrophone();
+    if (!this.stateTask) this.stateTask = Promise.resolve().then(async () => {
+      while (this.channelId && this.media.state === 'connected') {
+        const key = JSON.stringify([this.channelId, this.generation, this.muted, this.deafened]);
+        if (key === this.publishedState) break;
+        await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); this.publishedState = key;
+      }
+    }).finally(() => { this.stateTask = null; });
+    await this.stateTask;
+  }
   async setMuted(value: boolean) { if (this.muted === value) return; this.muted = value; if (this.channelId && this.media.state === 'connected') await this.state(); }
   private applyVolumes() {
     const silent = this.deafened || this.room?.members.find(m => m.user.id === this.options.userId)?.serverDeafened;

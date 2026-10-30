@@ -653,5 +653,10 @@
   "This capture source did not provide sound. Video sharing continues.": "این منبع صدایی ارائه نکرد. اشتراک تصویر ادامه دارد.",
   "Replying to {name}": "در پاسخ به {name}",
   "Mute stream sound": "قطع صدای پخش",
-  "Unmute stream sound": "وصل صدای پخش"
+  "Unmute stream sound": "وصل صدای پخش",
+  "Enable push to talk": "فعال کردن صحبت با نگه‌داشتن کلید",
+  "Push to talk ready": "آمادهٔ صحبت با نگه‌داشتن کلید",
+  "Hold {key} to talk. Pressing the talk key also clears manual mute.": "برای صحبت، {key} را نگه دارید. فشردن کلید صحبت، قطع صدای دستی را هم برمی‌دارد.",
+  "Push-to-talk releases when this page loses focus. Toggle-to-talk stays on until toggled off or you leave the call. Function keys work while typing; letter keys do not. Website hotkeys cannot be pressed from other apps.": "با خروج از صفحه، صحبت با نگه‌داشتن کلید متوقف می‌شود. حالت روشن/خاموش با کلید، تا خاموش کردن یا خروج از تماس فعال می‌ماند. کلیدهای F هنگام تایپ هم کار می‌کنند، اما کلیدهای حروف نه. در نسخهٔ وب، کلید صحبت در برنامه‌های دیگر کار نمی‌کند.",
+  "Windows background talk keys work in other apps and the tray. Toggle-to-talk stays on when switching apps. Lock, sleep or helper failure mutes the microphone.": "کلید صحبت در ویندوز هنگام استفاده از برنامه‌های دیگر و در حالت کوچک‌شده هم کار می‌کند. جابه‌جایی بین برنامه‌ها حالت روشن/خاموش با کلید را قطع نمی‌کند. قفل شدن ویندوز، حالت خواب یا خرابی ابزار کلید میانبر، میکروفون را قطع می‌کند."
 }

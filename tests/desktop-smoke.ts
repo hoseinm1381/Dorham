@@ -109,6 +109,11 @@ try {
       await page.getByRole('button', { name: 'Lounge', exact: true }).click();
       const microphone = async () => backend!.db.one('SELECT muted FROM voice_members WHERE user_id=(SELECT id FROM users WHERE username=?)', [username]);
       await expect.poll(async () => (await microphone())?.muted).toBe(1);
+      await page.getByRole('button', { name: 'Push to talk ready', exact: true }).click();
+      await key('up'); await new Promise(resolve => setTimeout(resolve, 1200));
+      await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0);
+      await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect.poll(async () => (await microphone())?.muted).toBe(1); await key('up');
+      await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up'); await expect.poll(async () => (await microphone())?.muted).toBe(1);
       // A background game must still receive PTT even if the last focused
       // Dorham control was its composer. Foreground typing remains excluded.
       await page.getByRole('textbox', { name: 'Message', exact: true }).focus();
@@ -125,6 +130,11 @@ try {
         await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide()); await new Promise(resolve => setTimeout(resolve, 1200));
         await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(1); await key('up');
         await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up');
+        // Switching away from a latched toggle is ordinary focus loss, not lock/sleep.
+        await desktop.evaluate(({ BrowserWindow }) => { const main = BrowserWindow.getAllWindows()[0]; main.show(); main.focus(); });
+        await page.getByRole('textbox', { name: 'Message', exact: true }).focus();
+        await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
+        await expect.poll(async () => (await microphone())?.muted).toBe(0);
         await desktop.evaluate(({ powerMonitor }) => powerMonitor.emit('lock-screen')); await expect.poll(async () => (await microphone())?.muted).toBe(1); await desktop.evaluate(({ powerMonitor }) => powerMonitor.emit('unlock-screen'));
         await writeFile('artifacts/evidence/windows-background-hotkeys.json', JSON.stringify({ testedAt: new Date().toISOString(), actualWindowsKeyState: true, pushToTalkWhileAnotherWindowFocused: true, releaseMuted: true, helperCrashMuted: true, toggleWhileHidden: true, lockEventMuted: true, syntheticKeyInjection: true, elevatedGamesAndPhysicalKeyboard: 'untested' }, null, 2));
       } finally { await key('up'); await desktop.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id)?.destroy(); BrowserWindow.getAllWindows()[0].show(); }, fixtureId); }

@@ -1,0 +1,15 @@
+/* Readable compact gaming UI; no extra timers, media layers or animations. */
+.message-body>p { font-size:14px; }
+.message-byline button { font-size:12px; }
+.message-byline time,.mini-time,.message-body>p small { font-size:11px; }
+.composer textarea { font-size:14px; }
+.composer-footer { font-size:10px; }
+.message-actions .icon-button { width:32px; height:32px; }
+.icon-button:focus-visible,.gaming-voice button:focus-visible,.settings-categories button:focus-visible { outline:2px solid #b8a9ff; outline-offset:3px; }
+@media(max-width:600px) {
+  .message-actions .icon-button,.topbar-actions .icon-button,.gaming-voice .screen button { min-width:40px; min-height:40px; }
+  .message-byline { flex-wrap:wrap; gap:5px 9px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; }
+}

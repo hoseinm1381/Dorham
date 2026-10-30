@@ -39,6 +39,8 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   const lock = openSync(lockPath, 'wx'); writeSync(lock, String(process.pid)); closeSync(lock);
   const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service);
   const eventLoop = monitorEventLoopDelay({ resolution: 20 }); eventLoop.enable();
+  // Bounded aggregates only: no account IDs, addresses, message content, or traces.
+  const realtime = { actions: {} as Record<string, { count: number; failures: number; totalMs: number; maxMs: number; slow: number }>, disconnects: {} as Record<string, number>, maintenance: { passes: 0, maxMs: 0, maxTimerDelayMs: 0 } };
   app.addHook('onClose', async () => { eventLoop.disable(); });
   await attachments.initialize();
   // Voice is transient. Restart fences every previous signaling epoch.
@@ -248,7 +250,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.get('/admin/metrics', async req => {
       if (!req.account.instance_admin) fail(403, 'FORBIDDEN', 'Instance administrator required.');
       let disk = 0; for (const f of await readdir(c.dataDir)) { const s = await stat(path.join(c.dataDir, f)); if (s.isFile()) disk += s.size; }
-      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map(s => s.data.userId)).size, accounts: (await db.one('SELECT COUNT(*) AS count FROM users'))!.count, messages: (await db.one('SELECT COUNT(*) AS count FROM messages'))!.count, shares: (await db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count };
+      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, realtime, sfuControl: sfu.metrics, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map(s => s.data.userId)).size, accounts: (await db.one('SELECT COUNT(*) AS count FROM users'))!.count, messages: (await db.one('SELECT COUNT(*) AS count FROM messages'))!.count, shares: (await db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count };
     });
   }, { prefix: '/api/v1' });
   const io = new SocketServer(app.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 120000, skipMiddlewares: false }, pingInterval: 20000, pingTimeout: 10000, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
@@ -297,15 +299,18 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
         if (s.data.roomKey !== roomKey) { s.data.roomKey = roomKey; s.emit('voice:room', update.room); }
       }
     }
-    if (sfu.client) try { await sfu.synchronize(); }
-    catch (err) { app.log.error({ err }, 'SFU permission synchronization failed'); fail(503, 'SFU_UNAVAILABLE', 'Control changes were saved, but SFU enforcement could not be confirmed. Retry when the media server is available.'); }
   });
   service.notify = async (kind, payload) => {
     if (kind === 'conversation:event') {
-      for (const s of io.sockets.sockets.values()) { try { await service.conversation(db, s.data.userId, payload.conversationId); s.emit(kind, payload); } catch { /* access denied */ } }
+      const audience = await service.conversationAudience([...io.sockets.sockets.values()].map(s => ({ socketId: s.id, userId: s.data.userId })), payload.conversationId);
+      for (const id of audience) io.sockets.sockets.get(id)?.emit(kind, payload);
     } else if (kind === 'voice:move') { const target = io.sockets.sockets.get(payload.socketId); if (target) { target.data.voiceChannel = null; target.emit('voice:move', { channelId: payload.channelId }); }
-    } else if (kind === 'voice:changed') {
+    } else if (kind === 'voice:changed' || kind === 'voice:state:changed') {
       await voiceRefresh.run();
+      // Local microphone/PTT/deafen state changes do not alter SFU grants.
+      // Membership, leases, permissions and moderation retain confirmed enforcement.
+      if (kind === 'voice:changed' && sfu.client) try { await sfu.synchronize(); }
+      catch (err) { app.log.error({ err }, 'SFU permission synchronization failed'); fail(503, 'SFU_UNAVAILABLE', 'Control changes were saved, but SFU enforcement could not be confirmed. Retry when the media server is available.'); }
     } else io.emit(kind, payload);
   };
   io.on('connection', socket => {
@@ -319,14 +324,16 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     let windowStart = Date.now(), eventCount = 0;
     const handle = (event: string, fn: (body: any) => Promise<any>) => socket.on(event, async (body, ack) => {
       if (typeof ack !== 'function') return;
+      const started = performance.now(), metric = realtime.actions[event] ||= { count: 0, failures: 0, totalMs: 0, maxMs: 0, slow: 0 }; metric.count++;
       try {
         if (Date.now() - windowStart > 10000) { windowStart = Date.now(); eventCount = 0; }
         if (++eventCount > 400) fail(429, 'RATE_LIMIT', 'Too many real-time actions.');
         await validSocket(socket); const result = await fn(body); ack({ ok: true, data: result });
-      } catch (e: any) { ack({ ok: false, error: { code: e.code || 'INVALID_REQUEST', message: e instanceof ZodError ? 'Invalid real-time payload.' : (e instanceof AppError || e.code === 'TURN_UNAVAILABLE' ? e.message : 'Real-time action failed.') } }); }
+      } catch (e: any) { metric.failures++; ack({ ok: false, error: { code: e.code || 'INVALID_REQUEST', message: e instanceof ZodError ? 'Invalid real-time payload.' : (e instanceof AppError || e.code === 'TURN_UNAVAILABLE' ? e.message : 'Real-time action failed.') } }); }
+      finally { const elapsed = performance.now() - started; metric.totalMs += elapsed; metric.maxMs = Math.max(metric.maxMs, elapsed); if (elapsed > 500) metric.slow++; }
     });
     handle('message:send', async b => { const m = messageSchema.parse(b); return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds); });
-    handle('typing', async b => { const v = z.object({ conversationId: id, active: z.boolean() }).parse(b); await service.conversation(db, socket.data.userId, v.conversationId, true); for (const s of io.sockets.sockets.values()) { if (s.id === socket.id) continue; try { await service.conversation(db, s.data.userId, v.conversationId); s.emit('typing', { ...v, userId: socket.data.userId }); } catch { /* private */ } } return {}; });
+    handle('typing', async b => { const v = z.object({ conversationId: id, active: z.boolean() }).parse(b); const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter(s => s.id !== socket.id).map(s => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId); for (const id of audience) io.sockets.sockets.get(id)?.emit('typing', { ...v, userId: socket.data.userId }); return {}; });
     handle('voice:join', async b => { const v = z.object({ channelId: id, eligible: z.boolean() }).parse(b); const result = await service.joinVoice(socket.data.userId, socket.id!, v.channelId, v.eligible); socket.data.voiceChannel = v.channelId; return result; });
     handle('voice:leave', async b => { z.object({ requestId }).parse(b); const result = await service.voiceAction(socket.data.userId, socket.id!, 'leave'); socket.data.voiceChannel = null; return result; });
     handle('voice:heartbeat', async b => { const v = z.object({ eligible: z.boolean().optional() }).parse(b); const result = await service.voiceAction(socket.data.userId, socket.id!, 'heartbeat', v); if ('room' in result) socket.emit('voice:room', result.room); return result; });
@@ -347,7 +354,8 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       }
       io.to(target!.socket_id).emit('voice:signal', { ...v, from: socket.data.userId }); return {};
     });
-    socket.on('disconnect', async () => {
+    socket.on('disconnect', async reason => {
+      realtime.disconnects[reason] = (realtime.disconnects[reason] || 0) + 1;
       connectionLatency.remove(socket.id);
       try {
         const vm = await db.one('SELECT channel_id FROM voice_members WHERE socket_id=?', [socket.id]);
@@ -363,8 +371,9 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     await app.register(staticPlugin, { root: webRoot, prefix: '/' });
     app.setNotFoundHandler((req, reply) => { if (req.url.startsWith('/api/') || req.url.startsWith('/avatars/')) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Not found.' } }); return reply.sendFile('index.html'); });
   }
-  let maintenanceRunning = false, nextStorageCheck = 0, storageWasPressured = false;
+  let maintenanceRunning = false, nextStorageCheck = 0, storageWasPressured = false, nextMaintenance = performance.now() + 5000;
   const maintenance = setInterval(async () => {
+    const started = performance.now(); realtime.maintenance.maxTimerDelayMs = Math.max(realtime.maintenance.maxTimerDelayMs, started - nextMaintenance); nextMaintenance = started + 5000;
     if (maintenanceRunning) return; maintenanceRunning = true;
     try {
       await service.cleanup(); await disconnectInvalidSessions(); await service.notify('voice:changed', {});
@@ -373,7 +382,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
         if (storage.warnings.length && !storageWasPressured) app.log.warn({ storage }, 'Storage pressure: act before writes fail');
         storageWasPressured = storage.warnings.length > 0;
       }
-    } catch (err) { app.log.error({ err }, 'Maintenance failed'); } finally { maintenanceRunning = false; }
+    } catch (err) { app.log.error({ err }, 'Maintenance failed'); } finally { maintenanceRunning = false; realtime.maintenance.passes++; realtime.maintenance.maxMs = Math.max(realtime.maintenance.maxMs, performance.now() - started); }
   }, 5000); maintenance.unref();
   // Upgraded sockets must close before Fastify starts draining the HTTP server.
   // Waiting until onClose deadlocks a restart while any chat client stays online.

@@ -1,4 +1,6 @@
-**Current release: 0.5.0** — gaming voice/viewer and reliability changes are deployed on the pilot at the operator’s explicit request. The failed capacity gate remains a known limitation. See [release verification and limitations](docs/RELEASE-0.5.0.md).
+**Current release: 0.5.1** — server efficiency, push-to-talk recovery, toggle-to-talk focus behavior and readability improvements are deployed on the pilot at the operator’s explicit request. All 84 unit/API tests and production builds pass. The failed ten-user media capacity gate remains a known limitation. See [release verification and limitations](docs/RELEASE-0.5.1.md) and [matched performance measurements](docs/PERFORMANCE-0.5.1.md).
+
+Previous release: **0.5.0** — [gaming voice/viewer and reliability](docs/RELEASE-0.5.0.md).
 
 Previous update: **0.4.4** — [compact upload allowance](docs/COMPACT-UPLOAD-0.4.4.md).
 
