@@ -1,5 +1,7 @@
 # 0.5.0 candidate verification and measurements
 
+Later on 30 October: [capacity retest](CAPACITY-RETEST-2026-10-30.md) also failed the required hold. It includes isolated VPS control-plane and two-browser diagnostics, exact cleanup and unchanged production state. The measurements below preserve the earlier candidate checkpoint.
+
 Local work: 30 October 2026, Windows, pinned Node 24.22.1. The source version is 0.5.0; live remains 0.4.4. A failed required capacity run is not accepted as a pass.
 
 ## Recorded heavy workload
