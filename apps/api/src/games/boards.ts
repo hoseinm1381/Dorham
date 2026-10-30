@@ -4,11 +4,11 @@ export function fourStart(now: number): Engine { return { phase: 'turn', deadlin
 export function fourAction(s: Engine, seat: number, a: any, now: number) {
   insist(s.phase === 'turn' && seat === s.turn && a.type === 'drop'); const col = integer(a.column, 0, 6);
   let row = 5; while (row >= 0 && s.board[row * 7 + col] !== -1) row--; insist(row >= 0, 'That column is full.');
-  const index = row * 7 + col; s.board[index] = seat; s.moves++;
+  const index = row * 7 + col; s.board[index] = seat; s.moves++; s.last=index;
   for (const [dx, dy] of [[1,0],[0,1],[1,1],[1,-1]]) {
-    let count = 1;
-    for (const sign of [-1,1]) for (let d = 1; d < 4; d++) { const x = col + dx * d * sign, y = row + dy * d * sign; if (x < 0 || x > 6 || y < 0 || y > 5 || s.board[y*7+x] !== seat) break; count++; }
-    if (count >= 4) { s.result = `Player ${seat+1} wins`; s.phase = 'ended'; s.winner = seat; }
+    const line = [index];
+    for (const sign of [-1,1]) for (let d = 1; d < 4; d++) { const x = col + dx * d * sign, y = row + dy * d * sign; if (x < 0 || x > 6 || y < 0 || y > 5 || s.board[y*7+x] !== seat) break; line.push(y*7+x); }
+    if (line.length >= 4) { s.result = `Player ${seat+1} wins`; s.phase = 'ended'; s.winner = seat; s.winning=line; }
   }
   if (!s.result && s.moves === 42) { s.result = 'Draw'; s.phase = 'ended'; }
   s.turn = 1-seat; s.deadline = s.result ? 0 : now+60000;
@@ -16,10 +16,10 @@ export function fourAction(s: Engine, seat: number, a: any, now: number) {
 export const dominoTiles: [number,number][] = Array.from({length:7},(_,a)=>Array.from({length:7-a},(_,b)=>[a,a+b] as [number,number])).flat();
 function dominoRound(s: Engine, n: number, now: number) {
   const deck = shuffle(Array.from({length:28},(_,i)=>i)); s.hands = Array.from({length:n},(_,i)=>s.active?.[i]===false?[]:deck.splice(0,7)); s.boneyard=deck; s.chain=[]; s.passes=0; s.phase='turn'; s.roundResult=null; s.opening=-1;
-  let best=-1,leader=0;
-  s.hands.forEach((hand:number[],p:number)=>hand.forEach(t=>{ const [a,b]=dominoTiles[t], weight=a===b?100+a:a+b; if(weight>best){best=weight;leader=p;s.opening=t;} }));
-  s.turn=leader;s.deadline=now+60000;s.round=(s.round||0)+1;
+  dominoOpening(s);s.deadline=now+60000;s.round=(s.round||0)+1;
 }
+// Recompute the mandatory opener if its owner leaves before placing it.
+export function dominoOpening(s:Engine){let best=-1,leader=0;s.opening=-1;s.hands.forEach((hand:number[],p:number)=>{if(s.active?.[p]===false)return;hand.forEach(t=>{const [a,b]=dominoTiles[t],weight=a===b?100+a:a+b;if(weight>best){best=weight;leader=p;s.opening=t;}});});s.turn=leader;s.passes=0;}
 export function dominoStart(n:number,settings:GameSettings,now:number):Engine { const s:Engine={phase:'turn',deadline:0,result:null,scores:Array(n).fill(0),mode:settings.domino};dominoRound(s,n,now);return s; }
 export function dominoLegal(s:Engine,seat:number) { const hand:number[]=s.hands[seat]||[]; if(!s.chain.length)return hand.filter(t=>t===s.opening).map(tile=>({tile,end:'right'})); const left=s.chain[0][0],right=s.chain.at(-1)[1];return hand.flatMap(tile=>{const pair=dominoTiles[tile];return [...(pair.includes(left)?[{tile,end:'left'}]:[]),...(pair.includes(right)?[{tile,end:'right'}]:[])];}); }
 function dominoScore(s:Engine,now:number) {

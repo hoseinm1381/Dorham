@@ -1,5 +1,5 @@
 import type { GameSettings, Picture } from '../../../../packages/contracts/src/games';
-import { freshPicture, insist, integer, normalizeAnswer, shuffle, stroke, text, words, type Engine } from './common';
+import { freshPicture, insist, integer, normalizeAnswer, shuffle, stroke, text, undoStroke, words, type Engine } from './common';
 function drawingTurn(s:Engine,settings:GameSettings,now:number) {
   while(s.round<s.order.length&&s.active?.[s.order[s.round]]===false)s.round++;
   if(s.round>=s.order.length){s.phase='ended';s.result='Drawing rounds complete';s.deadline=0;return;}
@@ -7,10 +7,11 @@ function drawingTurn(s:Engine,settings:GameSettings,now:number) {
 }
 export function drawingStart(n:number,settings:GameSettings,now:number):Engine {const s:Engine={phase:'drawing',deadline:0,result:null,round:0,order:Array.from({length:settings.rounds},()=>Array.from({length:n},(_,i)=>i)).flat(),words:words(settings),scores:Array(n).fill(0)};drawingTurn(s,settings,now);return s;}
 function drawingReveal(s:Engine,now:number){s.phase='reveal';s.token=`reveal-${s.round}`;s.deadline=now+5000;}
+export function drawingEveryoneGuessed(s:Engine,now:number){if(s.phase==='drawing'&&s.scores.every((_:number,i:number)=>i===s.drawer||s.active?.[i]===false||s.guessed.includes(i)))drawingReveal(s,now);}
 export function drawingAction(s:Engine,seat:number,a:any,settings:GameSettings,now:number) {
   insist(s.phase==='drawing'&&a.token===s.token,'The drawing round has changed.');
-  if(a.type==='stroke'||a.type==='clear'){insist(seat===s.drawer,'Only the drawer can draw.');if(a.type==='clear')s.picture=freshPicture();else stroke(s.picture,a.stroke);}
-  else {insist(a.type==='guess'&&seat!==s.drawer&&!s.guessed.includes(seat),'Wait for the next drawing.');const answer=text(a.text,80),correct=normalizeAnswer(answer)===normalizeAnswer(s.word);if(correct){s.guessed.push(seat);s.scores[seat]+=Math.max(20,100-Math.floor((now-s.started)/1000));s.scores[s.drawer]+=10;s.guesses.push({seat,correct:true});if(s.guessed.length===(s.active?.filter(Boolean).length||s.scores.length)-1)drawingReveal(s,now);}else s.guesses.push({seat,text:answer,correct:false});s.guesses=s.guesses.slice(-30);}
+  if(['stroke','clear','undo'].includes(a.type)){insist(seat===s.drawer,'Only the drawer can draw.');if(a.type==='clear')s.picture=freshPicture();else if(a.type==='undo')undoStroke(s.picture);else stroke(s.picture,a.stroke);}
+  else {insist(a.type==='guess'&&seat!==s.drawer&&!s.guessed.includes(seat),'Wait for the next drawing.');const answer=text(a.text,80),correct=normalizeAnswer(answer)===normalizeAnswer(s.word);if(correct){s.guessed.push(seat);s.scores[seat]+=Math.max(20,100-Math.floor((now-s.started)/1000));s.scores[s.drawer]+=10;s.guesses.push({seat,correct:true});drawingEveryoneGuessed(s,now);}else s.guesses.push({seat,text:answer,correct:false});s.guesses=s.guesses.slice(-30);}
 }
 export function drawingTick(s:Engine,settings:GameSettings,now:number){if(s.phase==='drawing')drawingReveal(s,now);else if(s.phase==='reveal'){s.round++;drawingTurn(s,settings,now);}}
 export function drawingView(s:Engine,seat:number){const reveal=s.phase!=='drawing'||seat===s.drawer||s.guessed.includes(seat);return {phase:s.phase,token:s.token,round:s.round+1,total:s.order.length,drawer:s.drawer,word:reveal?s.word:null,wordLength:Array.from(s.word).length,picture:s.picture,scores:s.scores,guesses:s.guesses,guessed:s.guessed};}
@@ -28,7 +29,7 @@ function phoneAdvance(s:Engine,settings:GameSettings,now:number) {
 export function phoneStart(n:number,settings:GameSettings,now:number):Engine{return {phase:'write',deadline:now+settings.seconds*1000,result:null,step:0,token:'phone-0',albums:Array.from({length:n},()=>[]),done:[],answers:{},pictures:Array.from({length:n},freshPicture)};}
 export function phoneAction(s:Engine,seat:number,a:any,settings:GameSettings,now:number) {
   insist(s.phase!=='reveal'&&a.token===s.token&&!s.done.includes(seat),'This page has already been submitted.');
-  if(a.type==='stroke'||a.type==='clear'){insist(s.phase==='draw');if(a.type==='clear')s.pictures[seat]=freshPicture();else stroke(s.pictures[seat],a.stroke);}
+  if(['stroke','clear','undo'].includes(a.type)){insist(s.phase==='draw');if(a.type==='clear')s.pictures[seat]=freshPicture();else if(a.type==='undo')undoStroke(s.pictures[seat]);else stroke(s.pictures[seat],a.stroke);}
   else {insist(a.type==='submit');if(s.phase!=='draw')s.answers[seat]=text(a.text);s.done.push(seat);if(s.done.length===s.albums.length)phoneAdvance(s,settings,now);}
 }
 export function phoneTick(s:Engine,settings:GameSettings,now:number){phoneAdvance(s,settings,now);}

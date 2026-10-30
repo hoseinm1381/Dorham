@@ -7,6 +7,7 @@ export function text(value: unknown, max = 180): string { insist(typeof value ==
 export function shuffle<T>(values: T[]): T[] { const a = values.slice(); for (let i = a.length - 1; i > 0; i--) { const j = randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 export const nextSeat = (seat: number, n: number) => (seat + 1) % n;
 export const freshPicture = (): Picture => ({ strokes: [], points: 0 });
+export function undoStroke(picture:Picture){const last=picture.strokes.pop();if(last)picture.points-=last.points.length;}
 const colors = ['#20232b', '#ffffff', '#e45b63', '#4a86e8', '#43a477', '#ecc64c', '#9a69d5', '#e78e48'];
 export function stroke(picture: Picture, value: any) {
   insist(value && colors.includes(value.color) && [3, 7, 14].includes(value.width), 'Choose a drawing tool.');

@@ -66,6 +66,7 @@ it('streams bounded canvas deltas only to authorized watchers and never broadcas
     expect(received[0]).toHaveLength(1);expect(received[0][0]).toMatchObject({id:g.id,revision:g.revision,requestId:rid,type:'stroke'});expect(received[0][0]).not.toHaveProperty('word');
     for(const i of [1,2,3,4])expect(received[i]).toHaveLength(kind==='drawing'?1:0);
     await command(0,before,'action',stroke,rid);expect((await h.db.one('SELECT state FROM game_sessions WHERE id=?',[g.id]))!.state).toContain('"points":2');
+    const undo=await command(0,g,'action',{type:'undo',token:g.state.token});expect(undo.statusCode,undo.body).toBe(200);g=undo.json();expect(g.state.picture.points).toBe(0);
     await event(sockets[4],'game:unwatch',{id:g.id});const count=received[4].length;await command(0,g,'action',{type:'clear',token:g.state.token});await new Promise(r=>setTimeout(r,30));expect(received[4]).toHaveLength(count);
   }finally{await h.close();}}
 });

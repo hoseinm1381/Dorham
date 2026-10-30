@@ -65,7 +65,7 @@ export function pokerAction(s:Engine,seat:number,a:any,now:number) {
 }
 export function pokerView(s:Engine,seat:number) {
   const own=seat>=0,acting=own&&s.phase==='betting'&&s.turn===seat,call=acting?Math.max(0,s.bet-s.street[seat]):0;
-  return {phase:s.phase,stack:s.stack,departed:s.departed,board:s.board,holes:s.holes.map((h:number[],i:number)=>i===seat||(s.showdown&&!s.folded[i])?h:h.map(()=>-1)),folded:s.folded,street:s.street,committed:s.committed,dealer:s.dealer,turn:s.turn,hand:s.hand,blind:s.blind,bet:s.bet,pots:s.pots,payouts:s.payouts,handResult:s.handResult,log:s.log,
+  return {phase:s.phase,stack:s.stack,departed:s.departed,board:s.board,holes:s.holes.map((h:number[],i:number)=>i===seat||(s.showdown&&!s.folded[i])?h:h.map(()=>-1)),handRanks:s.holes.map((h:number[],i:number)=>h.length===2&&s.board.length>=3&&(i===seat||(s.showdown&&!s.folded[i]))?rankHand([...h,...s.board])[0]:null),folded:s.folded,street:s.street,committed:s.committed,dealer:s.dealer,turn:s.turn,hand:s.hand,blind:s.blind,bet:s.bet,pots:s.pots,payouts:s.payouts,handResult:s.handResult,log:s.log,
     controls:acting?{call:Math.min(call,s.stack[seat]),canCheck:call===0,canRaise:s.street[seat]+s.stack[seat]>s.bet&&(!s.acted[seat]||s.bet>=s.reopen[seat]),minRaise:minimumRaise(s),maxRaise:s.street[seat]+s.stack[seat]}:null};
 }
 export function pokerTimeout(s:Engine,now:number){pokerAction(s,s.turn,{type:s.street[s.turn]>=s.bet?'check':'fold'},now);}

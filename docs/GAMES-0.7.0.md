@@ -1,5 +1,7 @@
 # Voice-channel games in 0.7.0
 
+Updated experience in **0.7.2**: [per-game improvements and fixes](RELEASE-0.7.2.md). The original rules and release baseline below remain useful; drawing undo, replay lobbies, richer feedback and departure fixes are described in that update.
+
 Join voice, select **Games** beside **Share screen**, choose a game and its settings, then create a lobby. Each card and game header identifies its supported human player count. Lobbies and channel entries show actual occupancy, such as **3/8 joined**. Spectators do not consume player seats. Chess also retains its existing AI option.
 
 | Game | Human players | Rules in this release |
