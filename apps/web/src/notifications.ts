@@ -1,6 +1,6 @@
 // Local, synthesized cues: no external assets or requests. Audio is unlocked by a
 // user gesture; browsers may deliberately suppress cues before that gesture.
-export type Cue = 'message' | 'sent' | 'join' | 'leave';
+export type Cue = 'message' | 'sent' | 'join' | 'leave' | 'mute' | 'unmute';
 export type SoundPreferences = { messages: boolean; voice: boolean };
 let context: AudioContext | undefined, last = 0;
 export function soundPreferences(): SoundPreferences {
@@ -16,7 +16,7 @@ export function playCue(kind: Cue, busy = false) {
   if (context?.state === 'suspended') { void context.resume().then(() => { if (context?.state === 'running') playCue(kind, busy); }).catch(() => {}); return; }
   if (!context || context.state !== 'running' || ((kind === 'message' || kind === 'sent') && performance.now() - last < 120)) return;
   last = performance.now();
-  const notes = kind === 'message' ? [660, 880] : kind === 'sent' ? [520] : kind === 'join' ? [440, 660] : [660, 440];
+  const notes = kind === 'message' ? [660, 880] : kind === 'sent' ? [520] : kind === 'join' ? [440, 660] : kind === 'leave' ? [660, 440] : kind === 'mute' ? [520, 350] : [350, 520];
   try {
     notes.forEach((frequency, i) => {
       const start = context!.currentTime + i * 0.10, oscillator = context!.createOscillator(), gain = context!.createGain();

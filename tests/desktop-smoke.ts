@@ -101,6 +101,7 @@ try {
     await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
     console.log('Installed Windows decoded inline image/video and optional own screen preview; hiding preview preserved capture.');
     if (process.env.DORHAM_TEST_HOTKEY_SENDER) {
+      await page.evaluate(() => { (window as any).__microphoneCues = []; window.addEventListener('dorham-sound-played', ((event: CustomEvent) => { if (['mute', 'unmute'].includes(event.detail)) (window as any).__microphoneCues.push(event.detail); }) as EventListener); });
       const sender = path.resolve(process.env.DORHAM_TEST_HOTKEY_SENDER), exec = promisify(execFile);
       // Keep each injected state observable for several 20 ms native polls.
       // Back-to-back process injections can otherwise release/repress between polls.
@@ -128,7 +129,9 @@ try {
         await desktop.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id)?.destroy(); BrowserWindow.getAllWindows()[0].show(); }, fixtureId);
         await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.getByLabel('Voice input mode', { exact: true }).selectOption('toggle'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
         await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide()); await new Promise(resolve => setTimeout(resolve, 1200));
+        await page.evaluate(() => { (window as any).__microphoneCues = []; });
         await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(1); await key('up');
+        await expect.poll(() => page.evaluate(() => (window as any).__microphoneCues)).toEqual(['unmute', 'mute']);
         await key('down'); await expect.poll(async () => (await microphone())?.muted).toBe(0); await key('up');
         // Switching away from a latched toggle is ordinary focus loss, not lock/sleep.
         await desktop.evaluate(({ BrowserWindow }) => { const main = BrowserWindow.getAllWindows()[0]; main.show(); main.focus(); });
@@ -136,7 +139,7 @@ try {
         await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
         await expect.poll(async () => (await microphone())?.muted).toBe(0);
         await desktop.evaluate(({ powerMonitor }) => powerMonitor.emit('lock-screen')); await expect.poll(async () => (await microphone())?.muted).toBe(1); await desktop.evaluate(({ powerMonitor }) => powerMonitor.emit('unlock-screen'));
-        await writeFile('artifacts/evidence/windows-background-hotkeys.json', JSON.stringify({ testedAt: new Date().toISOString(), actualWindowsKeyState: true, pushToTalkWhileAnotherWindowFocused: true, releaseMuted: true, helperCrashMuted: true, toggleWhileHidden: true, lockEventMuted: true, syntheticKeyInjection: true, elevatedGamesAndPhysicalKeyboard: 'untested' }, null, 2));
+        await writeFile('artifacts/evidence/windows-background-hotkeys.json', JSON.stringify({ testedAt: new Date().toISOString(), actualWindowsKeyState: true, pushToTalkWhileAnotherWindowFocused: true, releaseMuted: true, helperCrashMuted: true, toggleWhileHidden: true, hiddenMicrophoneCues: ['unmute', 'mute'], lockEventMuted: true, syntheticKeyInjection: true, elevatedGamesAndPhysicalKeyboard: 'untested' }, null, 2));
       } finally { await key('up'); await desktop.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id)?.destroy(); BrowserWindow.getAllWindows()[0].show(); }, fixtureId); }
       await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click();
       console.log('Windows background PTT, release and toggle passed with actual OS key-state transitions.');

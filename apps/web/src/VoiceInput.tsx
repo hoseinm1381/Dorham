@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import { allowedWhileTyping, bindingLabel, defaultVoiceInput, matchesBinding, validBinding, VoiceInputState, type VoiceInputPreferences } from '../../../packages/contracts/src/voice-hotkeys';
 import type { MediaTransport } from '@dorham/media';
 import { t } from './i18n';
+import { playCue } from './notifications';
 
 export function readVoiceInput(): VoiceInputPreferences {
   try { const value = JSON.parse(localStorage.getItem('dorham-voice-input') || 'null'); if (value && ['open', 'push', 'toggle'].includes(value.mode) && validBinding(value.binding) && typeof value.background === 'boolean') return value; } catch { /* device defaults */ }
@@ -13,15 +14,23 @@ export function useVoiceInput(transport: RefObject<MediaTransport | null>, activ
   const state = useRef(new VoiceInputState()), prefs = useRef(readVoiceInput()), activeRef = useRef(active), onError = useRef(error), task = useRef<Promise<void> | null>(null), dirty = useRef(false), fault = useRef(false);
   const [muted, setMuted] = useState(() => prefs.current.mode !== 'open'), [locked, setLocked] = useState(false), [preferences, setPreferences] = useState(prefs.current);
   const initialized = useRef(false); if (!initialized.current) { state.current.configure(prefs.current.mode); initialized.current = true; }
+  const lastMuted = useRef(state.current.muted);
   activeRef.current = active; onError.current = error;
   const onNotice = useRef(notice); onNotice.current = notice;
+  const updateMuted = (sound = true) => {
+    const next = state.current.muted;
+    setMuted(next);
+    if (lastMuted.current !== next && sound && activeRef.current) playCue(next ? 'mute' : 'unmute');
+    lastMuted.current = next;
+  };
   const apply = () => {
-    setMuted(state.current.muted); setLocked(state.current.locked); dirty.current = true;
+    setLocked(state.current.locked); dirty.current = true;
     // Invoke mute immediately so release never waits behind a signaling roundtrip.
     if (state.current.muted) void transport.current?.setMuted(true).catch(e => onError.current(e));
+    updateMuted();
     if (!task.current) task.current = Promise.resolve().then(async () => {
       do { dirty.current = false; await transport.current?.setMuted(state.current.muted); } while (dirty.current);
-    }).catch(e => { state.current.release(); if (prefs.current.mode === 'open') state.current.locked = true; setMuted(true); void transport.current?.setMuted(true).catch(() => {}); onError.current(e); }).finally(() => { task.current = null; });
+    }).catch(e => { state.current.release(); if (prefs.current.mode === 'open') state.current.locked = true; void transport.current?.setMuted(true).catch(() => {}); updateMuted(); onError.current(e); }).finally(() => { task.current = null; });
   };
   const applyRef = useRef(apply); applyRef.current = apply;
   useEffect(() => {
@@ -45,7 +54,7 @@ export function useVoiceInput(transport: RefObject<MediaTransport | null>, activ
     return () => { native?.(); window.removeEventListener('dorham-voice-input-changed', changed); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', visible); };
   }, []);
   useEffect(() => { if (!active) { state.current.release(); applyRef.current(); } }, [active]);
-  return { muted, locked, preferences, prepare: async () => { state.current.release(); setMuted(state.current.muted); await transport.current?.setMuted(state.current.muted); }, toggle: () => { state.current.manual(); applyRef.current(); if (prefs.current.mode === 'push' && state.current.muted) onNotice.current(t('Hold {key} to talk. Pressing the talk key also clears manual mute.', { key: bindingLabel(prefs.current.binding) })); } };
+  return { muted, locked, preferences, prepare: async () => { state.current.release(); updateMuted(false); await transport.current?.setMuted(state.current.muted); }, toggle: () => { state.current.manual(); applyRef.current(); if (prefs.current.mode === 'push' && state.current.muted) onNotice.current(t('Hold {key} to talk. Pressing the talk key also clears manual mute.', { key: bindingLabel(prefs.current.binding) })); } };
 }
 
 export function VoiceInputSettings() {

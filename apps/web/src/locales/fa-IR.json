@@ -667,5 +667,7 @@
   "0% mutes this person; 100% is original volume; 200% doubles the audio signal.": "۰٪ صدای این فرد را قطع می‌کند؛ ۱۰۰٪ صدای اصلی و ۲۰۰٪ سیگنال صوتی دوبرابر است.",
   "My microphone gain": "تقویت صدای میکروفون من",
   "Changes the voice you send to everyone. 100% is the original level. Higher gain can distort a loud microphone.": "بلندی صدایی را که برای دیگران می‌فرستید تغییر می‌دهد. ۱۰۰٪ سطح اصلی است. تقویت زیاد ممکن است صدای بلند میکروفون را مخدوش کند.",
-  "Reset microphone gain": "بازنشانی تقویت میکروفون"
+  "Reset microphone gain": "بازنشانی تقویت میکروفون",
+  "Voice join, leave, mute and unmute sounds": "صدای ورود، خروج، قطع و وصل میکروفون",
+  "Do not disturb silences incoming notifications. Your microphone feedback still plays. Sound starts after interacting with the app.": "حالت مزاحم نشوید اعلان‌های دریافتی را بی‌صدا می‌کند. بازخورد میکروفون شما همچنان پخش می‌شود. صدا پس از تعامل با برنامه فعال می‌شود."
 }
