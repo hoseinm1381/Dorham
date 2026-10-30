@@ -5,7 +5,12 @@ vi.mock('livekit-client', async importOriginal => {
   const original = await importOriginal<typeof import('livekit-client')>();
   class Room extends EventEmitter {
     state = 'disconnected'; remoteParticipants = new Map();
-    localParticipant = { setMicrophoneEnabled: vi.fn(async () => {}), getTrackPublication: () => undefined, setScreenShareEnabled: vi.fn(async () => {}) };
+    microphone: any;
+    localParticipant = {
+      createTracks: vi.fn(async () => [{ mute: async () => {}, setProcessor: async () => {}, stop: () => {}, mediaStreamTrack: { enabled: false } }]),
+      publishTrack: vi.fn(async (track: any) => { this.microphone = track; }),
+      setMicrophoneEnabled: vi.fn(async () => {}), getTrackPublication: () => this.microphone ? { audioTrack: this.microphone } : undefined, setScreenShareEnabled: vi.fn(async () => {})
+    };
     connect = vi.fn(async () => { this.state = 'connected'; }); startAudio = async () => {};
     disconnect = async () => { this.state = 'disconnected'; };
   }

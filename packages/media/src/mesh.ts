@@ -2,18 +2,20 @@ import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
 import { ack } from './signaling';
 import type { MediaTransport, MediaOptions } from './index';
 import { defaultAudioProcessing, browserAudioProcessing, processingMismatch, type AudioProcessing } from './audio-processing';
+import { MicrophoneGain, clampMicrophoneGain } from './microphone-gain';
 import { AudioActivityMeter } from './audio-activity';
 import { screenSettings, type ScreenQuality } from './screen-quality';
 type Peer = { pc: RTCPeerConnection; epoch: string; makingOffer: boolean; ignoreOffer: boolean; settingAnswer: boolean; pendingIce: RTCIceCandidateInit[]; streams: NonNullable<Signal['streams']>; received: Map<string, MediaStream>; audio?: { source: MediaStreamAudioSourceNode; element: HTMLAudioElement; gain: GainNode; analyser: AnalyserNode; meterSource: MediaStreamAudioSourceNode; meter: AudioActivityMeter }; screenSender?: RTCRtpSender; screenSubscribed: boolean; restarts: number; connectionTimer?: ReturnType<typeof setTimeout>; timedOut: boolean; iceErrors: number[] };
 export class MeshTransport implements MediaTransport {
   room: VoiceRoom | null = null;
-  getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true, sharedAudio: false, outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' }; }
+  getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true, microphoneGain: true, sharedAudio: false, outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' }; }
   async reconnect() { if (this.channelId && !this.joining) await this.rejoin(); }
   protected peers = new Map<string, Peer>(); protected mic: MediaStream | null = null; protected screen: MediaStream | null = null;
   protected context: AudioContext | null = null; protected lease: Share | null = null; protected channelId: string | null = null;
   protected epoch = ''; protected iceServers: RTCIceServer[] = []; protected muted = false; protected deafened = false;
   private audioProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private captureProcessing: AudioProcessing = { ...defaultAudioProcessing };
+  private inputGain = new MicrophoneGain(); private gainValue = 1; private outgoing: MediaStream | null = null;
   private microphoneChange: Promise<void> = Promise.resolve();
   private heartbeat?: ReturnType<typeof setInterval>; private meter?: ReturnType<typeof setInterval>; private volumes = new Map<string, number>();
   private joining = false; private destroyed = false; private signalQueue: Promise<unknown> = Promise.resolve();
@@ -36,6 +38,7 @@ export class MeshTransport implements MediaTransport {
   private onDisconnect = () => { this.options.emit('status', 'Reconnecting voice…'); };
   constructor(protected options: MediaOptions) {
     this.audioProcessing = { ...defaultAudioProcessing, ...options.audioProcessing };
+    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); this.inputGain.setGain(this.gainValue);
     const s = options.socket; s.on('voice:move', this.onMoved); s.on('voice:room', this.onRoom); s.on('voice:signal', this.onSignal); s.on('voice:removed', this.onRemoved); s.on('connect', this.onConnect); s.on('disconnect', this.onDisconnect);
   }
   protected error(e: any) { if (!this.destroyed) this.options.emit('error', e.message || String(e)); }
@@ -50,7 +53,7 @@ export class MeshTransport implements MediaTransport {
       acquired = await navigator.mediaDevices.getUserMedia({ audio: { ...processing }, video: false }); current(); this.mic = acquired;
       for (const track of this.mic.getAudioTracks()) track.enabled = !this.muted && !this.deafened;
       this.captureProcessing = processing;
-      context = new AudioContext(); this.context = context; await context.resume(); current(); this.channelId = channelId;
+      context = new AudioContext(); this.context = context; await context.resume(); current(); await this.prepareMicrophone(this.mic); current(); this.channelId = channelId;
       await this.rejoin(); current();
       this.heartbeat = setInterval(() => { if (this.options.socket.connected && this.room) void ack(this.options.socket, 'voice:heartbeat', { eligible: this.peers.size === 0 || [...this.peers.values()].some(p => p.pc.connectionState === 'connected') }).catch(e => this.error(e)); }, 5000);
       this.attachMicMeter();
@@ -80,7 +83,7 @@ export class MeshTransport implements MediaTransport {
   }
   private metadata(): NonNullable<Signal['streams']> {
     const streams: NonNullable<Signal['streams']> = [];
-    if (this.mic) streams.push({ streamId: this.mic.id, kind: 'audio' });
+    if (this.outgoing) streams.push({ streamId: this.outgoing.id, kind: 'audio' });
     if (this.screen && this.lease) streams.push({ streamId: this.screen.id, kind: 'screen', leaseId: this.lease.id }); return streams;
   }
   private async signal(userId: string, payload: Partial<Signal>) {
@@ -98,7 +101,7 @@ export class MeshTransport implements MediaTransport {
       this.error(new Error('No media connection was established. Try another network or ask the server owner to enable a media relay.'));
     }, 25000);
     pc.onicecandidateerror = event => { p.iceErrors = [...p.iceErrors.slice(-4), event.errorCode]; };
-    for (const track of this.mic?.getTracks() || []) pc.addTrack(track, this.mic!);
+    for (const track of this.outgoing?.getTracks() || []) pc.addTrack(track, this.outgoing!);
     if (this.screen) { const transceiver = pc.addTransceiver('video', { direction: 'sendrecv', streams: [this.screen] }); p.screenSender = transceiver.sender; }
     pc.onnegotiationneeded = async () => {
       // Elect one initial offerer. This avoids needless rollback/glare while
@@ -201,7 +204,17 @@ export class MeshTransport implements MediaTransport {
   }
   async setDevice(deviceId: string) { await this.replaceMicrophone(deviceId, this.captureProcessing); }
   async setOutputDevice(deviceId: string) { if (!this.context || typeof (this.context as any).setSinkId !== 'function') throw new Error('Speaker selection is not supported in this browser.'); await (this.context as any).setSinkId(deviceId); }
-  getLocalAudioStream() { return this.mic; }
+  getLocalAudioStream() { return this.outgoing; }
+  async setMicrophoneGain(value: number) {
+    this.gainValue = clampMicrophoneGain(value); this.inputGain.setGain(this.gainValue); await this.inputGain.resume();
+  }
+  private async prepareMicrophone(stream: MediaStream) {
+    await this.inputGain.restart({ track: stream.getAudioTracks()[0], audioContext: this.context! });
+    const track = this.inputGain.processedTrack!;
+    if (!this.outgoing) this.outgoing = new MediaStream();
+    for (const old of this.outgoing.getTracks()) this.outgoing.removeTrack(old);
+    this.outgoing.addTrack(track); return track;
+  }
   private replaceMicrophone(deviceId: string, processing: AudioProcessing): Promise<void> {
     const epoch = this.epoch;
     const next = this.microphoneChange.catch(() => {}).then(async () => { if (this.channelId && epoch === this.epoch) await this.replaceMicrophoneNow(deviceId, processing); });
@@ -215,7 +228,7 @@ export class MeshTransport implements MediaTransport {
         const restored = await acquire(previousDevice || '', this.captureProcessing);
         restored.getAudioTracks()[0].enabled = false;
         if (epoch !== this.epoch || !this.channelId) restored.getTracks().forEach(t => t.stop());
-        else { this.mic = restored; await Promise.allSettled([...this.peers.values()].map(async p => { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(restored.getAudioTracks()[0]); })); this.attachMicMeter(); await this.setMuted(this.muted); }
+        else { const output = await this.prepareMicrophone(restored); this.mic = restored; await Promise.allSettled([...this.peers.values()].map(async p => { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(output); })); this.attachMicMeter(); await this.setMuted(this.muted); }
       } catch { /* Original capture error is reported; no unmuted fallback. */ }
     };
     // Chromium shares preprocessing with a still-open capture of the same
@@ -234,7 +247,8 @@ export class MeshTransport implements MediaTransport {
     // Enable only after installation, using the latest mute/deafen state.
     track.enabled = false;
     try {
-      for (const p of this.peers.values()) { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(track); }
+      const output = await this.prepareMicrophone(next);
+      for (const p of this.peers.values()) { const sender = p.pc.getSenders().find(s => s.track?.kind === 'audio'); if (sender) await sender.replaceTrack(output); }
     } catch (error) {
       next.getTracks().forEach(t => t.stop()); await restorePrevious(); throw error;
     }
@@ -308,7 +322,8 @@ export class MeshTransport implements MediaTransport {
     const previous = this.channelId; this.channelId = null; clearInterval(this.heartbeat); clearInterval(this.meter);
     this.watchedShares.clear(); this.hiddenShares.clear();
     await this.stopShare(); for (const userId of [...this.peers.keys()]) this.removePeer(userId);
-    this.mic?.getTracks().forEach(t => t.stop()); this.mic = null; this.micSource?.disconnect(); this.micSource = null; this.micAnalyser = null; this.micMeter = null; await this.context?.close().catch(() => {}); this.context = null; this.room = null; this.epoch = '';
+    await this.microphoneChange.catch(() => {});
+    this.mic?.getTracks().forEach(t => t.stop()); this.mic = null; await this.inputGain.destroy(); this.outgoing = null; this.micSource?.disconnect(); this.micSource = null; this.micAnalyser = null; this.micMeter = null; await this.context?.close().catch(() => {}); this.context = null; this.room = null; this.epoch = '';
     if (previous && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {});
     this.options.emit('room', null); this.options.emit('status', '');
   }

@@ -10,7 +10,7 @@ export class DeferredTransport implements MediaTransport {
   private muted = false; private deafened = false; private generation = 0; private destroyed = false;
   constructor(private mode: 'mesh' | 'livekit' | 'native', private options: MediaOptions) {}
   get room() { return this.inner?.room || null; }
-  getCapabilities() { return this.inner?.getCapabilities() || { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: this.mode === 'native', amplification: true, sharedAudio: this.mode === 'livekit' && (!(globalThis as any).desktop || Boolean((globalThis as any).desktop.systemAudioSafe)), outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' }; }
+  getCapabilities() { return this.inner?.getCapabilities() || { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: this.mode === 'native', amplification: true, microphoneGain: this.mode !== 'native', sharedAudio: this.mode === 'livekit' && (!(globalThis as any).desktop || Boolean((globalThis as any).desktop.systemAudioSafe)), outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' }; }
   private load() {
     if (this.inner) return Promise.resolve(this.inner);
     if (!this.loading) { const epoch = this.generation;
@@ -35,6 +35,7 @@ export class DeferredTransport implements MediaTransport {
   async setOutputDevice(value: string) { await this.inner?.setOutputDevice?.(value); }
   getLocalAudioStream() { return this.inner?.getLocalAudioStream?.() || null; }
   getAudioProcessing() { return this.inner?.getAudioProcessing?.() || browserAudioProcessing(this.options.audioProcessing || { noiseSuppression: true, echoCancellation: true, autoGainControl: true }); }
+  async setMicrophoneGain(value: number) { this.options.microphoneGain = value; await this.inner?.setMicrophoneGain?.(value); }
   async setAudioProcessing(value: AudioProcessing) { if (this.inner) await this.inner.setAudioProcessing?.(value); this.options.audioProcessing = { ...value }; }
   async startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean }) { if (!this.inner?.room) throw new Error('Join a voice channel first.'); await this.inner.startShare(quality, options); }
   async setShareQuality(quality: ScreenQuality) { await this.inner?.setShareQuality(quality); }
