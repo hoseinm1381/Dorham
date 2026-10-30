@@ -26,7 +26,7 @@ import {
 import {
   config,
   openDatabase
-} from "./chunk-VFHQ757F.js";
+} from "./chunk-TFZZS3MZ.js";
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
@@ -37,8 +37,8 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import { Server as SocketServer } from "socket.io";
-import { z as z4, ZodError } from "zod";
-import { randomUUID as randomUUID2 } from "crypto";
+import { z as z5, ZodError } from "zod";
+import { randomUUID as randomUUID3 } from "crypto";
 import { monitorEventLoopDelay } from "perf_hooks";
 import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from "fs";
 import { mkdir as mkdir2, writeFile, unlink as unlink2, readdir, stat as stat3 } from "fs/promises";
@@ -601,6 +601,487 @@ function mediaAdmission(app2, service, sessionForSocket) {
   });
 }
 
+// apps/api/src/chess.ts
+import { randomUUID as randomUUID2 } from "crypto";
+import { z as z4 } from "zod";
+
+// packages/contracts/src/chess.ts
+var costs = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+var colorOf = (p) => p === p.toUpperCase() ? 0 : 1;
+var squareName = (i) => "abcdefgh"[i % 8] + (8 - Math.floor(i / 8));
+var inside = (x, y) => x >= 0 && x < 8 && y >= 0 && y < 8;
+var bishop = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+var rook = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+var knight = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
+function initialPosition(mode) {
+  const board = Array(64).fill("");
+  if (mode === "standard") {
+    [..."rnbqkbnrpppppppp"].forEach((p, i) => board[i] = p);
+    [..."PPPPPPPPRNBQKBNR"].forEach((p, i) => board[i + 48] = p);
+  } else {
+    board[4] = "k";
+    board[60] = "K";
+  }
+  const s = { mode, board, turn: 0, rights: mode === "standard" ? "KQkq" : "", ep: -1, virgin: mode === "elixer" ? [4, 60] : [], coins: [3, 3], half: 0, ply: 0, repeats: [] };
+  s.repeats = [positionKey(s)];
+  return s;
+}
+function attacked(s, target, by) {
+  const x = target % 8, y = Math.floor(target / 8);
+  for (const dx of [-1, 1]) {
+    const py = y + (by === 0 ? 1 : -1), px = x + dx;
+    if (inside(px, py) && s.board[py * 8 + px] === (by === 0 ? "P" : "p")) return true;
+  }
+  for (const [dx, dy] of knight) if (inside(x + dx, y + dy) && s.board[(y + dy) * 8 + x + dx] === (by === 0 ? "N" : "n")) return true;
+  for (const [dx, dy] of [...bishop, ...rook]) {
+    for (let d = 1; inside(x + dx * d, y + dy * d); d++) {
+      const p = s.board[(y + dy * d) * 8 + x + dx * d];
+      if (!p) continue;
+      if (colorOf(p) === by && (p.toLowerCase() === "q" || p.toLowerCase() === (dx && dy ? "b" : "r") || d === 1 && p.toLowerCase() === "k")) return true;
+      break;
+    }
+  }
+  return false;
+}
+function inCheck(s, color = s.turn) {
+  const i = s.board.indexOf(color === 0 ? "K" : "k");
+  return i < 0 || attacked(s, i, 1 - color);
+}
+function pseudo(s) {
+  const actions = [], add = (from, to) => {
+    if (s.board[to]?.toLowerCase() === "k") return;
+    if (s.board[from].toLowerCase() === "p" && (to < 8 || to >= 56)) for (const promotion of ["q", "r", "b", "n"]) actions.push({ from, to, promotion });
+    else actions.push({ from, to });
+  };
+  for (let from = 0; from < 64; from++) {
+    const p = s.board[from];
+    if (!p || colorOf(p) !== s.turn) continue;
+    const type = p.toLowerCase(), x = from % 8, y = Math.floor(from / 8);
+    if (type === "p") {
+      const dy = s.turn === 0 ? -1 : 1, next = from + dy * 8;
+      if (inside(x, y + dy) && !s.board[next]) {
+        add(from, next);
+        if ((s.mode === "elixer" ? s.virgin.includes(from) : y === (s.turn === 0 ? 6 : 1)) && inside(x, y + 2 * dy) && !s.board[from + 16 * dy]) add(from, from + 16 * dy);
+      }
+      for (const dx of [-1, 1]) if (inside(x + dx, y + dy)) {
+        const to = next + dx, target = s.board[to];
+        if (target && colorOf(target) !== s.turn || to === s.ep && s.board[to - dy * 8]?.toLowerCase() === "p") add(from, to);
+      }
+    } else {
+      const directions = type === "n" ? knight : type === "b" ? bishop : type === "r" ? rook : [...bishop, ...rook];
+      for (const [dx, dy] of directions) for (let d = 1; inside(x + d * dx, y + d * dy); d++) {
+        const to = (y + d * dy) * 8 + x + d * dx, target = s.board[to];
+        if (target && colorOf(target) === s.turn) break;
+        add(from, to);
+        if (target || type === "n" || type === "k") break;
+      }
+      if (type === "k" && from === (s.turn === 0 ? 60 : 4) && !inCheck(s)) for (const [right, corner, step] of [[s.turn === 0 ? "K" : "k", from + 3, 1], [s.turn === 0 ? "Q" : "q", from - 4, -1]]) {
+        const eligible = s.mode === "elixer" ? s.virgin.includes(from) && s.virgin.includes(corner) : s.rights.includes(right);
+        if (!eligible || s.board[corner] !== (s.turn === 0 ? "R" : "r")) continue;
+        if (s.board[from + step] || s.board[from + step * 2] || step < 0 && s.board[from - 3]) continue;
+        if (!attacked(s, from + step, 1 - s.turn) && !attacked(s, from + step * 2, 1 - s.turn)) add(from, from + step * 2);
+      }
+    }
+  }
+  if (s.mode === "elixer") {
+    for (const buy of Object.keys(costs)) if (s.coins[s.turn] >= costs[buy]) {
+      const start = s.turn === 0 ? 48 : 0;
+      for (let to = start; to < start + 16; to++) if (!s.board[to]) actions.push({ buy, to });
+    }
+  }
+  return actions;
+}
+function transition(s, a) {
+  const board = s.board.slice(), color = s.turn, captured = board[a.to];
+  let rights = s.rights, virgin = s.virgin.filter((i) => i !== a.to && i !== a.from), ep = -1;
+  const coins = [...s.coins];
+  let half = s.half + 1;
+  if (a.buy) {
+    board[a.to] = color === 0 ? a.buy.toUpperCase() : a.buy;
+    coins[color] -= costs[a.buy];
+    virgin.push(a.to);
+    half = 0;
+  } else {
+    const from = a.from, p = board[from], type = p.toLowerCase();
+    board[from] = "";
+    board[a.to] = p;
+    if (type === "p") {
+      half = 0;
+      if (Math.abs(a.to - from) === 16) ep = (a.to + from) / 2;
+      if (a.to === s.ep && !captured && from % 8 !== a.to % 8) {
+        const victim = a.to + (color === 0 ? 8 : -8);
+        board[victim] = "";
+        virgin = virgin.filter((i) => i !== victim);
+      }
+      if (a.promotion) board[a.to] = color === 0 ? a.promotion.toUpperCase() : a.promotion;
+    }
+    if (type === "k") {
+      rights = rights.replace(color === 0 ? /[KQ]/g : /[kq]/g, "");
+      if (Math.abs(a.to - from) === 2) {
+        const corner = a.to > from ? from + 3 : from - 4, dest = a.to > from ? from + 1 : from - 1;
+        board[dest] = board[corner];
+        board[corner] = "";
+        virgin = virgin.filter((i) => i !== corner);
+      }
+    }
+    if (captured) half = 0;
+    for (const [i, right] of [[0, "q"], [7, "k"], [56, "Q"], [63, "K"]]) if (from === i || a.to === i) rights = rights.replace(right, "");
+  }
+  if (s.mode === "elixer") coins[color]++;
+  return { ...s, board, rights, virgin, coins, ep, half, turn: 1 - color, ply: s.ply + 1, last: a };
+}
+function legalActions(s) {
+  return pseudo(s).filter((a) => !inCheck(transition(s, a), s.turn));
+}
+function sameAction(a, b) {
+  return a.from === b.from && a.to === b.to && a.buy === b.buy && a.promotion === b.promotion;
+}
+function positionKey(s) {
+  const ep = s.ep >= 0 && pseudo({ ...s, coins: [0, 0] }).some((a) => a.from !== void 0 && a.to === s.ep && s.board[a.from].toLowerCase() === "p" && a.from % 8 !== a.to % 8 && !inCheck(transition(s, a), s.turn)) ? s.ep : -1;
+  return `${s.board.map((p) => p || ".").join("")}/${s.turn}/${s.rights}/${ep}${s.mode === "elixer" ? `/${s.coins}/${s.virgin.slice().sort((a, b) => a - b)}` : ""}`;
+}
+function applyAction(s, action) {
+  const a = legalActions(s).find((a2) => sameAction(a2, action));
+  if (!a) throw new Error("Illegal chess action");
+  return advanceLegalAction(s, a);
+}
+function advanceLegalAction(s, a) {
+  const next = transition(s, a);
+  next.repeats = [...next.half === 0 && s.mode === "standard" ? [] : s.repeats, positionKey(next)].slice(-1001);
+  return next;
+}
+function insufficient(s) {
+  if (s.mode !== "standard") return false;
+  const rest = s.board.flatMap((p, i) => p && p.toLowerCase() !== "k" ? [{ p: p.toLowerCase(), i }] : []);
+  if (!rest.length) return true;
+  if (rest.length === 1 && ["b", "n"].includes(rest[0].p)) return true;
+  return rest.every((v) => v.p === "b") && rest.every((v) => (v.i % 8 + Math.floor(v.i / 8)) % 2 === (rest[0].i % 8 + Math.floor(rest[0].i / 8)) % 2);
+}
+function repetitionCount(s) {
+  const key = positionKey(s);
+  return s.repeats.filter((k) => k === key).length;
+}
+function canMateOnTimeout(s, color) {
+  const own = s.board.filter((p) => p && colorOf(p) === color && p.toLowerCase() !== "k");
+  if (!own.length) return false;
+  if (own.length === 1 && ["b", "n"].includes(own[0].toLowerCase()) && s.board.filter((p) => p && colorOf(p) !== color && p.toLowerCase() !== "k").length === 0) return false;
+  return !insufficient(s);
+}
+function outcome(s) {
+  if (!legalActions(s).length) return inCheck(s) ? s.turn === 0 ? "Black wins by checkmate" : "White wins by checkmate" : "Draw by stalemate";
+  if (insufficient(s)) return "Draw by insufficient material";
+  if (s.mode === "standard" && (s.half >= 150 || repetitionCount(s) >= 5)) return "Draw by automatic rule";
+  return s.ply >= 1e3 ? "Draw by game length limit" : null;
+}
+
+// apps/api/src/chess.ts
+var chessCreate = z4.object({ requestId: z4.string().uuid(), serverId: z4.string().min(1).max(100), opponentId: z4.string().min(1).max(100).optional(), difficulty: z4.enum(["Easy", "Medium", "Hard"]).optional(), mode: z4.enum(["standard", "elixer"]), minutes: z4.union([z4.literal(3), z4.literal(5), z4.literal(10), z4.literal(15)]), increment: z4.union([z4.literal(0), z4.literal(2), z4.literal(5), z4.literal(10)]) }).strict().refine((b) => Boolean(b.opponentId) !== Boolean(b.difficulty), "Choose a person or AI");
+var chessCommand = z4.object({ requestId: z4.string().uuid(), revision: z4.number().int().positive(), kind: z4.enum(["accept", "decline", "cancel", "action", "resign", "offerDraw", "acceptDraw", "declineDraw", "claimDraw"]), action: z4.object({ from: z4.number().int().min(0).max(63).optional(), to: z4.number().int().min(0).max(63), buy: z4.enum(["p", "n", "b", "r", "q"]).optional(), promotion: z4.enum(["q", "r", "b", "n"]).optional() }).strict().optional() }).strict();
+var winner = (color, reason) => `${color === 0 ? "White" : "Black"} wins by ${reason}`;
+function chargeClock(g, now) {
+  if (g.status !== "playing" || g.pausedUntil) return;
+  const color = g.position.turn;
+  g.remaining[color] = Math.max(0, g.remaining[color] - Math.max(0, now - g.runningSince));
+  g.runningSince = now;
+  if (!g.remaining[color]) {
+    g.status = "finished";
+    g.result = g.position.mode === "standard" && !canMateOnTimeout(g.position, 1 - color) ? "Draw by insufficient material" : winner(1 - color, "timeout");
+  }
+}
+function chooseAi(s, difficulty) {
+  const actions = legalActions(s);
+  if (!actions.length) return;
+  if (difficulty === "Easy") return actions[Math.floor(Math.random() * actions.length)];
+  const values = { ...costs, k: 100 }, color = s.turn, deadline = performance.now() + 8;
+  const evaluate = (p) => p.board.reduce((score2, piece) => score2 + (piece ? (piece === piece.toUpperCase() ? 1 : -1) * values[piece.toLowerCase()] : 0), 0) * (color === 0 ? 1 : -1) + (p.coins[color] - p.coins[1 - color]) * 0.12;
+  const ranked = actions.map((a) => ({ a, hint: (a.buy ? 0.2 : values[s.board[a.to]?.toLowerCase()] || 0) + (a.promotion ? 8 : 0) })).sort((a, b) => b.hint - a.hint);
+  let best = ranked[0].a, score = -Infinity, searched = 0;
+  for (const { a } of ranked) {
+    if (performance.now() > deadline && searched) break;
+    const next = advanceLegalAction(s, a);
+    let value = evaluate(next) + (inCheck(next) ? 0.3 : 0);
+    if (difficulty === "Hard" && searched < 12) {
+      const replies = legalActions(next).sort((a2, b) => (values[next.board[b.to]?.toLowerCase()] || 0) - (values[next.board[a2.to]?.toLowerCase()] || 0)).slice(0, 12);
+      for (const reply of replies) {
+        if (performance.now() > deadline) break;
+        value = Math.min(value, evaluate(advanceLegalAction(next, reply)));
+      }
+    }
+    if (value > score) {
+      score = value;
+      best = a;
+    }
+    searched++;
+  }
+  return best;
+}
+var ChessService = class {
+  constructor(service) {
+    this.service = service;
+  }
+  service;
+  active = /* @__PURE__ */ new Map();
+  timer;
+  closed = false;
+  epoch = Date.now();
+  monotonic = performance.now();
+  now = () => this.epoch + performance.now() - this.monotonic;
+  notify = async () => {
+  };
+  online = () => true;
+  onError = () => {
+  };
+  async initialize() {
+    const rows = await this.service.db.all("SELECT state FROM chess_games WHERE status<>'finished'");
+    for (const row of rows) {
+      const g = JSON.parse(row.state);
+      if (g.status === "playing") {
+        const now = this.now();
+        this.expire(g, now);
+        if (g.status === "playing") {
+          g.missing = [g.whiteId, ...g.blackId ? [g.blackId] : []];
+          g.missingAt = Object.fromEntries(g.missing.map((id2) => [id2, now]));
+          g.pausedUntil = now + 3e4;
+          g.runningSince = now;
+        }
+        g.revision++;
+        await this.save(this.service.db, g);
+      }
+      if (g.status !== "finished") this.active.set(g.id, g);
+    }
+    this.schedule();
+  }
+  close() {
+    this.closed = true;
+    clearTimeout(this.timer);
+  }
+  async allowed(tx, uid, g) {
+    const member = await tx.one("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.user_id=? AND m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [uid, g.serverId]);
+    if (!member) fail(403, "FORBIDDEN", "Join the match server to play or watch.");
+    const ids = [g.whiteId, ...g.blackId ? [g.blackId] : []];
+    for (const id2 of ids) if (!await tx.one("SELECT user_id FROM members WHERE server_id=? AND user_id=?", [g.serverId, id2])) fail(403, "FORBIDDEN", "A player has left the match server.");
+  }
+  async load(tx, id2) {
+    const row = await tx.one("SELECT state FROM chess_games WHERE id=?", [id2]);
+    if (!row) fail(404, "NOT_FOUND", "Chess match not found.");
+    return JSON.parse(row.state);
+  }
+  async save(tx, g) {
+    g.updatedAt = this.now();
+    await tx.run("INSERT INTO chess_games(id,server_id,white_id,black_id,status,updated_at,state) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,state=excluded.state", [g.id, g.serverId, g.whiteId, g.blackId, g.status, g.updatedAt, JSON.stringify(g)]);
+  }
+  async get(uid, id2) {
+    return this.service.db.transaction(async (tx) => {
+      const g = await this.load(tx, id2);
+      await this.allowed(tx, uid, g);
+      const now = this.now();
+      const view = structuredClone(g);
+      chargeClock(view, now);
+      const ownTurn = (view.position.turn === 0 ? view.whiteId : view.blackId) === uid;
+      return { ...view, serverNow: now, actions: view.status === "playing" && !view.pausedUntil && ownTurn ? legalActions(view.position) : [], check: inCheck(view.position), canClaimDraw: view.position.mode === "standard" && (view.position.half >= 100 || repetitionCount(view.position) >= 3) };
+    });
+  }
+  async list(uid, serverId) {
+    if (!await this.service.db.one("SELECT user_id FROM members WHERE server_id=? AND user_id=?", [serverId, uid])) fail(403, "FORBIDDEN", "Server membership required.");
+    const rows = await this.service.db.all("SELECT state FROM chess_games WHERE server_id=? ORDER BY updated_at DESC LIMIT 30", [serverId]);
+    return rows.map((r) => JSON.parse(r.state)).map(({ id: id2, whiteId, blackId, whiteName, blackName, status, position, minutes, increment, result }) => ({ id: id2, whiteId, blackId, whiteName, blackName, status, mode: position.mode, minutes, increment, result }));
+  }
+  async create(uid, b) {
+    const result = await this.service.mutate(uid, b.requestId, "chess.create", b, async (tx) => {
+      const names = [];
+      for (const userId of [uid, ...b.opponentId ? [b.opponentId] : []]) {
+        const row = await tx.one("SELECT u.display_name FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND m.user_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [b.serverId, userId]);
+        if (!row) fail(403, "FORBIDDEN", "Both players must belong to this server.");
+        names.push(row.display_name);
+      }
+      if (b.opponentId === uid) fail(400, "INVALID_REQUEST", "Choose another player.");
+      if (b.opponentId && await tx.one("SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)", [uid, b.opponentId, b.opponentId, uid])) fail(403, "FORBIDDEN", "This challenge is unavailable.");
+      const active = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [uid, uid]);
+      const pending = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status='pending' AND (white_id=? OR black_id=?)", [uid, uid]);
+      const total = await tx.one("SELECT COUNT(*) AS n FROM chess_games WHERE status<>'finished'");
+      if (Number(active.n) >= 1 || Number(pending.n) >= 3 || Number(total.n) >= 60) fail(409, "CAPACITY", "Finish your current game or pending challenges first.");
+      const now = this.now(), g = { id: randomUUID2(), serverId: b.serverId, whiteId: uid, blackId: b.opponentId || null, whiteName: names[0], blackName: names[1] || `${b.difficulty} AI`, difficulty: b.difficulty || null, status: b.opponentId ? "pending" : "playing", position: initialPosition(b.mode), revision: 1, minutes: b.minutes, increment: b.increment, remaining: [b.minutes * 6e4, b.minutes * 6e4], runningSince: now, pausedUntil: 0, missing: [], missingAt: {}, grace: [3e4, 3e4], result: null, drawBy: null, createdAt: now, updatedAt: now, log: [] };
+      await tx.run("DELETE FROM chess_games WHERE id IN (SELECT id FROM chess_games WHERE status='finished' ORDER BY updated_at DESC LIMIT 10000 OFFSET 999)");
+      await this.save(tx, g);
+      return { id: g.id };
+    });
+    await this.changed(result.id);
+    return this.get(uid, result.id);
+  }
+  async command(uid, id2, b) {
+    const result = await this.service.mutate(uid, b.requestId, "chess.command", { id: id2, ...b }, async (tx) => {
+      const g = await this.load(tx, id2);
+      await this.allowed(tx, uid, g);
+      if (uid !== g.whiteId && uid !== g.blackId) fail(403, "FORBIDDEN", "Spectators cannot change a match.");
+      if (g.revision !== b.revision) fail(409, "STALE_GAME", "The board changed. Review the latest position.");
+      const now = this.now();
+      this.expire(g, now);
+      if (g.status === "finished") fail(409, "GAME_FINISHED", "The match has ended.");
+      if (g.status === "pending") {
+        if (b.kind === "accept" && uid === g.blackId) {
+          if (!this.online(g.whiteId) || !this.online(g.blackId)) fail(409, "OFFLINE", "Both players must be online to start.");
+          for (const player of [g.whiteId, g.blackId]) if (await tx.one("SELECT id FROM chess_games WHERE status='playing' AND (white_id=? OR black_id=?)", [player, player])) fail(409, "CAPACITY", "A player already has an active match.");
+          g.status = "playing";
+          g.runningSince = now;
+        } else if (b.kind === "decline" && uid === g.blackId || b.kind === "cancel" && uid === g.whiteId) {
+          g.status = "finished";
+          g.result = "Challenge cancelled";
+        } else fail(400, "INVALID_REQUEST", "Accept, decline or cancel this challenge first.");
+      } else if (b.kind === "resign") {
+        g.status = "finished";
+        g.result = winner(uid === g.whiteId ? 1 : 0, "resignation");
+      } else {
+        if (g.pausedUntil) fail(409, "PAUSED", "Waiting for reconnection.");
+        chargeClock(g, now);
+        if (b.kind === "action") {
+          if ((g.position.turn === 0 ? g.whiteId : g.blackId) !== uid) fail(403, "WRONG_TURN", "Wait for your turn.");
+          if (!b.action) fail(400, "INVALID_REQUEST", "Choose a move.");
+          this.move(g, b.action);
+        } else if (b.kind === "offerDraw") {
+          if (g.drawBy) fail(409, "DRAW_PENDING", "A draw offer is already pending.");
+          g.drawBy = uid;
+        } else if (b.kind === "acceptDraw" && g.drawBy && g.drawBy !== uid) {
+          g.status = "finished";
+          g.result = "Draw by agreement";
+        } else if (b.kind === "declineDraw" && g.drawBy && g.drawBy !== uid) g.drawBy = null;
+        else if (b.kind === "claimDraw" && (g.position.turn === 0 ? g.whiteId : g.blackId) === uid && g.position.mode === "standard" && (g.position.half >= 100 || repetitionCount(g.position) >= 3)) {
+          g.status = "finished";
+          g.result = "Draw claimed by rule";
+        } else fail(400, "INVALID_REQUEST", "That match action is unavailable.");
+      }
+      g.revision++;
+      await this.save(tx, g);
+      return { id: id2 };
+    });
+    await this.changed(result.id);
+    return this.get(uid, result.id);
+  }
+  move(g, a) {
+    const color = g.position.turn;
+    try {
+      g.position = applyAction(g.position, a);
+    } catch {
+      fail(400, "ILLEGAL_MOVE", "That move or purchase is not legal.");
+    }
+    g.remaining[color] += g.increment * 1e3;
+    g.drawBy = null;
+    g.log.push(a.buy ? `${a.buy.toUpperCase()} @ ${squareName(a.to)}` : `${squareName(a.from)}\u2013${squareName(a.to)}${a.promotion ? "=" + a.promotion.toUpperCase() : ""}`);
+    const result = outcome(g.position);
+    if (result) {
+      g.status = "finished";
+      g.result = result;
+    }
+  }
+  expire(g, now) {
+    if (g.status === "pending" && now >= g.createdAt + 12e4) {
+      g.status = "finished";
+      g.result = "Challenge expired";
+    }
+    if (g.status !== "playing") return;
+    if (g.pausedUntil && now >= g.pausedUntil) {
+      g.status = "finished";
+      g.result = g.missing.length > 1 ? "Draw after both players disconnected" : winner(g.missing[0] === g.whiteId ? 1 : 0, "disconnection");
+    } else chargeClock(g, now);
+  }
+  async presence(uid, online) {
+    const ids = [...this.active.values()].filter((g) => g.status === "playing" && (g.whiteId === uid || g.blackId === uid)).map((g) => g.id);
+    for (const id2 of ids) {
+      const changed = await this.service.db.transaction(async (tx) => {
+        const g = await this.load(tx, id2), now = this.now();
+        if (g.status !== "playing") return false;
+        this.expire(g, now);
+        const color = uid === g.whiteId ? 0 : 1;
+        if (online && g.missing.includes(uid)) {
+          g.grace[color] = Math.max(0, g.grace[color] - (now - g.missingAt[uid]));
+          g.missing = g.missing.filter((v) => v !== uid);
+          delete g.missingAt[uid];
+        } else if (!online && !g.missing.includes(uid)) {
+          g.missing.push(uid);
+          g.missingAt[uid] = now;
+        } else return false;
+        g.pausedUntil = g.missing.length ? Math.min(...g.missing.map((v) => g.missingAt[v] + g.grace[v === g.whiteId ? 0 : 1])) : 0;
+        if (!g.pausedUntil) g.runningSince = now;
+        this.expire(g, now);
+        g.revision++;
+        await this.save(tx, g);
+        return true;
+      });
+      if (changed) await this.changed(id2);
+    }
+  }
+  async changed(id2) {
+    if (this.closed) return;
+    const row = await this.service.db.one("SELECT state FROM chess_games WHERE id=?", [id2]);
+    if (!row) {
+      this.active.delete(id2);
+      this.schedule();
+      return;
+    }
+    const g = JSON.parse(row.state);
+    if (g.status === "finished") this.active.delete(id2);
+    else this.active.set(id2, g);
+    await this.notify(g).catch(this.onError);
+    this.schedule();
+    if (g.status === "playing" && !g.pausedUntil && !g.blackId && g.position.turn === 1) setImmediate(() => {
+      if (!this.closed) void this.bot(id2, g.revision).catch(this.onError);
+    });
+  }
+  async bot(id2, revision) {
+    await this.service.db.transaction(async (tx) => {
+      const g = await this.load(tx, id2);
+      if (g.revision !== revision || g.status !== "playing" || g.pausedUntil || g.blackId || g.position.turn !== 1) return;
+      const now = this.now();
+      this.expire(g, now);
+      if (g.status === "playing") {
+        const a = chooseAi(g.position, g.difficulty);
+        if (a) {
+          chargeClock(g, this.now());
+          if (g.status === "playing") this.move(g, a);
+        }
+      }
+      g.revision++;
+      await this.save(tx, g);
+    });
+    await this.changed(id2);
+  }
+  schedule() {
+    clearTimeout(this.timer);
+    if (this.closed || !this.active.size) return;
+    const deadline = Math.min(...[...this.active.values()].map((g) => g.status === "pending" ? g.createdAt + 12e4 : g.pausedUntil || g.runningSince + g.remaining[g.position.turn]));
+    this.timer = setTimeout(() => {
+      void this.tick().catch((e) => {
+        this.onError(e);
+        if (!this.closed) {
+          this.timer = setTimeout(() => {
+            this.schedule();
+          }, 1e3);
+          this.timer.unref();
+        }
+      });
+    }, Math.max(1, Math.ceil(deadline - this.now())));
+    this.timer.unref();
+  }
+  async tick() {
+    for (const id2 of [...this.active.keys()]) {
+      const changed = await this.service.db.transaction(async (tx) => {
+        const row = await tx.one("SELECT state FROM chess_games WHERE id=?", [id2]);
+        if (!row) {
+          this.active.delete(id2);
+          return false;
+        }
+        const g = JSON.parse(row.state);
+        this.expire(g, this.now());
+        if (g.status !== "finished") return false;
+        g.revision++;
+        await this.save(tx, g);
+        return true;
+      });
+      if (changed) await this.changed(id2);
+    }
+    this.schedule();
+  }
+};
+
 // apps/api/src/app.ts
 async function createApp(c = config(), options = {}) {
   const logging = options.logger ?? !process.env.VITEST;
@@ -622,6 +1103,9 @@ async function createApp(c = config(), options = {}) {
   writeSync(lock, String(process.pid));
   closeSync(lock);
   const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service);
+  const chess = new ChessService(service);
+  chess.onError = (e) => app2.log.error({ err: e }, "Chess task failed");
+  await chess.initialize();
   const eventLoop = monitorEventLoopDelay({ resolution: 20 });
   eventLoop.enable();
   const realtime = { actions: {}, disconnects: {}, maintenance: { passes: 0, maxMs: 0, maxTimerDelayMs: 0 } };
@@ -708,7 +1192,7 @@ async function createApp(c = config(), options = {}) {
     await db.transaction(async (tx) => {
       const old = await tx.all("SELECT id FROM sessions WHERE user_id=? ORDER BY created_at DESC", [userId]);
       for (const s of old.slice(2)) await tx.run("DELETE FROM sessions WHERE id=?", [s.id]);
-      await tx.run("INSERT INTO sessions(id,user_id,access_hash,refresh_hash,csrf,native,access_expires,expires_at,created_at,device_name,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [randomUUID2(), userId, hash(access), refresh ? hash(refresh) : null, csrf, Number(native), now + (native ? 15 * 6e4 : 30 * 864e5), now + 30 * 864e5, now, device.slice(0, 160), now]);
+      await tx.run("INSERT INTO sessions(id,user_id,access_hash,refresh_hash,csrf,native,access_expires,expires_at,created_at,device_name,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [randomUUID3(), userId, hash(access), refresh ? hash(refresh) : null, csrf, Number(native), now + (native ? 15 * 6e4 : 30 * 864e5), now + 30 * 864e5, now, device.slice(0, 160), now]);
     });
     const account = await db.one("SELECT * FROM users WHERE id=?", [userId]);
     if (!native) setCookie(reply, access);
@@ -743,7 +1227,7 @@ async function createApp(c = config(), options = {}) {
       const count = await tx.one("SELECT COUNT(*) AS count FROM users");
       if (count.count >= c.maxUsers) fail(409, "ACCOUNT_LIMIT", "This instance has reached its account limit.");
       if (await tx.one("SELECT id FROM users WHERE username=?", [username])) fail(409, "USERNAME_TAKEN", "This username is unavailable.");
-      const userId2 = randomUUID2();
+      const userId2 = randomUUID3();
       await tx.run("INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)", [userId2, username, body.displayName, encoded, Date.now(), body.language || ""]);
       return userId2;
     });
@@ -761,8 +1245,8 @@ async function createApp(c = config(), options = {}) {
     return sessionFor(user.id, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Unknown device"));
   });
   app2.post("/api/v1/auth/refresh", { config: authRate }, async (req) => {
-    const body = z4.object({ refreshToken: z4.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
-    const outcome = await db.transaction(async (tx) => {
+    const body = z5.object({ refreshToken: z5.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
+    const outcome2 = await db.transaction(async (tx) => {
       const reused = await tx.one("SELECT session_id FROM used_refresh WHERE hash=?", [fingerprint]);
       if (reused) {
         await tx.run("DELETE FROM sessions WHERE id=?", [reused.session_id]);
@@ -776,16 +1260,20 @@ async function createApp(c = config(), options = {}) {
       await tx.run("UPDATE sessions SET access_hash=?,refresh_hash=?,access_expires=?,expires_at=?,last_seen=? WHERE id=?", [hash(accessToken), hash(refreshToken), Date.now() + 15 * 6e4, Date.now() + 30 * 864e5, Date.now(), old.id]);
       return { accessToken, refreshToken, csrf: old.csrf };
     });
-    if (!outcome) fail(401, "REFRESH_INVALID", "Session expired. Sign in again.");
-    return outcome;
+    if (!outcome2) fail(401, "REFRESH_INVALID", "Session expired. Sign in again.");
+    return outcome2;
   });
   publicAccountRoutes(app2, service, authRate, sessionFor, disconnectInvalidSessions);
   await app2.register(async (api) => {
     api.addHook("preHandler", authenticate);
     protectedAccountRoutes(api, service, disconnectInvalidSessions);
+    api.get("/chess", async (req) => ({ games: await chess.list(req.account.id, z5.string().min(1).max(100).parse(req.query.serverId)) }));
+    api.post("/chess", async (req) => chess.create(req.account.id, chessCreate.parse(req.body)));
+    api.get("/chess/:id", async (req) => chess.get(req.account.id, id.parse(req.params.id)));
+    api.post("/chess/:id", async (req) => chess.command(req.account.id, id.parse(req.params.id), chessCommand.parse(req.body)));
     attachments.register(api);
     api.post("/auth/renew", async (req, reply) => {
-      z4.object({ requestId }).parse(req.body);
+      z5.object({ requestId }).parse(req.body);
       if (req.session.native) fail(400, "NATIVE_REFRESH", "Use native credential renewal.");
       const access = token(), now = Date.now();
       await db.run("UPDATE sessions SET access_hash=?,access_expires=?,expires_at=?,last_seen=? WHERE id=?", [hash(access), now + 30 * 864e5, now + 30 * 864e5, now, req.session.id]);
@@ -794,14 +1282,14 @@ async function createApp(c = config(), options = {}) {
     });
     api.get("/auth/me", async (req) => ({ user: publicUser(req.account), csrf: req.session.csrf }));
     api.post("/auth/logout", async (req, reply) => {
-      z4.object({ requestId }).parse(req.body);
+      z5.object({ requestId }).parse(req.body);
       await db.run("DELETE FROM sessions WHERE id=?", [req.session.id]);
       for (const s of io.sockets.sockets.values()) if (s.data.sessionId === req.session.id) s.disconnect(true);
       reply.clearCookie("dorham_session", { path: "/" });
       return { success: true };
     });
     api.post("/auth/password", async (req) => {
-      const b = z4.object({ currentPassword: z4.string().max(128), password: passwordSchema, requestId }).parse(req.body);
+      const b = z5.object({ currentPassword: z5.string().max(128), password: passwordSchema, requestId }).parse(req.body);
       if (req.account.guest || !await passwordVerify(req.account.password_hash, b.currentPassword)) fail(401, "INVALID_CREDENTIALS", "Current password is incorrect.");
       const encoded = await passwordHash(b.password);
       const result = await service.mutate(req.account.id, b.requestId, "password.change", { fingerprint: hash(b.password) }, async (tx) => {
@@ -813,7 +1301,7 @@ async function createApp(c = config(), options = {}) {
       return result;
     });
     api.post("/admin/claim", async (req) => {
-      const b = z4.object({ secret: z4.string().max(256), requestId }).parse(req.body);
+      const b = z5.object({ secret: z5.string().max(256), requestId }).parse(req.body);
       if (!c.bootstrapSecret || !equal(c.bootstrapSecret, b.secret)) fail(403, "FORBIDDEN", "Bootstrap secret is invalid.");
       return service.mutate(req.account.id, b.requestId, "admin.claim", {}, async (tx) => {
         if (await tx.one("SELECT value FROM meta WHERE key='admin_claimed'")) fail(409, "ALREADY_CLAIMED", "Instance administration has already been claimed.");
@@ -853,7 +1341,7 @@ async function createApp(c = config(), options = {}) {
         let size = 0;
         for (const f of await readdir(avatarDir)) size += (await stat3(path3.join(avatarDir, f))).size;
         if (size + image.length > c.maxAvatarsMiB * 1024 * 1024) fail(507, "AVATAR_QUOTA", "Avatar storage is full.");
-        const name = `${randomUUID2()}.webp`;
+        const name = `${randomUUID3()}.webp`;
         await writeFile(path3.join(avatarDir, name), image, { flag: "wx" });
         const old = await tx.one("SELECT avatar FROM users WHERE id=?", [req.account.id]);
         await tx.run("UPDATE users SET avatar=? WHERE id=?", [`/avatars/${name}`, req.account.id]);
@@ -869,11 +1357,11 @@ async function createApp(c = config(), options = {}) {
     api.get("/channels/:id", async (req) => service.channel(db, req.account.id, id.parse(req.params.id)));
     api.get("/channels/:id/overrides", async (req) => service.channelOverrides(req.account.id, id.parse(req.params.id), schemas.role.parse(req.query.role)));
     api.post("/servers", async (req) => {
-      const b = z4.object({ name: schemas.name, requestId }).parse(req.body);
+      const b = z5.object({ name: schemas.name, requestId }).parse(req.body);
       return service.createServer(req.account.id, b.requestId, b.name);
     });
     api.patch("/servers/:id", async (req) => {
-      const b = z4.object({ name: schemas.name.optional(), delete: z4.boolean().optional(), allowGuests: z4.boolean().optional(), allowMemberInvites: z4.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
+      const b = z5.object({ name: schemas.name.optional(), delete: z5.boolean().optional(), allowGuests: z5.boolean().optional(), allowMemberInvites: z5.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
       return service.changeServer(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/channels", async (req) => {
@@ -881,52 +1369,52 @@ async function createApp(c = config(), options = {}) {
       return service.createChannel(req.account.id, b.requestId, id.parse(req.params.id), b.name, b.kind);
     });
     api.patch("/channels/:id", async (req) => {
-      const b = z4.object({ name: schemas.name.optional(), delete: z4.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z4.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
+      const b = z5.object({ name: schemas.name.optional(), delete: z5.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z5.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
       return service.changeChannel(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/invites", async (req) => {
-      const b = z4.object({ hours: z4.number().int().min(1).max(168).default(24), uses: z4.number().int().min(1).max(100).default(10), requestId }).parse(req.body);
+      const b = z5.object({ hours: z5.number().int().min(1).max(168).default(24), uses: z5.number().int().min(1).max(100).default(10), requestId }).parse(req.body);
       return service.invite(req.account.id, b.requestId, id.parse(req.params.id), token(), b.hours, b.uses);
     });
     api.get("/servers/:id/invites", async (req) => service.invitations(req.account.id, id.parse(req.params.id)));
     api.delete("/servers/:id/invites/:code", async (req) => {
-      const b = z4.object({ requestId }).parse(req.body), p = req.params;
-      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z4.string().min(10).max(100).parse(p.code));
+      const b = z5.object({ requestId }).parse(req.body), p = req.params;
+      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z5.string().min(10).max(100).parse(p.code));
     });
     api.get("/servers/:id/roles", async (req) => service.customRoles(req.account.id, id.parse(req.params.id)));
     api.post("/servers/:id/roles", async (req) => {
-      const b = z4.object({ roleId: z4.string().uuid().optional(), name: z4.string().trim().min(1).max(32).optional(), color: z4.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z4.boolean().optional(), userId: id.optional(), assigned: z4.boolean().optional(), requestId }).strict().parse(req.body);
+      const b = z5.object({ roleId: z5.string().uuid().optional(), name: z5.string().trim().min(1).max(32).optional(), color: z5.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z5.boolean().optional(), userId: id.optional(), assigned: z5.boolean().optional(), requestId }).strict().parse(req.body);
       return service.changeCustomRole(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/invites/join", async (req) => {
-      const b = z4.object({ code: z4.string().min(10).max(100), requestId }).parse(req.body);
+      const b = z5.object({ code: z5.string().min(10).max(100), requestId }).parse(req.body);
       return service.joinInvite(req.account.id, b.requestId, b.code);
     });
     api.get("/servers/:id/members", async (req) => service.members(req.account.id, id.parse(req.params.id)));
     api.patch("/servers/:serverId/members/:userId", async (req) => {
-      const b = z4.object({ role: schemas.role.optional(), remove: z4.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
+      const b = z5.object({ role: schemas.role.optional(), remove: z5.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
       return service.changeMember(req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b);
     });
     api.post("/servers/:id/leave", async (req) => {
-      const b = z4.object({ requestId }).parse(req.body);
+      const b = z5.object({ requestId }).parse(req.body);
       return service.leaveServer(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/dms/:id/close", async (req) => {
-      const b = z4.object({ requestId }).parse(req.body);
+      const b = z5.object({ requestId }).parse(req.body);
       return service.closeDirectMessage(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/users/:id/block", async (req) => {
-      const b = z4.object({ blocked: z4.boolean(), requestId }).parse(req.body);
+      const b = z5.object({ blocked: z5.boolean(), requestId }).parse(req.body);
       return service.blockUser(req.account.id, b.requestId, id.parse(req.params.id), b.blocked);
     });
     api.post("/dms", async (req) => {
-      const b = z4.object({ userId: id, requestId }).parse(req.body);
+      const b = z5.object({ userId: id, requestId }).parse(req.body);
       const result = await service.dm(req.account.id, b.requestId, b.userId);
       await service.notify("state:changed", {});
       return result;
     });
     api.get("/conversations/:id/messages", async (req) => {
-      const b = z4.object({ before: z4.coerce.number().int().min(1).optional(), after: z4.coerce.number().int().min(0).optional() }).parse(req.query);
+      const b = z5.object({ before: z5.coerce.number().int().min(1).optional(), after: z5.coerce.number().int().min(0).optional() }).parse(req.query);
       return service.history(req.account.id, id.parse(req.params.id), b.before, b.after);
     });
     api.post("/messages", async (req) => {
@@ -934,29 +1422,29 @@ async function createApp(c = config(), options = {}) {
       return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds);
     });
     api.patch("/messages/:id", async (req) => {
-      const b = z4.object({ content: z4.string().trim().min(1).max(4e3).optional(), delete: z4.boolean().optional(), emoji: z4.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z4.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
+      const b = z5.object({ content: z5.string().trim().min(1).max(4e3).optional(), delete: z5.boolean().optional(), emoji: z5.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z5.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
       return service.changeMessage(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/conversations/:id/read", async (req) => {
-      const b = z4.object({ sequence: z4.number().int().min(0), requestId }).parse(req.body);
+      const b = z5.object({ sequence: z5.number().int().min(0), requestId }).parse(req.body);
       return service.read(req.account.id, b.requestId, id.parse(req.params.id), b.sequence);
     });
     api.get("/voice/:id", async (req) => service.room(req.account.id, id.parse(req.params.id)));
     api.post("/voice/:id/moderate", async (req) => {
-      const b = z4.object({ userId: id, action: z4.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
+      const b = z5.object({ userId: id, action: z5.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
       return service.moderate(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.action);
     });
     api.patch("/voice/:id/policy", async (req) => {
-      const b = z4.object({ locked: z4.boolean(), userLimit: z4.number().int().min(1).max(c.maxVoice), tagMode: z4.enum(["ANY", "ALL"]), requiredTags: z4.array(z4.string().uuid()).max(32), requestId }).parse(req.body);
+      const b = z5.object({ locked: z5.boolean(), userLimit: z5.number().int().min(1).max(c.maxVoice), tagMode: z5.enum(["ANY", "ALL"]), requiredTags: z5.array(z5.string().uuid()).max(32), requestId }).parse(req.body);
       return service.voicePolicy(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/voice/:id/move", async (req) => {
-      const b = z4.object({ userId: id, channelId: id, requestId }).parse(req.body);
+      const b = z5.object({ userId: id, channelId: id, requestId }).parse(req.body);
       return service.moveVoice(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.channelId);
     });
     api.get("/servers/:id/tags", async (req) => ({ tags: await service.tags(req.account.id, id.parse(req.params.id)) }));
     api.post("/servers/:id/tags", async (req) => {
-      const b = z4.object({ tagId: z4.string().uuid().optional(), name: z4.string().trim().min(1).max(32).optional(), color: z4.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z4.boolean().optional(), userId: id.optional(), assigned: z4.boolean().optional(), requestId }).parse(req.body);
+      const b = z5.object({ tagId: z5.string().uuid().optional(), name: z5.string().trim().min(1).max(32).optional(), color: z5.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z5.boolean().optional(), userId: id.optional(), assigned: z5.boolean().optional(), requestId }).parse(req.body);
       return service.changeTag(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.get("/admin/metrics", async (req) => {
@@ -971,6 +1459,12 @@ async function createApp(c = config(), options = {}) {
   }, { prefix: "/api/v1" });
   const io = new SocketServer(app2.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 12e4, skipMiddlewares: false }, pingInterval: 2e4, pingTimeout: 1e4, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
   mediaAdmission(app2, service, (socketId) => io.sockets.sockets.get(socketId)?.data.sessionId);
+  chess.online = (uid) => [...io.sockets.sockets.values()].some((s) => s.data.userId === uid);
+  chess.notify = async (g) => {
+    const members = new Set((await db.all("SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)", [g.serverId])).map((r) => r.user_id));
+    if (!members.has(g.whiteId) || g.blackId && !members.has(g.blackId)) return;
+    for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId)) s.emit("chess:changed", { id: g.id, serverId: g.serverId, challengeTo: g.status === "pending" ? g.blackId : null });
+  };
   io.use(async (socket, next) => {
     try {
       const cookieValue = String(socket.handshake.headers.cookie || "").split(";").map((s) => s.trim()).find((s) => s.startsWith("dorham_session="))?.split("=")[1];
@@ -1074,6 +1568,7 @@ async function createApp(c = config(), options = {}) {
       return;
     }
     io.emit("presence", { userId: socket.data.userId, online: true });
+    void chess.presence(socket.data.userId, true).catch(chess.onError);
     void measureConnection(socket).then(() => {
       if (socket.connected) socket.emit("connection:latencies", connectionLatency.snapshot(io.sockets.sockets.values()));
     });
@@ -1106,31 +1601,31 @@ async function createApp(c = config(), options = {}) {
       return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds);
     });
     handle("typing", async (b) => {
-      const v = z4.object({ conversationId: id, active: z4.boolean() }).parse(b);
+      const v = z5.object({ conversationId: id, active: z5.boolean() }).parse(b);
       const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter((s) => s.id !== socket.id).map((s) => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId);
       for (const id2 of audience) io.sockets.sockets.get(id2)?.emit("typing", { ...v, userId: socket.data.userId });
       return {};
     });
     handle("voice:join", async (b) => {
-      const v = z4.object({ channelId: id, eligible: z4.boolean() }).parse(b);
+      const v = z5.object({ channelId: id, eligible: z5.boolean() }).parse(b);
       const result = await service.joinVoice(socket.data.userId, socket.id, v.channelId, v.eligible);
       socket.data.voiceChannel = v.channelId;
       return result;
     });
     handle("voice:leave", async (b) => {
-      z4.object({ requestId }).parse(b);
+      z5.object({ requestId }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "leave");
       socket.data.voiceChannel = null;
       return result;
     });
     handle("voice:heartbeat", async (b) => {
-      const v = z4.object({ eligible: z4.boolean().optional() }).parse(b);
+      const v = z5.object({ eligible: z5.boolean().optional() }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "heartbeat", v);
       if ("room" in result) socket.emit("voice:room", result.room);
       return result;
     });
     handle("voice:state", async (b) => {
-      const v = z4.object({ muted: z4.boolean(), deafened: z4.boolean(), requestId }).parse(b);
+      const v = z5.object({ muted: z5.boolean(), deafened: z5.boolean(), requestId }).parse(b);
       return service.voiceAction(socket.data.userId, socket.id, "state", v);
     });
     handle("share:start", async (b) => {
@@ -1143,11 +1638,11 @@ async function createApp(c = config(), options = {}) {
       return service.updateShare(socket.data.userId, socket.id, v.requestId, v);
     });
     handle("share:stop", async (b) => {
-      const v = z4.object({ requestId }).parse(b);
+      const v = z5.object({ requestId }).parse(b);
       return service.share(socket.data.userId, socket.id, v.requestId, true);
     });
     handle("voice:sfu", async (b) => {
-      const v = z4.object({ channelId: id }).parse(b);
+      const v = z5.object({ channelId: id }).parse(b);
       return sfu.credentials(socket.data.userId, socket.id, v.channelId);
     });
     handle("voice:signal", async (b) => {
@@ -1170,6 +1665,7 @@ async function createApp(c = config(), options = {}) {
         const vm = await db.one("SELECT channel_id FROM voice_members WHERE socket_id=?", [socket.id]);
         if (vm) await service.voiceAction(socket.data.userId, socket.id, "leave");
         if (![...io.sockets.sockets.values()].some((s) => s.data.userId === socket.data.userId)) io.emit("presence", { userId: socket.data.userId, online: false });
+        if (!chess.online(socket.data.userId)) await chess.presence(socket.data.userId, false);
       } catch (err) {
         app2.log.error({ err }, "Disconnect cleanup failed");
       }
@@ -1213,6 +1709,7 @@ async function createApp(c = config(), options = {}) {
   }, 5e3);
   maintenance.unref();
   app2.addHook("preClose", async () => {
+    chess.close();
     clearInterval(maintenance);
     clearInterval(latencyTimer);
     io.engine.close();
@@ -1223,7 +1720,7 @@ async function createApp(c = config(), options = {}) {
     await db.close();
     if (existsSync(lockPath) && readFileSync(lockPath, "utf8") === String(process.pid)) unlinkSync(lockPath);
   });
-  return { app: app2, db, service, io, attachments, config: c };
+  return { app: app2, db, service, io, chess, attachments, config: c };
 }
 
 // apps/api/src/index.ts

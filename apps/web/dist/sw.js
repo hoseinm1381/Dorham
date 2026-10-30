@@ -1,5 +1,5 @@
-const CACHE = 'dorham-shell-56fe5a682460';
-const SHELL = ["./","./icon.svg","./icon-192.png","./icon-512.png","./manifest.webmanifest","./assets/index-PYMc49it.js","./assets/index-DNMsULCM.css","./assets/livekit-CYItdfkw.js","./assets/mesh-H2nulznt.js","./assets/native-BWskujmc.js","./assets/Vazirmatn-Variable-BeciDpKm.woff2"];
+const CACHE = 'dorham-shell-8ebbe9ba00fb';
+const SHELL = ["./","./icon.svg","./icon-192.png","./icon-512.png","./manifest.webmanifest","./assets/index-C4ZxLO0p.js","./assets/index-DNMsULCM.css","./assets/livekit-CEvWrWIV.js","./assets/mesh-DlzXWqVD.js","./assets/native-DzSpbi0F.js","./assets/Vazirmatn-Variable-BeciDpKm.woff2"];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))); self.clients.claim(); });
 self.addEventListener('fetch', event => {
