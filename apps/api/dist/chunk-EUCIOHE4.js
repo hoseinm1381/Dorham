@@ -37,7 +37,7 @@ function config(overrides = {}) {
     cloudflareTurnKeyId: process.env.CLOUDFLARE_TURN_KEY_ID || "",
     cloudflareTurnApiToken: process.env.CLOUDFLARE_TURN_API_TOKEN || "",
     mediaTransport: process.env.MEDIA_TRANSPORT === "livekit" ? "livekit" : "mesh",
-    screenMaxBitrate: num("SCREEN_MAX_BITRATE", 45e4),
+    screenMaxBitrate: num("SCREEN_MAX_BITRATE", 15e5),
     screenMaxFrameRate: num("SCREEN_MAX_FRAME_RATE", 30),
     standardShareSlots: num("STANDARD_SHARE_SLOTS", 3),
     trustedProxies: list("TRUSTED_PROXIES"),
@@ -305,4 +305,4 @@ export {
   config,
   openDatabase
 };
-//# sourceMappingURL=chunk-TVTC4KB5.js.map
+//# sourceMappingURL=chunk-EUCIOHE4.js.map

@@ -1,4 +1,6 @@
-Current update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
+Current deployed release: **0.7.4**, schema 8. The screen-sharing ceiling is now `SCREEN_MAX_BITRATE=1500000`; selectable bandwidth is 300–1500 kbps and new preferences default to 450 kbps. Current frame-rate policy remains 30fps, with three standard slots and room-first fallback. These encoder ceilings include shared sound; network overhead is additional. See [release verification](RELEASE-0.7.4.md). The older checkpoints below describe their historical configuration.
+
+Earlier update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
 
 Current deployed application: **0.5.0**, schema 4, three standard share slots plus room-first fallback, a 30fps selectable ceiling and the combined 450 kbps target. The operator explicitly authorized rollout despite failed capacity tests. See [release verification and limitations](RELEASE-0.5.0.md).
 

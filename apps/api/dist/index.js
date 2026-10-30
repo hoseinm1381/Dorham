@@ -26,7 +26,7 @@ import {
 import {
   config,
   openDatabase
-} from "./chunk-TVTC4KB5.js";
+} from "./chunk-EUCIOHE4.js";
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
