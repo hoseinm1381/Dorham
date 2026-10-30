@@ -24,6 +24,7 @@ import { ConnectionLatencyMonitor } from './connection-latency';
 import { Attachments } from './attachments';
 import { mediaAdmission } from './media-admission';
 import { publicAccountRoutes, protectedAccountRoutes, audit } from './accounts';
+import { ChessService, chessCreate, chessCommand } from './chess';
 
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
 export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean } = {}) {
@@ -38,6 +39,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }
   const lock = openSync(lockPath, 'wx'); writeSync(lock, String(process.pid)); closeSync(lock);
   const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service);
+  const chess = new ChessService(service); chess.onError = e => app.log.error({ err: e }, 'Chess task failed'); await chess.initialize();
   const eventLoop = monitorEventLoopDelay({ resolution: 20 }); eventLoop.enable();
   // Bounded aggregates only: no account IDs, addresses, message content, or traces.
   const realtime = { actions: {} as Record<string, { count: number; failures: number; totalMs: number; maxMs: number; slow: number }>, disconnects: {} as Record<string, number>, maintenance: { passes: 0, maxMs: 0, maxTimerDelayMs: 0 } };
@@ -170,6 +172,10 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   await app.register(async api => {
     api.addHook('preHandler', authenticate);
     protectedAccountRoutes(api, service, disconnectInvalidSessions);
+    api.get('/chess', async req => ({ games: await chess.list(req.account.id, z.string().min(1).max(100).parse((req.query as any).serverId)) }));
+    api.post('/chess', async req => chess.create(req.account.id, chessCreate.parse(req.body)));
+    api.get('/chess/:id', async req => chess.get(req.account.id, id.parse((req.params as any).id)));
+    api.post('/chess/:id', async req => chess.command(req.account.id, id.parse((req.params as any).id), chessCommand.parse(req.body)));
     attachments.register(api);
     api.post('/auth/renew', async (req, reply) => {
       z.object({ requestId }).parse(req.body);
@@ -255,6 +261,12 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }, { prefix: '/api/v1' });
   const io = new SocketServer(app.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 120000, skipMiddlewares: false }, pingInterval: 20000, pingTimeout: 10000, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
   mediaAdmission(app, service, socketId => io.sockets.sockets.get(socketId)?.data.sessionId);
+  chess.online = uid => [...io.sockets.sockets.values()].some(s => s.data.userId === uid);
+  chess.notify = async g => {
+    const members = new Set((await db.all('SELECT m.user_id FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id WHERE m.server_id=? AND u.banned=0 AND (u.guest=0 OR s.allow_guests=1)', [g.serverId])).map(r => r.user_id));
+    if (!members.has(g.whiteId) || (g.blackId && !members.has(g.blackId))) return;
+    for (const s of io.sockets.sockets.values()) if (members.has(s.data.userId)) s.emit('chess:changed', { id: g.id, serverId: g.serverId, challengeTo: g.status === 'pending' ? g.blackId : null });
+  };
   io.use(async (socket, next) => {
     try {
       const cookieValue = String(socket.handshake.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('dorham_session='))?.split('=')[1];
@@ -318,6 +330,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     const connected = new Set([...io.sockets.sockets.values()].map(s => s.data.userId));
     if (connected.size > c.maxOnline) { socket.emit('capacity', { message: 'Online capacity reached.' }); socket.disconnect(true); return; }
     io.emit('presence', { userId: socket.data.userId, online: true });
+    void chess.presence(socket.data.userId, true).catch(chess.onError);
     void measureConnection(socket).then(() => {
       if (socket.connected) socket.emit('connection:latencies', connectionLatency.snapshot(io.sockets.sockets.values()));
     });
@@ -361,6 +374,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
         const vm = await db.one('SELECT channel_id FROM voice_members WHERE socket_id=?', [socket.id]);
         if (vm) await service.voiceAction(socket.data.userId, socket.id!, 'leave');
         if (![...io.sockets.sockets.values()].some(s => s.data.userId === socket.data.userId)) io.emit('presence', { userId: socket.data.userId, online: false });
+        if (!chess.online(socket.data.userId)) await chess.presence(socket.data.userId, false);
       } catch (err) { app.log.error({ err }, 'Disconnect cleanup failed'); }
     });
   });
@@ -386,7 +400,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }, 5000); maintenance.unref();
   // Upgraded sockets must close before Fastify starts draining the HTTP server.
   // Waiting until onClose deadlocks a restart while any chat client stays online.
-  app.addHook('preClose', async () => { clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
+  app.addHook('preClose', async () => { chess.close(); clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
   app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); await attachments.close(); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
-  return { app, db, service, io, attachments, config: c };
+  return { app, db, service, io, chess, attachments, config: c };
 }

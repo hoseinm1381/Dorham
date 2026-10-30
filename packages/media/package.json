@@ -1,7 +1,7 @@
 {
   "name": "@dorham/media",
   "private": true,
-  "version": "0.5.4",
+  "version": "0.6.0",
   "type": "module",
   "exports": "./src/index.ts"
 }

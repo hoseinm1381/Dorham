@@ -1,8 +1,8 @@
 {
   "name": "@dorham/desktop",
   "private": true,
-  "version": "0.5.4",
-  "description": "Dorham â€” your people, a little closer",
+  "version": "0.6.0",
+  "description": "Dorham \u00e2\u20ac\u201d your people, a little closer",
   "author": "Dorham contributors",
   "type": "module",
   "main": "main.cjs"

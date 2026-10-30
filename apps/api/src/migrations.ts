@@ -69,4 +69,12 @@ export async function migrateExpansion(db: Database) {
     await tx.run('ALTER TABLE servers ADD COLUMN allow_member_invites INTEGER NOT NULL DEFAULT 1');
     await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(5,?)', [Date.now()]);
   });
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=6')) return;
+    await tx.run('CREATE TABLE chess_games (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, white_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, black_id TEXT REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL, updated_at BIGINT NOT NULL, state TEXT NOT NULL)');
+    await tx.run('CREATE INDEX chess_server ON chess_games(server_id,status,updated_at)');
+    await tx.run('CREATE INDEX chess_white ON chess_games(white_id,status)');
+    await tx.run('CREATE INDEX chess_black ON chess_games(black_id,status)');
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(6,?)', [Date.now()]);
+  });
 }
