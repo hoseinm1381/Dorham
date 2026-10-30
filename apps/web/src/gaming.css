@@ -38,7 +38,9 @@
 .audio-device-settings { border-block:1px solid #ffffff16; margin-block:15px; padding-block:15px; }
 .audio-device-settings h3 { margin-bottom:15px; }
 .audio-device-settings label { margin-block:12px; }
-.audio-test-actions { display:flex; gap:8px; margin-block:12px; }
+.audio-test-actions { display:flex; flex-wrap:wrap; gap:8px; margin-block:12px; }
+.microphone-voice-test { border-top:1px solid #ffffff16; margin-top:18px; padding-top:16px; }
+.microphone-voice-test p { font-size:12px; line-height:1.65; color:var(--muted); }
 .audio-device-settings meter { width:100%; height:16px; }
 .pending-send { display:flex; gap:12px; align-items:center; font-size:12px; margin-bottom:7px; padding:8px; background:#b7675718; border-radius:6px; }
 .pending-send button { text-decoration:underline; min-height:30px; }

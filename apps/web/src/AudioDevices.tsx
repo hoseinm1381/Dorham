@@ -3,6 +3,7 @@ import type { MediaTransport } from '@dorham/media';
 import { readAudioProcessingPreferences } from './AudioProcessingControls';
 import { serverUrl } from './api';
 import { t } from './i18n';
+import { MicrophoneVoiceTest } from './MicrophoneVoiceTest';
 function storageKey(account: string) { return `dorham-audio:${serverUrl() || location.origin}:${account}`; }
 export function readAudioChoices(account: string): { input: string; output: string; levels: Record<string, number> } {
   try { const value = JSON.parse(localStorage.getItem(storageKey(account)) || '{}'); return { input: typeof value.input === 'string' ? value.input : '', output: typeof value.output === 'string' ? value.output : '', levels: Object.fromEntries(Object.entries(value.levels || {}).filter(([, v]) => Number.isFinite(v) && Number(v) >= 0 && Number(v) <= 200).slice(-100)) as Record<string, number> }; }
@@ -58,5 +59,6 @@ export function AudioDeviceSettings({ account, transport, error }: { account: st
     {!outputSupported && <p>{t('Speaker selection is not supported in this browser.')}</p>}
     <div className="audio-test-actions"><button type="button" className="secondary" onClick={() => { void microphoneTest(); }}>{t(testing ? 'Stop microphone test' : 'Test microphone')}</button><button type="button" className="secondary" onClick={() => { void speakerTest(); }}>{t('Test speakers')}</button></div>
     {testing && <meter aria-label={t('Microphone level')} min={0} max={1} value={level}/>}<p role="status">{t(notice)}</p>
+    <MicrophoneVoiceTest input={choices.input} output={choices.output} transport={transport} error={error}/>
   </section>;
 }

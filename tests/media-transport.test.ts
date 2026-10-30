@@ -112,3 +112,19 @@ it('restarts capture when Chromium reports unchanged processing, retaining SDK m
     expect(track.mute).toHaveBeenCalledTimes(2); expect(microphone.enabled).toBe(false);
   } finally { await f.transport.destroy(); }
 });
+
+it('repairs a removed gain processor even when the microphone enabled state has not changed', async () => {
+  const f = fixture();
+  try {
+    const joining = f.transport.join('room'); f.release(); await joining;
+    let processor: any;
+    const microphone = { enabled: true, readyState: 'live' };
+    const track = { mediaStreamTrack: microphone, getProcessor: () => processor, setProcessor: vi.fn(async (next: any) => { processor = next; next.processedTrack = { enabled: true, stop: vi.fn() }; }) };
+    (f.transport as any).media.localParticipant.getTrackPublication = () => ({ audioTrack: track });
+    await f.transport.setMicrophoneGain(2.5);
+    expect(track.setProcessor).toHaveBeenCalledOnce(); expect(processor.processedTrack).toBeTruthy(); expect((processor as any).value).toBe(2.5);
+    await f.transport.setMuted(true); processor = undefined;
+    await f.transport.setMicrophoneGain(1.5);
+    expect(track.setProcessor).toHaveBeenCalledTimes(2); expect(microphone.enabled).toBe(false); expect((processor as any).enabled).toBe(false);
+  } finally { await f.transport.destroy(); }
+});

@@ -86,12 +86,18 @@ test('own microphone gain changes transmitted audio at 50–250%, respects mute 
       await expect.poll(async () => { measured = await level(receiver); return measured / normal / ratio; }).toBeCloseTo(1, 1);
       measurements[String(percent)] = measured; console.log('Microphone gain RMS', percent, measured);
     }
-    await sender.screenshot({ path: `artifacts/evidence/v053-microphone-gain-settings.png` });
+    await sender.screenshot({ path: `artifacts/evidence/v071-microphone-gain-settings.png` });
     await sender.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await sender.getByRole('button', { name: 'Mute microphone', exact: true }).click();
     await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
     await settings(sender); await gain().fill('50'); await gain().fill('250');
     await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
+    await sender.getByRole('button', { name: 'Record voice test', exact: true }).click();
+    await expect(sender.getByRole('button', { name: 'Play voice test', exact: true })).toBeVisible({ timeout: 10000 });
+    await sender.getByRole('button', { name: 'Play voice test', exact: true }).click();
+    await expect(sender.getByRole('button', { name: 'Stop playback', exact: true })).toBeVisible();
+    await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
+    await sender.getByRole('button', { name: 'Stop playback', exact: true }).click();
     // Switching capture while muted must retain both silence and the saved gain.
     const mic = sender.getByRole('combobox', { name: 'Microphone', exact: true });
     const device = await mic.locator('option').evaluateAll(options => (options as HTMLOptionElement[]).find(option => option.value)?.value);
@@ -113,6 +119,6 @@ test('own microphone gain changes transmitted audio at 50–250%, respects mute 
     await expect.poll(async () => (await level(receiver)) / normal).toBeCloseTo(1, 1);
     const transport = (await api(receiver, '/bootstrap')).mediaTransport;
     await mkdir('artifacts/evidence', { recursive: true });
-    await writeFile(`artifacts/evidence/v053-microphone-gain-${transport}.json`, JSON.stringify({ transport, measurements, savedBeforeJoin: true, muteAndDeafen: true, mutedDeviceReplacement: true, rejoin: true, reload: true, reset: true, source: 'quiet synthetic tone; measured remote decoded WebRTC RMS, no physical acoustic measurement' }, null, 2));
+    await writeFile(`artifacts/evidence/v071-microphone-gain-${transport}.json`, JSON.stringify({ transport, measurements, savedBeforeJoin: true, muteAndDeafen: true, mutedDeviceReplacement: true, rejoin: true, reload: true, reset: true, source: 'quiet synthetic tone; measured remote decoded WebRTC RMS, no physical acoustic measurement' }, null, 2));
   } finally { await senderContext.close(); await receiverContext.close(); }
 });

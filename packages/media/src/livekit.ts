@@ -87,18 +87,24 @@ export class LiveKitTransport implements MediaTransport {
   }
   async setMicrophoneGain(value: number) {
     this.gainValue = clampMicrophoneGain(value); this.inputGain.setGain(this.gainValue);
+    if (this.channelId && this.media.state === 'connected') await this.applyMicrophone();
+    this.inputGain.setGain(this.gainValue);
     await this.inputGain.resume();
+  }
+  private gainProcessorMissing() {
+    const track = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+    return Boolean(track?.getProcessor && (!track.getProcessor()?.processedTrack || track.getProcessor() !== this.inputGain));
   }
   private applyMicrophone(): Promise<void> {
     const track = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
     this.inputGain.setEnabled(this.microphoneEnabled());
     if (track && !this.microphoneEnabled()) track.mediaStreamTrack.enabled = false;
     if (!this.microphoneTask) this.microphoneTask = Promise.resolve().then(async () => {
-      while (this.appliedMicrophone !== this.microphoneEnabled()) {
+      while (this.appliedMicrophone !== this.microphoneEnabled() || this.gainProcessorMissing()) {
         const self = this.room?.members.find(m => m.user.id === this.options.userId);
         if (!self?.serverMuted && !self?.serverDeafened && !this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack) await this.createMicrophone();
         const existing = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
-        if (existing?.getProcessor && !existing.getProcessor()?.processedTrack) {
+        if (existing?.getProcessor && (!existing.getProcessor()?.processedTrack || existing.getProcessor() !== this.inputGain)) {
           const gain = new MicrophoneGain(this.gainValue); gain.setEnabled(false); this.inputGain = gain; await existing.setProcessor(gain);
         }
         const enabled = this.microphoneEnabled();

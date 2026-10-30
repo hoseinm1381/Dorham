@@ -968,5 +968,21 @@
   "This drawing is full. Clear it or submit it.": "بوم پر شده است. آن را پاک کنید یا بفرستید.",
   "The drawing round has changed.": "دور نقاشی تغییر کرده است.",
   "This page has already been submitted.": "این صفحه قبلاً فرستاده شده است.",
-  "Check|poker": "چک"
+  "Check|poker": "چک",
+  "Signal gain: {db} dB. 250% is about +8 dB, not 2.5 times the perceived loudness.": "تقویت سیگنال: {db} دسی‌بل. ۲۵۰٪ حدود ۸ دسی‌بل تقویت است و به معنی ۲٫۵ برابر شدن بلندی شنیده‌شده نیست.",
+  "Hear your microphone": "صدای میکروفون خود را بشنوید",
+  "Record up to 5 seconds, then play it back. Adjust microphone gain while listening to compare. The recording stays in memory and is erased when you close this panel.": "تا ۵ ثانیه ضبط کنید و سپس آن را بشنوید. هنگام پخش، تقویت میکروفون را برای مقایسه تغییر دهید. ضبط فقط در حافظه می‌ماند و با بستن این بخش پاک می‌شود.",
+  "Use headphones if you are in a voice call.": "اگر در تماس صوتی هستید، از هدفون استفاده کنید.",
+  "Stop recording": "توقف ضبط",
+  "Record voice test": "ضبط آزمایشی صدا",
+  "Stop playback": "توقف پخش",
+  "Play voice test": "پخش آزمایش صدا",
+  "Voice test level": "سطح صدای آزمایش",
+  "Waiting for microphone permission…": "در انتظار اجازهٔ میکروفون…",
+  "Recording locally…": "در حال ضبط روی دستگاه…",
+  "Recording ready. Press Play voice test.": "ضبط آماده است. پخش آزمایش صدا را بزنید.",
+  "Playing locally with your selected gain.": "در حال پخش روی دستگاه با تقویت انتخاب‌شدهٔ شما.",
+  "Test audio is never uploaded.": "صدای آزمایش هرگز بارگذاری نمی‌شود.",
+  "The signal is clipping. Reduce microphone gain or your device input level.": "صدا از حد مجاز بالاتر می‌رود و مخدوش می‌شود. تقویت میکروفون یا سطح ورودی دستگاه را کم کنید.",
+  "Microphone playback test is not supported in this browser.": "آزمایش پخش صدای میکروفون در این مرورگر پشتیبانی نمی‌شود."
 }
