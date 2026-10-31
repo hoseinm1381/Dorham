@@ -27,3 +27,7 @@ apps/desktop/native/*.exe
 apps/desktop/voice-keys.json
 
 apps/web/public/audio/
+
+apps/desktop/release-contract.cjs
+*.pfx
+*.p12

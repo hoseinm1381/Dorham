@@ -6,6 +6,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DorhamMediaPlugin.class);
         registerPlugin(DorhamSecretsPlugin.class);
         registerPlugin(DorhamFilesPlugin.class);
+        registerPlugin(DorhamUpdatesPlugin.class);
         super.onCreate(state);
     }
 }

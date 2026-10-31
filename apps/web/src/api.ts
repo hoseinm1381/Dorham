@@ -1,7 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { io, type Socket } from 'socket.io-client';
 import instance from './instance.json';
-declare global { interface Window { desktop?: { getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; setLanguage?(value: string): Promise<void>; version: string; systemAudioSafe?: boolean; configureVoiceHotkey(value: import('../../../packages/contracts/src/voice-hotkeys').VoiceInputPreferences): Promise<{ supported: boolean }>; onVoiceHotkey(listener: (event: { type: 'down' | 'up' | 'release' | 'error'; message?: string; background?: boolean }) => void): () => void } } }
+declare global { interface Window { desktop?: { getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; setLanguage?(value: string): Promise<void>; version?: string; getAppInfo?(): Promise<{version: string; platform: string}>; checkUpdate?(): Promise<{current: string; latest: string; available: boolean}>; installUpdate?(): Promise<{started: boolean}>; systemAudioSafe?: boolean; configureVoiceHotkey(value: import('../../../packages/contracts/src/voice-hotkeys').VoiceInputPreferences): Promise<{ supported: boolean }>; onVoiceHotkey(listener: (event: { type: 'down' | 'up' | 'release' | 'error'; message?: string; background?: boolean }) => void): () => void } } }
 const store = registerPlugin<any>('DorhamSecrets');
 const files = registerPlugin<any>('DorhamFiles');
 export const native = Capacitor.isNativePlatform() || Boolean(window.desktop);

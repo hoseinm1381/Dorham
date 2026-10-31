@@ -6,6 +6,8 @@ directories:
 files:
   - main.cjs
   - preload.cjs
+  - updater.cjs
+  - release-contract.cjs
   - voice-hotkeys.cjs
   - voice-keys.json
   - native/VoiceHotkey.exe
@@ -25,6 +27,7 @@ artifactName: Dorham-${version}-Windows-${arch}.${ext}
 nsis:
   oneClick: false
   perMachine: false
-  allowToChangeInstallationDirectory: true
+  allowToChangeInstallationDirectory: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false

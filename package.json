@@ -1,6 +1,6 @@
 {
   "name": "dorham",
-  "version": "0.7.7",
+  "version": "1.0.0",
   "private": true,
   "overrides": {
     "xcode": {
@@ -38,7 +38,8 @@
     "deploy:branch": "node scripts/deploy-branch.mjs",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build",
     "admin": "tsx scripts/admin.ts",
-    "test:expansion": "node scripts/browser-tests.mjs --expansion"
+    "test:expansion": "node scripts/browser-tests.mjs --expansion",
+    "release:downloads": "node scripts/release-downloads.mjs"
   },
   "dependencies": {
     "@capacitor/android": "8.5.3",

@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, safeStorage, protocol, net, session, desktopCapturer, dialog, Tray, Menu, nativeImage, shell, powerMonitor } = require('electron');
+const { createUpdater } = require('./updater.cjs');
 const { VoiceHotkeys } = require('./voice-hotkeys.cjs');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -14,7 +15,15 @@ const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const readSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { return {}; } };
 const saveSettings = settings => { fs.writeFileSync(settingsFile(), JSON.stringify(settings), { mode: 0o600 }); };
 const trusted = event => { if (!event.senderFrame?.url.startsWith('dorham://app/')) throw new Error('Untrusted sender'); };
+const updater = createUpdater(app, net, { canInstall: () => !inCall });
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
+app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 app.whenReady().then(() => {
+  if (!primary) return;
+  ipcMain.handle('app:info', event => { trusted(event); return { version: app.getVersion(), platform: 'windows' }; });
+  ipcMain.handle('update:check', event => { trusted(event); return updater.check(); });
+  ipcMain.handle('update:install', event => { trusted(event); if (inCall) throw Error('Disconnect voice before installing an update.'); return updater.install(); });
   protocol.handle('dorham', async request => {
     const url = new URL(request.url);
     if (url.hostname !== 'app') return new Response('Forbidden', { status: 403 });

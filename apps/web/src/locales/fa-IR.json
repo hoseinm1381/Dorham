@@ -1198,5 +1198,18 @@
   "Connection details": "جزئیات اتصال",
   "Background-noise removal is off. Echo settings stay unchanged.": "حذف نویز پس‌زمینه خاموش است. تنظیم جلوگیری از پژواک تغییر نمی‌کند.",
   "Record up to 5 seconds, then play it back. Adjust volume or noise removal to compare.": "تا ۵ ثانیه ضبط کنید و سپس پخش کنید. برای مقایسه، بلندی صدا یا حذف نویز را تغییر دهید.",
-  "Only you hear this test. Your call is muted and deafened while it runs, then your previous settings return.": "این آزمایش را فقط خودتان می‌شنوید. هنگام آزمایش، میکروفون و صدای تماس قطع می‌شود؛ پس از آن تنظیمات قبلی برمی‌گردد."
+  "Only you hear this test. Your call is muted and deafened while it runs, then your previous settings return.": "این آزمایش را فقط خودتان می‌شنوید. هنگام آزمایش، میکروفون و صدای تماس قطع می‌شود؛ پس از آن تنظیمات قبلی برمی‌گردد.",
+  "Download apps": "دریافت برنامه‌ها",
+  "Get apps": "دریافت برنامه",
+  "Dorham apps": "برنامه‌های دورهم",
+  "Close downloads": "بستن دانلودها",
+  "Update": "به‌روزرسانی",
+  "Install update": "نصب به‌روزرسانی",
+  "Check for updates": "بررسی به‌روزرسانی",
+  "Downloads are temporarily unavailable.": "دانلود موقتاً در دسترس نیست.",
+  "Disconnect voice before installing an update.": "پیش از نصب به‌روزرسانی از تماس خارج شوید.",
+  "Please wait…": "لطفاً صبر کنید…",
+  "Allow Dorham to install updates, then tap Update again.": "به دورهم اجازه نصب به‌روزرسانی بدهید، سپس دوباره به‌روزرسانی را بزنید.",
+  "Try again": "دوباره تلاش کنید",
+  "The update could not be started. Try again later.": "شروع به‌روزرسانی ممکن نشد. بعداً دوباره تلاش کنید."
 }

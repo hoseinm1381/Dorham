@@ -1,3 +1,4 @@
+import { build } from 'esbuild';
 import { cp, mkdir, writeFile, rm } from 'node:fs/promises';
 import sharp from 'sharp';
 import { execFileSync } from 'node:child_process';
@@ -13,3 +14,5 @@ const png = await sharp('apps/web/public/icon.svg').resize(256, 256).png().toBuf
 await writeFile('apps/desktop/icon.png', png);
 const header = Buffer.alloc(22); header.writeUInt16LE(1, 2); header.writeUInt16LE(1, 4); header.writeUInt16LE(1, 10); header.writeUInt16LE(32, 12); header.writeUInt32LE(png.length, 14); header.writeUInt32LE(22, 18);
 await writeFile('apps/desktop/icon.ico', Buffer.concat([header, png]));
+
+await build({ entryPoints: ['packages/contracts/src/releases.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: 'apps/desktop/release-contract.cjs' });

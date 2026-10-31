@@ -1,3 +1,9 @@
+import groovy.json.JsonSlurper
+
+def dorhamVersion = new JsonSlurper().parse(file('../../../../package.json')).version
+def dorhamParts = dorhamVersion.tokenize('.').collect { it.toInteger() }
+def dorhamCode = dorhamParts[0] * 1000000 + dorhamParts[1] * 1000 + dorhamParts[2]
+
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
@@ -8,8 +14,8 @@ android {
         applicationId "com.dorham.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "0.3.0"
+        versionCode dorhamCode
+        versionName dorhamVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -23,7 +29,7 @@ android {
                 signingConfig signingConfigs.create('localRelease') {
                     storeFile file(System.getenv('DORHAM_KEYSTORE'))
                     storePassword System.getenv('DORHAM_STORE_PASSWORD')
-                    keyAlias 'dorham'
+                    keyAlias (System.getenv('DORHAM_KEY_ALIAS') ?: 'dorham')
                     keyPassword System.getenv('DORHAM_KEY_PASSWORD')
                 }
             }
