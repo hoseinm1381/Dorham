@@ -2336,7 +2336,7 @@ async function createApp(c = config(), options = {}) {
   await app2.register(cookie);
   const allowed = (origin) => !origin || c.origins.includes(origin);
   await app2.register(cors, { origin: (origin, cb) => cb(null, allowed(origin)), credentials: true, methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-Request-Id", "X-Dorham-Native", "Range"], exposedHeaders: ["Content-Range", "Accept-Ranges", "Content-Length"] });
-  await app2.register(helmet, { contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], connectSrc: ["'self'", "https:", "wss:", ...c.production ? [] : ["http:", "ws:"]], mediaSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false });
+  await app2.register(helmet, { contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'wasm-unsafe-eval'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], connectSrc: ["'self'", "https:", "wss:", ...c.production ? [] : ["http:", "ws:"]], mediaSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false });
   await app2.register(rateLimit, { global: options.rateLimit !== false, max: 600, timeWindow: "1 minute", keyGenerator: async (req) => {
     const raw = req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : req.cookies.dorham_session;
     const identity = raw ? await resolveSession(raw) : void 0;

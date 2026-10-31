@@ -1,4 +1,14 @@
-# Microphone noise suppression and echo cancellation
+# Audio settings in 0.7.7
+
+The main Audio view contains microphone volume, **Off / Standard / Strong** noise removal and a private voice test. Devices, optional high boost, talk keys, echo cancellation, automatic level and voice clarity are under **Advanced audio**. Settings apply during a call and are saved locally. The voice test mutes and deafens the call during recording/playback, then restores the prior state; its recording stays on the device.
+
+Standard uses browser suppression and the existing optional high-gain pause filter. Strong adds bundled RNNoise on the device at 48 kHz, with input normalization before the model and compensation before final volume. It removes background noise during speech as well as pauses. Model/processor failures visibly fall back to Standard. Off disables suppression and the pause filter while preserving separate echo/level settings. Strong uses more processing; Standard remains the default.
+
+Chrome signal tests and isolated LiveKit/SFU tests pass, including mute, capture restart and rejoin. The packaged Windows app starts the same worklet through its native application origin. Android continues using its native audio processing; no Android build/device acceptance is included. Synthetic speech/noise measurements do not certify physical microphones or subjective clarity. See [release verification and limitations](RELEASE-0.7.7.md).
+
+## Historical implementation notes before 0.7.7
+
+### Browser suppression and echo cancellation
 
 Chrome/Electron mesh already requested echo cancellation, noise suppression and automatic gain control by default. The Android plugin also requests native hardware/software audio processing. The operator confirmed the follow-up voice/screen call worked after the external relay was configured.
 
