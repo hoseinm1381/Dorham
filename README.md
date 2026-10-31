@@ -1,6 +1,6 @@
-**Local release: 1.0.0** — Windows and signed Android installers, small app-download links and native update notices. Server publication is deferred at the operator's request. See [release and update verification](docs/RELEASE-1.0.0.md).
+**Current release: 1.0.0** — deployed at **https://dorhamapp.ir/** with public Windows/Android downloads, a small Get apps menu and native update notices. See [release and update verification](docs/RELEASE-1.0.0.md).
 
-**Current release: 0.7.7** — simpler audio settings, local Strong noise removal, 16 built-in profile pictures and matching DM avatar colours. Deployed at **https://dorhamapp.ir/** after isolated SFU and verified rollback-backup checks. See [release verification](docs/RELEASE-0.7.7.md).
+**Previous release: 0.7.7** — simpler audio settings, local Strong noise removal, 16 built-in profile pictures and matching DM avatar colours. Deployed at **https://dorhamapp.ir/** after isolated SFU and verified rollback-backup checks. See [release verification](docs/RELEASE-0.7.7.md).
 
 **Previous release: 0.7.6** — [dorhamapp.ir](https://dorhamapp.ir/), signed-in password reset, existing-conversation badges, private voice-test isolation and optional +45 dB boost with local noise reduction. See [behavior and verification](docs/RELEASE-0.7.6.md).
 
