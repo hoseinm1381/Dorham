@@ -1,6 +1,6 @@
 # Dorham 1.0.2 web update
 
-This web-only update adds selected-window audio requests and clearer capture-picker instructions. Backend and stable Windows/Android downloads remain 1.0.0; native work is deferred.
+The web-only update is live at **https://dorhamapp.ir/**. It adds selected-window audio requests and clearer capture-picker instructions. Backend and stable Windows/Android downloads remain 1.0.0; native work is deferred.
 
 ## Sharing sound
 
@@ -19,6 +19,8 @@ Watch stream remains visible with voice controls collapsed. Fullscreen contains 
 
 ## Rollout
 
-Prepared for web-only deployment following independent verification of a fresh online database/file/config/frontend rollback backup. Existing hashed assets are retained for open clients. Live service PID/start identity, runtime/Caddy settings, native update manifest and backend package remain unchanged. Final public payload and rollout evidence is recorded with the release artifacts.
+The fresh private online backup was downloaded and independently verified: 38 database table digests, five stored files and all 78 previous web files, plus SQLite integrity and foreign keys. Its SHA-256 is `e158a1a6de33be5f3382020210549ff00c305746dfdea94abfe5b03681eb919e`.
+
+The web-only rollout changed 19 files and verified all 60 new web files through both local HTTP and public HTTPS with normal DNS/TLS. Existing hashed assets are retained for open clients. All four services remain active. Live service PID/start identity, runtime/Caddy settings, native update manifest and backend package are unchanged. No services were restarted. Deployment and public payload evidence is included in the release artifacts.
 
 Refresh the web page on both sharing and viewing computers, stop the old share and start a new one. Select Window or Chrome Tab and enable audio in Chrome's picker. Native preview builds and their deferred phone tests remain documented in [1.0.1](RELEASE-1.0.1.md).

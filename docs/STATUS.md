@@ -1,4 +1,4 @@
-Current web update **1.0.2** requests selected-application sound directly from Chrome and passes both real-window and synthetic two-client SFU checks. All 163 unit/API tests pass. Web-only rollout is prepared; backend/stable native releases remain 1.0.0. See [1.0.2 details](RELEASE-1.0.2.md).
+Current web update **1.0.2** requests selected-application sound directly from Chrome and passes both real-window and synthetic two-client SFU checks. All 163 unit/API tests pass. Web-only 1.0.2 is live: all 60 public files match, fresh rollback backup is independently verified, and voice services were not restarted. Backend/stable native releases remain 1.0.0. See [1.0.2 details](RELEASE-1.0.2.md).
 
 Previous web update **1.0.1** fixes Chrome screen sound, retains fullscreen sound controls and makes Watch stream visible without opening Voice controls. All 161 unit/API tests and the isolated real-SFU screen-audio checks pass. Online rollback backup is independently verified. Deployment preserves the running voice process and native update manifest. Native testing/releases are deferred. See [web details](RELEASE-1.0.1.md).
 
