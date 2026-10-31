@@ -2504,12 +2504,14 @@ async function createApp(c = config(), options = {}) {
       return { success: true };
     });
     api.post("/auth/password", async (req) => {
-      const b = z7.object({ currentPassword: z7.string().max(128), password: passwordSchema, requestId }).parse(req.body);
-      if (req.account.guest || !await passwordVerify(req.account.password_hash, b.currentPassword)) fail(401, "INVALID_CREDENTIALS", "Current password is incorrect.");
+      const b = z7.object({ password: passwordSchema, requestId }).parse(req.body);
+      if (req.account.guest) fail(403, "GUEST_ACCOUNT", "Register this guest account before setting a password.");
       const encoded = await passwordHash(b.password);
       const result = await service.mutate(req.account.id, b.requestId, "password.change", { fingerprint: hash(b.password) }, async (tx) => {
+        if (!await tx.one("SELECT id FROM sessions WHERE id=? AND user_id=? AND expires_at>=?", [req.session.id, req.account.id, Date.now()])) fail(401, "UNAUTHORIZED", "Sign in again to continue.");
         await tx.run("UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?", [encoded, req.account.id]);
         await tx.run("DELETE FROM sessions WHERE user_id=? AND id<>?", [req.account.id, req.session.id]);
+        await audit(tx, req.account.id, "password.change", req.account.id);
         return { success: true };
       });
       await disconnectInvalidSessions();
