@@ -1,6 +1,6 @@
 # Dorham 1.0.3 web update
 
-Adds all 64 supplied Soft Bubble emojis, including the nine Dorham exclusives. Backend and stable Windows/Android releases remain 1.0.0; native builds remain deferred.
+Live at **https://dorhamapp.ir/**. Adds all 64 supplied Soft Bubble emojis, including the nine Dorham exclusives. Backend and stable Windows/Android releases remain 1.0.0; native builds remain deferred.
 
 ## Using emojis
 
@@ -18,6 +18,8 @@ The supplied SVGs are copied unchanged, checked as static vector artwork, and ac
 
 ## Web rollout
 
-Prepared for web-only deployment after independent verification of a fresh online rollback backup. The rollout retains previous hashed assets and publishes 124 files without restarting voice services or changing runtime/Caddy settings, database schema, backend package or the stable native manifest. Final rollout/public hash evidence is retained with artifacts/v1.0.3.
+A fresh private online rollback backup was downloaded and independently verified: 38 database table digests, eight stored files, 95 existing web files, SQLite integrity and foreign keys. Backup SHA-256: `aa1bdaad491fca7ce20c6740f720ea89052a007e2a8744f1ee08efb653739dc5`.
+
+The web-only rollout changed 84 files and verified all 124 deployed files through local HTTP and normal public HTTPS/DNS, including every emoji SVG. Previous hashed assets are retained. All four services are active; the voice service PID/start identity is unchanged. No services were restarted and runtime/Caddy settings, database schema, backend package and stable native manifest are unchanged. Browser memory peaked at 2497.6 MiB combined. Rollout/public hash evidence is retained with artifacts/v1.0.3.
 
 Refresh the web page to load 1.0.3, then select the smile button beside the message box. Windows/Android binaries will need a later rebuild to include the new picker.
