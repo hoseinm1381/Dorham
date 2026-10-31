@@ -1211,5 +1211,8 @@
   "Please wait…": "لطفاً صبر کنید…",
   "Allow Dorham to install updates, then tap Update again.": "به دورهم اجازه نصب به‌روزرسانی بدهید، سپس دوباره به‌روزرسانی را بزنید.",
   "Try again": "دوباره تلاش کنید",
-  "The update could not be started. Try again later.": "شروع به‌روزرسانی ممکن نشد. بعداً دوباره تلاش کنید."
+  "The update could not be started. Try again later.": "شروع به‌روزرسانی ممکن نشد. بعداً دوباره تلاش کنید.",
+  "Listening only": "فقط شنونده",
+  "Microphone unavailable. Rejoin to try again.": "میکروفون در دسترس نیست. برای تلاش دوباره، خارج شوید و دوباره بپیوندید.",
+  "Listening only. Microphone unavailable or permission denied. Rejoin to try again.": "فقط شنونده هستید. میکروفون در دسترس نیست یا اجازهٔ استفاده ندارد. برای تلاش دوباره، خارج شوید و دوباره بپیوندید."
 }

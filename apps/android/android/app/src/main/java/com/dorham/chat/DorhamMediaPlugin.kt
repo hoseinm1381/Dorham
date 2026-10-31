@@ -35,6 +35,8 @@ import io.livekit.android.room.track.RemoteTrackPublication
 import io.livekit.android.room.track.VideoTrack as LiveVideoTrack
 import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import livekit.org.webrtc.*
 import livekit.org.webrtc.audio.JavaAudioDeviceModule
 import org.json.JSONArray
@@ -68,6 +70,9 @@ class DorhamMediaPlugin : Plugin() {
     private var micStream = UUID.randomUUID().toString()
     private var screenStream = UUID.randomUUID().toString()
     private var sfu: Room? = null
+    private var sfuReady = false
+    private var microphoneAvailable = false
+    private val microphoneLock = Mutex()
     private var viewer: FrameLayout? = null
     private val renderers = mutableListOf<Pair<SurfaceViewRenderer, () -> Unit>>()
     private val volumes = mutableMapOf<String, Double>()
@@ -78,16 +83,31 @@ class DorhamMediaPlugin : Plugin() {
     private fun emit(name: String, value: JSONObject) = notifyListeners(name, JSObject.fromJSONObject(value))
     private fun error(message: String) = emit("error", JSONObject().put("message", message))
     private fun ui(call: PluginCall, work: () -> Unit) { main.post { try { work() } catch (e: Exception) { call.reject(e.message ?: "Native media failed", e) } } }
+    private fun canUseMicrophone() = getPermissionState("microphone") == PermissionState.GRANTED && context.getSystemService(AudioManager::class.java).getDevices(AudioManager.GET_DEVICES_INPUTS).isNotEmpty()
+    private fun prepared(call: PluginCall) { call.resolve(JSObject().put("microphoneAvailable", canUseMicrophone())) }
+    private suspend fun applySfuMicrophone(live: Room) = microphoneLock.withLock {
+        if (sfu !== live || !sfuReady) return@withLock
+        val enabled = microphoneAvailable && !muted && !deafened && !selfMuted() && !selfDeafened()
+        try { live.localParticipant.setMicrophoneEnabled(enabled) }
+        catch (e: Exception) {
+            if (!enabled) throw e
+            microphoneAvailable = false
+            try { live.localParticipant.setMicrophoneEnabled(false) } catch (_: Exception) {}
+            VoiceService.instance?.microphone(false)
+            emit("listenOnly", JSONObject())
+        }
+    }
     @PluginMethod fun prepare(call: PluginCall) {
         if (getPermissionState("microphone") != PermissionState.GRANTED) requestPermissionForAlias("microphone", call, "microphoneResult") else prepareNotifications(call)
     }
-    @PermissionCallback private fun microphoneResult(call: PluginCall) { if (getPermissionState("microphone") == PermissionState.GRANTED) prepareNotifications(call) else call.reject("Microphone permission was denied") }
-    private fun prepareNotifications(call: PluginCall) { if (Build.VERSION.SDK_INT >= 33 && getPermissionState("notifications") != PermissionState.GRANTED) requestPermissionForAlias("notifications", call, "notificationsResult") else call.resolve() }
-    @PermissionCallback private fun notificationsResult(call: PluginCall) { if (getPermissionState("notifications") != PermissionState.GRANTED) error("Notifications were denied. Android may show the active voice service only in its active-app controls."); call.resolve() }
+    @PermissionCallback private fun microphoneResult(call: PluginCall) { prepareNotifications(call) }
+    private fun prepareNotifications(call: PluginCall) { if (Build.VERSION.SDK_INT >= 33 && getPermissionState("notifications") != PermissionState.GRANTED) requestPermissionForAlias("notifications", call, "notificationsResult") else prepared(call) }
+    @PermissionCallback private fun notificationsResult(call: PluginCall) { prepared(call) }
     @PermissionCallback private fun bluetoothResult(call: PluginCall) { if (getPermissionState("bluetooth") == PermissionState.GRANTED) setDevice(call) else call.reject("Bluetooth permission was denied. Select the speaker or earpiece instead.") }
     @PluginMethod fun join(call: PluginCall) = ui(call) {
         release(); active = this; selfId = call.getString("selfId") ?: error("Missing identity").let { "" }; room = call.getObject("room") ?: JSONObject()
-        context.startForegroundService(Intent(context, VoiceService::class.java))
+        microphoneAvailable = canUseMicrophone(); muted = call.getBoolean("muted") ?: false; deafened = call.getBoolean("deafened") ?: false
+        context.startForegroundService(Intent(context, VoiceService::class.java).putExtra("microphone", microphoneAvailable))
         val audioManager = context.getSystemService(AudioManager::class.java); audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         val servers = call.getArray("iceServers") ?: JSArray(); ice = (0 until servers.length()).map { n -> val item = servers.getJSONObject(n); val urls = item.optJSONArray("urls") ?: JSONArray().put(item.optString("urls")); PeerConnection.IceServer.builder((0 until urls.length()).map { urls.getString(it) }).setUsername(item.optString("username")).setPassword(item.optString("credential")).createIceServer() }
         val credentials = call.getObject("credentials")
@@ -102,7 +122,7 @@ class DorhamMediaPlugin : Plugin() {
                             else -> {}
                         }
                     } }
-                    live.connect(requireNotNull(credentials.getString("url")), requireNotNull(credentials.getString("token"))); live.localParticipant.setMicrophoneEnabled(!muted && !deafened && !selfMuted() && !selfDeafened()); call.resolve()
+                    live.connect(requireNotNull(credentials.getString("url")), requireNotNull(credentials.getString("token"))); sfuReady = true; applySfuMicrophone(live); call.resolve(JSObject().put("listenOnly", !microphoneAvailable))
                 } catch (e: Exception) { release(); call.reject("SFU connection failed: ${e.message}") }
             }
         } else {
@@ -111,8 +131,8 @@ class DorhamMediaPlugin : Plugin() {
             val adm = JavaAudioDeviceModule.builder(context).setUseHardwareAcousticEchoCanceler(true).setUseHardwareNoiseSuppressor(true).createAudioDeviceModule()
             factory = PeerConnectionFactory.builder().setAudioDeviceModule(adm).setVideoEncoderFactory(DefaultVideoEncoderFactory(shared.eglBaseContext, true, true)).setVideoDecoderFactory(DefaultVideoDecoderFactory(shared.eglBaseContext)).createPeerConnectionFactory(); adm.release()
             val constraints = MediaConstraints().apply { optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true")); optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true")); optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true")) }
-            audioSource = factory!!.createAudioSource(constraints); microphone = factory!!.createAudioTrack(UUID.randomUUID().toString(), audioSource)
-            updatePeers(); main.postDelayed(meter, 1000); call.resolve()
+            if (microphoneAvailable) { audioSource = factory!!.createAudioSource(constraints); microphone = factory!!.createAudioTrack(UUID.randomUUID().toString(), audioSource) }
+            updatePeers(); main.postDelayed(meter, 1000); call.resolve(JSObject().put("listenOnly", !microphoneAvailable))
         }
         val callback = object : ConnectivityManager.NetworkCallback() { override fun onAvailable(network: Network) { main.post { peers.values.forEach { it.pc.restartIce() } } } }
         context.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(callback); networkCallback = callback
@@ -139,7 +159,7 @@ class DorhamMediaPlugin : Plugin() {
         val config = PeerConnection.RTCConfiguration(ice).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN; continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY }
         val pc = factory!!.createPeerConnection(config, observer(userId)) ?: throw IllegalStateException("Could not create media connection")
         val peer = Peer(userId, epoch, pc); peers[userId] = peer
-        microphone?.let { pc.addTrack(it, listOf(micStream)) }; screenTrack?.let { peer.screenSender = pc.addTrack(it, listOf(screenStream)) }; return peer
+        if (microphone != null) pc.addTrack(microphone!!, listOf(micStream)) else pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)); screenTrack?.let { peer.screenSender = pc.addTrack(it, listOf(screenStream)) }; return peer
     }
     private fun sdp(success: (SessionDescription?) -> Unit = {}, failure: (String) -> Unit = { error(it) }): SdpObserver = object : SdpObserver {
         override fun onCreateSuccess(description: SessionDescription) { main.post { success(description) } }
@@ -179,7 +199,7 @@ class DorhamMediaPlugin : Plugin() {
         peers.keys.toList().forEach { id -> val p = peers[id]!!; if (ids[id]?.optString("epoch") != p.epoch) { p.pc.close(); p.pc.dispose(); peers.remove(id) } }
         if (factory != null) ids.forEach { (id, member) -> if (!peers.containsKey(id)) newPeer(id, member.getString("epoch")) }
         microphone?.setEnabled(!muted && !deafened && !selfMuted() && !selfDeafened()); peers.values.forEach { applyVolume(it) }
-        sfu?.let { live -> scope.launch { live.localParticipant.setMicrophoneEnabled(!muted && !deafened && !selfMuted() && !selfDeafened()); live.remoteParticipants.values.forEach { p -> p.trackPublications.values.forEach { pub -> (pub.track as? RemoteAudioTrack)?.setVolume(if (deafened || selfDeafened()) 0.0 else volumes[p.identity?.value?.substringBefore(":")] ?: 1.0) } } } }
+        sfu?.let { live -> scope.launch { try { applySfuMicrophone(live) } catch (e: Exception) { error(e.message ?: "Microphone state failed") }; live.remoteParticipants.values.forEach { p -> p.trackPublications.values.forEach { pub -> (pub.track as? RemoteAudioTrack)?.setVolume(if (deafened || selfDeafened()) 0.0 else volumes[p.identity?.value?.substringBefore(":")] ?: 1.0) } } } }
     }
     private fun applyVolume(p: Peer) { val m = members().firstOrNull { it.getJSONObject("user").getString("id") == p.id }; p.audio?.setVolume(if (deafened || selfDeafened() || m?.optBoolean("serverMuted") == true || m?.optBoolean("muted") == true || m?.optBoolean("deafened") == true) 0.0 else volumes[p.id] ?: 1.0) }
     @PluginMethod fun setState(call: PluginCall) = ui(call) { muted = call.getBoolean("muted") ?: false; deafened = call.getBoolean("deafened") ?: false; updatePeers(); sfu?.remoteParticipants?.values?.forEach { p -> p.trackPublications.values.forEach { pub -> (pub.track as? RemoteAudioTrack)?.setVolume(if (deafened || selfDeafened()) 0.0 else volumes[p.identity?.value?.substringBefore(":")] ?: 1.0) } }; call.resolve() }
@@ -287,10 +307,10 @@ class DorhamMediaPlugin : Plugin() {
     fun pulse() { bridge.webView.evaluateJavascript("window.dispatchEvent(new Event('dorham-native-pulse'))", null) }
     fun stopFromSystem() { main.post { release(); emit("error", JSONObject().put("message", "Android stopped the voice service. Rejoin to reconnect.")); emit("voiceStopped", JSONObject()) } }
     private fun release() {
-        closeViewer(); main.removeCallbacks(meter); stopCapture(); peers.values.forEach { it.pc.close(); it.pc.dispose() }; peers.clear(); microphone?.dispose(); microphone = null; audioSource?.dispose(); audioSource = null; factory?.dispose(); factory = null; egl?.release(); egl = null; sfu?.disconnect(); sfu?.release(); sfu = null; sfuVideos.clear()
+        closeViewer(); main.removeCallbacks(meter); stopCapture(); peers.values.forEach { it.pc.close(); it.pc.dispose() }; peers.clear(); microphone?.dispose(); microphone = null; audioSource?.dispose(); audioSource = null; factory?.dispose(); factory = null; egl?.release(); egl = null; sfuReady = false; sfu?.disconnect(); sfu?.release(); sfu = null; sfuVideos.clear()
         networkCallback?.let { try { context.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } catch (_: Exception) {} }; networkCallback = null
         val audio = context.getSystemService(AudioManager::class.java); if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice(); audio.mode = AudioManager.MODE_NORMAL
-        context.stopService(Intent(context, VoiceService::class.java)); if (active === this) active = null
+        if (active === this) active = null; VoiceService.instance?.stopFromApp()
     }
     override fun handleOnDestroy() { release(); scope.cancel(); super.handleOnDestroy() }
 }

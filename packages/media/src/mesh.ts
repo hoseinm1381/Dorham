@@ -1,3 +1,4 @@
+import { microphoneUnavailable, listenOnlyNotice } from './microphone-access';
 import type { NoiseRemoval } from './strong-denoiser';
 import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
 import { ack } from './signaling';
@@ -20,7 +21,7 @@ export class MeshTransport implements MediaTransport {
   private inputGain = new MicrophoneGain(); private gainValue = 1; private outgoing: MediaStream | null = null;
   private microphoneChange: Promise<void> = Promise.resolve();
   private heartbeat?: ReturnType<typeof setInterval>; private meter?: ReturnType<typeof setInterval>; private volumes = new Map<string, number>();
-  private joining = false; private destroyed = false; private signalQueue: Promise<unknown> = Promise.resolve();
+  private listenOnly = false; private joining = false; private destroyed = false; private signalQueue: Promise<unknown> = Promise.resolve();
   private earlySignals: Signal[] = []; private generation = 0;
   private hiddenShares = new Set<string>();
   private watchedShares = new Set<string>();
@@ -46,16 +47,23 @@ export class MeshTransport implements MediaTransport {
   protected error(e: any) { if (!this.destroyed) this.options.emit('error', e.message || String(e)); }
   async join(channelId: string) {
     if (this.channelId) await this.leave();
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access requires HTTPS or localhost.');
+    this.listenOnly = false; this.options.emit('listenOnly', false);
     const generation = ++this.generation; let acquired: MediaStream | undefined, context: AudioContext | undefined;
     const current = () => { if (this.destroyed || this.generation !== generation) throw new Error('Voice connection was cancelled.'); };
     this.joining = true;
     try {
       const processing = { ...this.audioProcessing };
-      acquired = await navigator.mediaDevices.getUserMedia({ audio: { ...processing }, video: false }); current(); this.mic = acquired;
-      for (const track of this.mic.getAudioTracks()) track.enabled = !this.muted && !this.deafened;
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new DOMException('Microphone unavailable', 'NotFoundError');
+        acquired = await navigator.mediaDevices.getUserMedia({ audio: { ...processing }, video: false });
+      } catch (error) {
+        if (!microphoneUnavailable(error)) throw error;
+        this.listenOnly = true; this.options.emit('listenOnly', true); this.options.emit('notice', listenOnlyNotice);
+      }
+      current(); this.mic = acquired || null;
+      for (const track of this.mic?.getAudioTracks() || []) track.enabled = !this.muted && !this.deafened;
       this.captureProcessing = processing;
-      context = new AudioContext({ sampleRate: 48000 }); this.context = context; await context.resume(); current(); await this.prepareMicrophone(this.mic); current(); this.channelId = channelId;
+      context = new AudioContext({ sampleRate: 48000 }); this.context = context; await context.resume(); current(); if (this.mic) await this.prepareMicrophone(this.mic); current(); this.channelId = channelId;
       await this.rejoin(); current();
       this.heartbeat = setInterval(() => { if (this.options.socket.connected && this.room) void ack(this.options.socket, 'voice:heartbeat', { eligible: this.peers.size === 0 || [...this.peers.values()].some(p => p.pc.connectionState === 'connected') }).catch(e => this.error(e)); }, 5000);
       this.attachMicMeter();
@@ -69,11 +77,11 @@ export class MeshTransport implements MediaTransport {
     } catch (e) { if (generation === this.generation) await this.leave(); else { acquired?.getTracks().forEach(t => t.stop()); await context?.close().catch(() => {}); } throw e; } finally { if (generation === this.generation) this.joining = false; }
   }
   private async rejoin() {
-    if (!this.channelId || !this.mic) return;
+    if (!this.channelId || !this.context) return;
     const generation = this.generation; this.epoch = ''; this.earlySignals = [];
     for (const userId of [...this.peers.keys()]) this.removePeer(userId);
     if (this.screen) await this.stopShare();
-    const result = await ack(this.options.socket, 'voice:join', { channelId: this.channelId, eligible: Boolean(this.context && this.mic.active && navigator.onLine) });
+    const result = await ack(this.options.socket, 'voice:join', { channelId: this.channelId, eligible: Boolean(this.context && navigator.onLine) });
     if (this.destroyed || generation !== this.generation) throw new Error('Voice connection was cancelled.');
     this.epoch = result.epoch; this.iceServers = result.iceServers; await this.updateRoom(result.room);
     for (const signal of this.earlySignals.splice(0)) this.onSignal(signal);
@@ -104,6 +112,7 @@ export class MeshTransport implements MediaTransport {
     }, 25000);
     pc.onicecandidateerror = event => { p.iceErrors = [...p.iceErrors.slice(-4), event.errorCode]; };
     for (const track of this.outgoing?.getTracks() || []) pc.addTrack(track, this.outgoing!);
+    if (!this.outgoing?.getAudioTracks().length) pc.addTransceiver('audio', { direction: 'recvonly' });
     if (this.screen) { const transceiver = pc.addTransceiver('video', { direction: 'sendrecv', streams: [this.screen] }); p.screenSender = transceiver.sender; }
     pc.onnegotiationneeded = async () => {
       // Elect one initial offerer. This avoids needless rollback/glare while
@@ -191,9 +200,9 @@ export class MeshTransport implements MediaTransport {
     if (!this.room) { this.publishedState = ''; return Promise.resolve(); }
     if (!this.stateTask) this.stateTask = Promise.resolve().then(async () => {
       while (this.room) {
-        const key = JSON.stringify([this.room.channelId, this.epoch, this.generation, this.muted, this.deafened]);
+        const key = JSON.stringify([this.room.channelId, this.epoch, this.generation, this.muted || this.listenOnly, this.deafened]);
         if (key === this.publishedState) break;
-        await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); this.publishedState = key;
+        await ack(this.options.socket, 'voice:state', { muted: this.muted || this.listenOnly, deafened: this.deafened, requestId: crypto.randomUUID() }); this.publishedState = key;
       }
     }).finally(() => { this.stateTask = null; });
     return this.stateTask;
@@ -333,7 +342,7 @@ export class MeshTransport implements MediaTransport {
     this.watchedShares.clear(); this.hiddenShares.clear();
     await this.stopShare(); for (const userId of [...this.peers.keys()]) this.removePeer(userId);
     await this.microphoneChange.catch(() => {});
-    this.mic?.getTracks().forEach(t => t.stop()); this.mic = null; await this.inputGain.destroy(); this.outgoing = null; this.micSource?.disconnect(); this.micSource = null; this.micAnalyser = null; this.micMeter = null; await this.context?.close().catch(() => {}); this.context = null; this.room = null; this.epoch = '';
+    this.mic?.getTracks().forEach(t => t.stop()); this.mic = null; await this.inputGain.destroy(); this.outgoing = null; this.micSource?.disconnect(); this.micSource = null; this.micAnalyser = null; this.micMeter = null; await this.context?.close().catch(() => {}); this.context = null; this.room = null; this.epoch = ''; this.listenOnly = false; this.options.emit('listenOnly', false);
     if (previous && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {});
     this.options.emit('room', null); this.options.emit('status', '');
   }

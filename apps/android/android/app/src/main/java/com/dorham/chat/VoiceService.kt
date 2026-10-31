@@ -8,13 +8,16 @@ import android.os.Handler
 import android.os.Looper
 
 class VoiceService : Service() {
+    private var microphoneActive = false
+    private var projectionActive = false
+    private var appStopping = false
     private val handler = Handler(Looper.getMainLooper())
     private val pulse = object : Runnable { override fun run() { DorhamMediaPlugin.active?.pulse(); handler.postDelayed(this, 5000) } }
     companion object { var instance: VoiceService? = null; const val CHANNEL = "dorham.voice"; const val ID = 1001 }
     override fun onCreate() {
         super.onCreate(); instance = this
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL, "Voice conversations", NotificationManager.IMPORTANCE_LOW))
-        startForeground(ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        startForeground(ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         handler.postDelayed(pulse, 5000)
     }
     fun notification(): Notification {
@@ -22,12 +25,21 @@ class VoiceService : Service() {
         val stop = PendingIntent.getService(this, 2, Intent(this, VoiceService::class.java).setAction("STOP"), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL).setContentTitle("Dorham voice is active").setContentText("Tap to return to your conversation").setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true).setContentIntent(open).addAction(Notification.Action.Builder(null, "Disconnect", stop).build()).build()
     }
-    fun projection(active: Boolean) { startForeground(ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or if (active) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0) }
+    private fun refreshTypes() {
+        val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+            (if (microphoneActive) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0) or
+            (if (projectionActive) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0)
+        startForeground(ID, notification(), types)
+    }
+    fun microphone(active: Boolean) { microphoneActive = active; refreshTypes() }
+    fun projection(active: Boolean) { projectionActive = active; refreshTypes() }
+    fun stopFromApp() { appStopping = true; stopSelf() }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP") { DorhamMediaPlugin.active?.stopFromSystem(); stopSelf() }
+        else { microphone(intent?.getBooleanExtra("microphone", false) == true) }
         return START_NOT_STICKY
     }
     override fun onTaskRemoved(rootIntent: Intent?) { DorhamMediaPlugin.active?.stopFromSystem(); stopSelf() }
-    override fun onDestroy() { handler.removeCallbacks(pulse); if (DorhamMediaPlugin.active != null) DorhamMediaPlugin.active?.stopFromSystem(); instance = null; super.onDestroy() }
+    override fun onDestroy() { handler.removeCallbacks(pulse); if (!appStopping) DorhamMediaPlugin.active?.stopFromSystem(); if (instance === this) instance = null; super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
 }

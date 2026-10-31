@@ -1,3 +1,5 @@
+**Prepared patch: 1.0.1** — removes the native server-address field, fixes Android voice join ordering and adds listen-only fallback without microphone access. Signed Android phone testing and stable publication are pending. See [patch verification](docs/RELEASE-1.0.1.md).
+
 **Current release: 1.0.0** — deployed at **https://dorhamapp.ir/** with public Windows/Android downloads, a small Get apps menu and native update notices. See [release and update verification](docs/RELEASE-1.0.0.md).
 
 **Previous release: 0.7.7** — simpler audio settings, local Strong noise removal, 16 built-in profile pictures and matching DM avatar colours. Deployed at **https://dorhamapp.ir/** after isolated SFU and verified rollback-backup checks. See [release verification](docs/RELEASE-0.7.7.md).

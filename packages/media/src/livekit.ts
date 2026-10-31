@@ -1,3 +1,4 @@
+import { microphoneUnavailable, listenOnlyNotice } from './microphone-access';
 import type { NoiseRemoval } from './strong-denoiser';
 import { clampScreenBandwidth, screenSettings, type ScreenQuality } from './screen-quality';
 import { Room, RoomEvent, ParticipantEvent, Track, type LocalAudioTrack, type RemoteTrack, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
@@ -22,7 +23,7 @@ export class LiveKitTransport implements MediaTransport {
   private deliveredScreens = new Set<string>(); private hiddenScreens = new Set<string>();
   private watchedShares = new Set<string>(); private streamVolumes = new Map<string, number>();
   private sharePermissionWait: AbortController | null = null;
-  private joining = false; private generation = 0;
+  private listenOnly = false; private joining = false; private generation = 0;
   private audioProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private captureProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private onRoom = (r: VoiceRoom) => {
@@ -65,7 +66,7 @@ export class LiveKitTransport implements MediaTransport {
     this.media.on(RoomEvent.Reconnected, () => { this.appliedMicrophone = undefined; this.applyVolumes(); this.updateSubscriptions(); void this.applyMicrophone().catch(e => options.emit('error', e.message)); options.emit('status', 'Voice connected through SFU'); });
   }
   async join(channelId: string) {
-    if (this.channelId) await this.leave(); this.channelId = channelId; this.captureProcessing = { ...this.audioProcessing }; this.joining = true;
+    if (this.channelId) await this.leave(); this.channelId = channelId; this.captureProcessing = { ...this.audioProcessing }; this.joining = true; this.listenOnly = false; this.options.emit('listenOnly', false);
     const generation = ++this.generation, current = () => { if (generation !== this.generation) throw new Error('Voice connection was cancelled.'); };
     try {
       const result = await ack(this.options.socket, 'voice:join', { channelId, eligible: navigator.onLine }); current(); this.room = result.room;
@@ -76,9 +77,10 @@ export class LiveKitTransport implements MediaTransport {
       this.options.emit('room', this.room); this.options.emit('status', 'Voice connected through SFU');
     } catch (e) { if (generation === this.generation) await this.leave(); throw e; } finally { if (generation === this.generation) this.joining = false; }
   }
-  private microphoneEnabled() { const self = this.room?.members.find(m => m.user.id === this.options.userId); return !this.muted && !this.deafened && !self?.serverMuted && !self?.serverDeafened; }
+  private microphoneEnabled() { const self = this.room?.members.find(m => m.user.id === this.options.userId); return !this.listenOnly && !this.muted && !this.deafened && !self?.serverMuted && !self?.serverDeafened; }
   private async createMicrophone() {
     const generation = this.generation;
+    if (!navigator.mediaDevices?.getUserMedia) throw new DOMException('Microphone unavailable', 'NotFoundError');
     const [track] = await this.media.localParticipant.createTracks({ audio: { ...this.captureProcessing }, video: false }) as LocalAudioTrack[];
     if (generation !== this.generation || !this.channelId) { track.stop(); throw new Error('Voice connection was cancelled.'); }
     const gain = new MicrophoneGain(this.gainValue); void gain.setNoiseRemoval(this.options.noiseRemoval ?? 'standard'); gain.setClarity(this.options.voiceClarity !== false); gain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold); gain.setEnabled(false); this.inputGain = gain;
@@ -109,7 +111,13 @@ export class LiveKitTransport implements MediaTransport {
     if (!this.microphoneTask) this.microphoneTask = Promise.resolve().then(async () => {
       while (this.appliedMicrophone !== this.microphoneEnabled() || this.gainProcessorMissing()) {
         const self = this.room?.members.find(m => m.user.id === this.options.userId);
-        if (!self?.serverMuted && !self?.serverDeafened && !this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack) await this.createMicrophone();
+        if (!this.listenOnly && !self?.serverMuted && !self?.serverDeafened && !this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack) {
+          try { await this.createMicrophone(); }
+          catch (error) {
+            if (!microphoneUnavailable(error)) throw error;
+            this.listenOnly = true; this.options.emit('listenOnly', true); this.options.emit('notice', listenOnlyNotice);
+          }
+        }
         const existing = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
         if (existing?.getProcessor && (!existing.getProcessor()?.processedTrack || existing.getProcessor() !== this.inputGain)) {
           const gain = new MicrophoneGain(this.gainValue); void gain.setNoiseRemoval(this.options.noiseRemoval ?? 'standard'); gain.setClarity(this.options.voiceClarity !== false); gain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold); gain.setEnabled(false); this.inputGain = gain; await existing.setProcessor(gain);
@@ -133,9 +141,9 @@ export class LiveKitTransport implements MediaTransport {
     await this.applyMicrophone();
     if (!this.stateTask) this.stateTask = Promise.resolve().then(async () => {
       while (this.channelId && this.media.state === 'connected') {
-        const key = JSON.stringify([this.channelId, this.generation, this.muted, this.deafened]);
+        const key = JSON.stringify([this.channelId, this.generation, this.muted || this.listenOnly, this.deafened]);
         if (key === this.publishedState) break;
-        await ack(this.options.socket, 'voice:state', { muted: this.muted, deafened: this.deafened, requestId: crypto.randomUUID() }); this.publishedState = key;
+        await ack(this.options.socket, 'voice:state', { muted: this.muted || this.listenOnly, deafened: this.deafened, requestId: crypto.randomUUID() }); this.publishedState = key;
       }
     }).finally(() => { this.stateTask = null; });
     await this.stateTask;
@@ -234,6 +242,6 @@ export class LiveKitTransport implements MediaTransport {
   }
   async subscribe(share: Share, enabled: boolean) { if (enabled) { this.hiddenScreens.delete(share.id); this.watchedShares.add(share.id); } else { this.hiddenScreens.add(share.id); this.watchedShares.delete(share.id); } this.updateSubscriptions(); this.applyVolumes(); if (!enabled) { this.deliveredScreens.delete(share.id); this.options.emit('screenRemoved', share.id); } }
   async getStats() { const participants: Record<string, any> = { audioProcessing: this.getAudioProcessing(), noiseRemoval: this.getNoiseRemoval() }; for (const p of this.media.remoteParticipants.values()) { const tracks = []; for (const t of p.trackPublications.values()) if (t.track) tracks.push(await t.track.getRTCStatsReport()); participants[p.identity] = { quality: p.connectionQuality, tracks }; } return participants; }
-  async leave() { this.generation++; this.joining = false; const was = this.channelId; this.channelId = null; clearInterval(this.heartbeat); await this.stopShare().catch(() => {}); await this.microphoneTask?.catch(() => {}); await this.media.disconnect(); await this.inputGain.destroy(); this.appliedMicrophone = undefined; this.deliveredScreens.clear(); this.watchedShares.clear(); this.hiddenScreens.clear(); this.streamVolumes.clear(); for (const e of this.elements.values()) e.remove(); this.elements.clear(); if (was && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {}); this.room = null; this.options.emit('room', null); }
+  async leave() { this.generation++; this.joining = false; const was = this.channelId; this.channelId = null; clearInterval(this.heartbeat); await this.stopShare().catch(() => {}); await this.microphoneTask?.catch(() => {}); await this.media.disconnect(); await this.inputGain.destroy(); this.appliedMicrophone = undefined; this.deliveredScreens.clear(); this.watchedShares.clear(); this.hiddenScreens.clear(); this.streamVolumes.clear(); for (const e of this.elements.values()) e.remove(); this.elements.clear(); if (was && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {}); this.room = null; this.listenOnly = false; this.options.emit('listenOnly', false); this.options.emit('room', null); }
   async destroy() { await this.leave(); if (this.playbackContext.state !== 'closed') await this.playbackContext.close(); this.options.socket.off('voice:move', this.onMoved); this.options.socket.off('voice:room', this.onRoom); this.options.socket.off('voice:removed', this.onRemoved); this.options.socket.off('connect', this.onConnect); }
 }
