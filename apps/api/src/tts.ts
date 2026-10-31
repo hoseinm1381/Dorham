@@ -28,7 +28,7 @@ export class VoiceSpeech {
       child.on('error', ended); child.on('exit', ended);
     }
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending = undefined; this.process?.kill(); this.process = undefined; reject(Error('TTS timed out. Your message was sent normally.')); }, 30000);
+      const timer = setTimeout(() => { this.pending = undefined; this.process?.kill(); this.process = undefined; reject(Error('TTS timed out. Your message was sent normally.')); }, 60000);
       this.pending = { resolve, reject, timer }; this.process!.stdin.write(JSON.stringify({ text }) + '\n');
     });
   }
