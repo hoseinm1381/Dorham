@@ -1,4 +1,6 @@
-**Current web update: 1.0.3** — 64 supplied Soft Bubble emojis, including nine Dorham exclusives, with a searchable message picker, Persian labels and offline artwork. See [web verification](docs/RELEASE-1.0.3.md).
+**Current web/server update: 1.0.4** — all 64 emoji reactions, keep-open selection, larger single emojis and local Farsi/English voice-channel TTS. Native builds remain deferred. See [release details](docs/RELEASE-1.0.4.md).
+
+**Previous web update: 1.0.3** — 64 supplied Soft Bubble emojis, including nine Dorham exclusives, with a searchable message picker, Persian labels and offline artwork. See [web verification](docs/RELEASE-1.0.3.md).
 
 **Previous web update: 1.0.2** — selected-window sound requests, clearer Chrome audio-picker instructions and verified native window audio through the SFU. Windows/Android releases remain deferred. See [web verification](docs/RELEASE-1.0.2.md).
 

@@ -13,4 +13,5 @@ for (const icon of icons) {
   catalog.push({ id: icon.name, label, category: icon.category, tags: icon.tags, src: `./${directory}/${icon.name}.svg` });
 }
 await writeFile('apps/web/src/emoji-catalog.json', JSON.stringify(catalog, null, 2) + '\n');
+await writeFile('packages/contracts/src/emoji-ids.json', JSON.stringify(catalog.map(e => e.id), null, 2) + '\n');
 console.log(`Prepared ${catalog.length} bundled emojis in ${directory}.`);

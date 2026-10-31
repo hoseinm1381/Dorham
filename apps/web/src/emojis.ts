@@ -1,4 +1,5 @@
 import catalog from './emoji-catalog.json';
+import { reactionEmojiId } from '../../../packages/contracts/src/emoji-reactions';
 export const emojis = catalog;
 export type Emoji = typeof emojis[number];
 export const emojiCategories = [
@@ -6,8 +7,7 @@ export const emojiCategories = [
   ['gaming', 'Gaming'], ['dorham-exclusive', 'Only Dorham'],
 ] as const;
 const byId = new Map(emojis.map(e => [e.id, e]));
-const reactions: Record<string, string> = { '👍': 'emoji-thumbs-up', '❤️': 'emoji-heart', '😂': 'emoji-laughing', '🎉': 'emoji-party', '✅': 'emoji-checkmark' };
-export const findEmoji = (value: string) => byId.get(reactions[value] || value);
+export const findEmoji = (value: string) => byId.get(reactionEmojiId(value) || value);
 export const emojiCode = (id: string) => `:${id}:`;
 export function emojiParts(text: string): { text: string; emoji?: Emoji }[] {
   const parts: { text: string; emoji?: Emoji }[] = []; let start = 0;
@@ -29,4 +29,9 @@ export function insertEmoji(text: string, id: string, start: number, end: number
   start = Math.max(0, Math.min(start, text.length)); end = Math.max(start, Math.min(end, text.length));
   const code = emojiCode(id), next = text.slice(0, start) + code + text.slice(end);
   return next.length <= 4000 ? { text: next, cursor: start + code.length } : null;
+}
+export function isSingleEmoji(content: string) {
+  const text = content.trim(), parts = emojiParts(text);
+  if (parts.length === 1 && parts[0].emoji) return true;
+  return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].length === 1 && /[\p{Extended_Pictographic}\p{Emoji_Presentation}]|\u20e3/u.test(text);
 }

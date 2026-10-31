@@ -1,3 +1,4 @@
+import { VoiceSpeech } from './tts';
 import Fastify, { type FastifyRequest, type FastifyReply, type FastifyContextConfig } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -7,6 +8,7 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { Server as SocketServer, type Socket } from 'socket.io';
 import { z, ZodError } from 'zod';
+import { reactionEmojiSchema } from '../../../packages/contracts/src/emoji-reactions';
 import { randomUUID } from 'node:crypto';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from 'node:fs';
@@ -29,7 +31,7 @@ import { serverIcons } from './server-icons';
 import { GameService, gameCreate, gameCommand } from './games/service';
 
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
-export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean } = {}) {
+export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean; ttsSynthesize?: (text: string) => Promise<Buffer> } = {}) {
   const logging = options.logger ?? !process.env.VITEST;
   const app = Fastify({ logger: logging ? { serializers: { req: req => ({ method: req.method, url: String(req.url).split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) } } : false, bodyLimit: 128 * 1024, trustProxy: c.trustedProxies.length ? c.trustedProxies : false, requestTimeout: 900000, connectionTimeout: 30000 });
   await mkdir(c.dataDir, { recursive: true });
@@ -257,8 +259,9 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.post('/users/:id/block', async req => { const b = z.object({ blocked: z.boolean(), requestId }).parse(req.body); return service.blockUser(req.account.id, b.requestId, id.parse((req.params as any).id), b.blocked); });
     api.post('/dms', async req => { const b = z.object({ userId: id, requestId }).parse(req.body); const result = await service.dm(req.account.id, b.requestId, b.userId); await service.notify('state:changed', {}); return result; });
     api.get('/conversations/:id/messages', async req => { const b = z.object({ before: z.coerce.number().int().min(1).optional(), after: z.coerce.number().int().min(0).optional() }).parse(req.query); return service.history(req.account.id, id.parse((req.params as any).id), b.before, b.after); });
-    api.post('/messages', async req => { const b = messageSchema.parse(req.body); return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds); });
-    api.patch('/messages/:id', async req => { const b = z.object({ content: z.string().trim().min(1).max(4000).optional(), delete: z.boolean().optional(), emoji: z.enum(['👍', '❤️', '😂', '🎉', '👀', '✅']).optional(), removeReaction: z.boolean().optional(), requestId }).refine(b => b.content || b.delete || b.emoji).parse(req.body); return service.changeMessage(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
+    api.post('/messages', async req => { const b = messageSchema.parse(req.body); return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds, b.tts); });
+    api.get('/voice/tts/:id/audio', async (req, reply) => { const audio = await voiceSpeech.read(req.account.id, id.parse((req.params as any).id)); if (!audio) fail(404, 'NOT_FOUND', 'Speech audio is unavailable.'); return reply.header('Cache-Control', 'private, no-store').type('audio/wav').send(audio); });
+    api.patch('/messages/:id', async req => { const b = z.object({ content: z.string().trim().min(1).max(4000).optional(), delete: z.boolean().optional(), emoji: reactionEmojiSchema.optional(), removeReaction: z.boolean().optional(), requestId }).refine(b => b.content || b.delete || b.emoji).parse(req.body); return service.changeMessage(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/conversations/:id/read', async req => { const b = z.object({ sequence: z.number().int().min(0), requestId }).parse(req.body); return service.read(req.account.id, b.requestId, id.parse((req.params as any).id), b.sequence); });
     api.get('/voice/:id', async req => service.room(req.account.id, id.parse((req.params as any).id)));
     api.post('/voice/:id/moderate', async req => { const b = z.object({ userId: id, action: z.enum(['mute', 'unmute', 'deafen', 'undeafen', 'denyShare', 'allowShare', 'kick', 'stopShare']), requestId }).parse(req.body); return service.moderate(req.account.id, b.requestId, id.parse((req.params as any).id), b.userId, b.action); });
@@ -273,6 +276,8 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     });
   }, { prefix: '/api/v1' });
   const io = new SocketServer(app.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 120000, skipMiddlewares: false }, pingInterval: 20000, pingTimeout: 10000, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
+  const voiceSpeech = new VoiceSpeech(service, (socketId, event) => io.sockets.sockets.get(socketId)?.emit('voice:tts', event), (userId, text) => { for (const socket of io.sockets.sockets.values()) if (socket.data.userId === userId) socket.emit('voice:tts-notice', { text }); }, options.ttsSynthesize);
+  service.onTts = (userId, message) => { void voiceSpeech.enqueue(userId, message).catch(() => {}); };
   mediaAdmission(app, service, socketId => io.sockets.sockets.get(socketId)?.data.sessionId);
   games.online = uid => [...io.sockets.sockets.values()].some(s => s.data.userId === uid);
   games.notify = async (g,directoryChanged,canvas) => {
@@ -370,7 +375,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       } catch (e: any) { metric.failures++; ack({ ok: false, error: { code: e.code || 'INVALID_REQUEST', message: e instanceof ZodError ? 'Invalid real-time payload.' : (e instanceof AppError || e.code === 'TURN_UNAVAILABLE' ? e.message : 'Real-time action failed.') } }); }
       finally { const elapsed = performance.now() - started; metric.totalMs += elapsed; metric.maxMs = Math.max(metric.maxMs, elapsed); if (elapsed > 500) metric.slow++; }
     });
-    handle('message:send', async b => { const m = messageSchema.parse(b); return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds); });
+    handle('message:send', async b => { const m = messageSchema.parse(b); return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds, m.tts); });
     handle('game:watch', async b => {const gameId=id.parse(b.id);const view=await games.get(socket.data.userId,gameId);socket.data.gameWatching=gameId;return view;});
     handle('game:unwatch', async b => {if(socket.data.gameWatching===id.parse(b.id))socket.data.gameWatching=null;return {};});
     handle('typing', async b => { const v = z.object({ conversationId: id, active: z.boolean() }).parse(b); const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter(s => s.id !== socket.id).map(s => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId); for (const id of audience) io.sockets.sockets.get(id)?.emit('typing', { ...v, userId: socket.data.userId }); return {}; });
@@ -429,6 +434,6 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   // Upgraded sockets must close before Fastify starts draining the HTTP server.
   // Waiting until onClose deadlocks a restart while any chat client stays online.
   app.addHook('preClose', async () => { chess.close(); games.close(); clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
-  app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); await attachments.close(); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
+  app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); voiceSpeech.close(); await attachments.close(); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
   return { app, db, service, io, chess, games, attachments, config: c };
 }

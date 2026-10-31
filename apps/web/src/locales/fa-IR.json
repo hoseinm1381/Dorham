@@ -1292,5 +1292,22 @@
   "Late Night": "بازی آخر شب",
   "Group Celebration": "جشن گروهی",
   "Group Hug": "بغل گروهی",
-  "Tea Time": "وقت چای"
+  "Tea Time": "وقت چای",
+  "Add reaction": "افزودن واکنش",
+  "Choose reactions": "انتخاب واکنش",
+  "React with {emoji}": "واکنش {emoji}",
+  "Keep picker open": "باز ماندن پنجرهٔ ایموجی",
+  "Reaction could not be saved. Try again.": "واکنش ذخیره نشد. دوباره تلاش کنید.",
+  "Use /tts or this checkbox to read your message to your voice channel.": "برای خواندن پیام در کانال صوتی خود از ‎/tts یا این گزینه استفاده کنید.",
+  "Send as TTS": "ارسال با گفتار",
+  "Speaks in {channel}": "پخش گفتار در {channel}",
+  "Outside voice: text only": "بیرون از کانال صوتی: فقط متن",
+  "Mute TTS": "بی‌صدا کردن گفتار",
+  "Unmute TTS": "فعال کردن گفتار",
+  "Click anywhere to enable voice TTS playback.": "برای فعال کردن پخش گفتار، روی صفحه کلیک کنید.",
+  "TTS is unavailable. Your message was sent normally.": "گفتار در دسترس نیست. پیام شما به‌صورت معمولی ارسال شد.",
+  "TTS is busy. Your message was sent normally.": "گفتار مشغول است. پیام شما به‌صورت معمولی ارسال شد.",
+  "You cannot use TTS in this voice channel. Your message was sent normally.": "در این کانال امکان استفاده از گفتار را ندارید. پیام شما به‌صورت معمولی ارسال شد.",
+  "TTS is limited to 400 characters and one request every 4 seconds. Your message was sent normally.": "گفتار حداکثر ۴۰۰ نویسه و یک درخواست در هر ۴ ثانیه می‌پذیرد. پیام شما به‌صورت معمولی ارسال شد.",
+  "Type a message after /tts.": "پس از ‎/tts متن پیام را بنویسید."
 }

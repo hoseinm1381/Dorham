@@ -70,3 +70,10 @@ export async function downloadAttachment(id: string, name: string) {
   if (!response.ok) { const data = await response.json(); throw Object.assign(new Error(data.error?.message || 'File download failed.'), { code: data.error?.code }); }
   const blob = await response.blob(), url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+
+export async function speechAudio(id: string) {
+  await maintainSession();
+  const response = await fetch(`${base}/api/v1/voice/tts/${encodeURIComponent(id)}/audio`, { credentials: 'include', headers: access ? { Authorization: `Bearer ${access}` } : {}, cache: 'no-store', signal: AbortSignal.timeout(10000) });
+  if (!response.ok) throw Error('Speech audio is unavailable.');
+  return response.arrayBuffer();
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
-import { emojiParts, insertEmoji, searchEmojis } from '../apps/web/src/emojis';
+import { emojiParts, insertEmoji, searchEmojis, isSingleEmoji } from '../apps/web/src/emojis';
 import { MessageContent } from '../apps/web/src/MessageContent';
 
 describe('bundled message emojis', () => {
@@ -29,4 +29,9 @@ describe('bundled message emojis', () => {
     expect(searchEmojis('چای', 'dorham-exclusive', label => label === 'Tea Time' ? 'وقت چای' : label).map(e => e.id)).toEqual(['dorham-tea-time']);
     expect(searchEmojis('chai', 'gaming')).toEqual([]);
   });
+});
+
+it('enlarges exactly one bundled or Unicode grapheme and leaves mixed messages normal', () => {
+  for (const text of [':dorham-tea-time:', ' :emoji-happy: ', '🙂', '👨‍👩‍👧‍👦', '👍🏽', '🇮🇷', '1️⃣']) expect(isSingleEmoji(text), text).toBe(true);
+  for (const text of ['', '1', 'hi 🙂', 'سلام :emoji-happy:', '🙂🙂', ':emoji-happy::emoji-heart:', ':unknown:', 'https://example.com/:emoji-happy:']) expect(isSingleEmoji(text), text).toBe(false);
 });

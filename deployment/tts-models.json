@@ -1,0 +1,41 @@
+{
+  "piper": "1.8.0",
+  "voices": {
+    "fa_IR-amir-medium.onnx": {
+      "sha256": "fb815380d969ea372b0b21b0de14421f58fe481047e153e69685d079b6e1a9d1",
+      "bytes": 63531379,
+      "sourceRevision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/b4e358ffcb232591bf73a540e70f7de528e4174a/fa/fa_IR/amir/medium/fa_IR-amir-medium.onnx"
+    },
+    "fa_IR-amir-medium.onnx.json": {
+      "sha256": "75f918a3bf0f57a9179abe725af529f2a5c79d6c899e2a84aec76c685d5dfb9a",
+      "bytes": 4958,
+      "sourceRevision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/b4e358ffcb232591bf73a540e70f7de528e4174a/fa/fa_IR/amir/medium/fa_IR-amir-medium.onnx.json"
+    },
+    "fa-MODEL_CARD": {
+      "sha256": "0d7d315699945ac830162f82d485d79af51a33081a7649e8992726bd4bba2384",
+      "bytes": 264,
+      "sourceRevision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/b4e358ffcb232591bf73a540e70f7de528e4174a/fa/fa_IR/amir/medium/MODEL_CARD"
+    },
+    "en_US-ljspeech-medium.onnx": {
+      "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+      "bytes": 63531379,
+      "sourceRevision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/b4e358ffcb232591bf73a540e70f7de528e4174a/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx"
+    },
+    "en_US-ljspeech-medium.onnx.json": {
+      "sha256": "141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860",
+      "bytes": 4972,
+      "sourceRevision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/b4e358ffcb232591bf73a540e70f7de528e4174a/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx.json"
+    },
+    "en-MODEL_CARD": {
+      "sha256": "fbee1529c89d36b3fe76d7e9f3f832dce17f44900a52d76a9bda735654766b4d",
+      "bytes": 517,
+      "sourceRevision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/b4e358ffcb232591bf73a540e70f7de528e4174a/en/en_US/ljspeech/medium/MODEL_CARD"
+    }
+  }
+}

@@ -8,3 +8,9 @@
 @media(max-width:420px){.emoji-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.emoji-picker{padding:11px}}
 
 .composer textarea{min-width:0;flex:1}
+
+.emoji-keep-open{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:#bfc0d4}.emoji-picker .emoji-keep-open input{width:16px;height:16px;padding:0}.emoji-grid button[aria-pressed=true]{background:#8d77e74d;box-shadow:inset 0 0 0 2px #baa4ff}.emoji-grid button:disabled{opacity:.65}
+.emoji-picker.reaction-picker{position:fixed;inset-inline-end:auto;bottom:auto;z-index:200;width:min(360px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow-y:auto}.message-actions:has([aria-expanded=true]){display:flex;opacity:1;pointer-events:auto}
+.message-text.single-emoji{display:inline-block;font-size:56px;line-height:1.2}.single-emoji .custom-emoji{width:64px;height:64px;vertical-align:middle;margin:4px 0}
+
+.tts-controls{display:flex;align-items:center;gap:10px;font-size:11px;color:#a8adc2;padding:4px 2px}.tts-controls label{display:flex;align-items:center;gap:5px}.tts-controls input{width:14px;height:14px;margin:0}.tts-controls button{margin-inline-start:auto;color:#b9a6ff;font-size:11px}.tts-controls small{font-size:10px}

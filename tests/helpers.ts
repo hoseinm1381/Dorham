@@ -5,9 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 import { createApp } from '../apps/api/src/app';
 import { config } from '../apps/api/src/config';
-export async function harness(overrides: Parameters<typeof config>[0] = {}) {
+export async function harness(overrides: Parameters<typeof config>[0] = {}, options: Parameters<typeof createApp>[1] = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'dorham-test-'));
-  const h = await createApp(config({ dataDir, databaseUrl: '', port: 3001, maxUsers: 100, roomShares: 0, globalShares: 0, bootstrapSecret: 'test-bootstrap-secret', stunUrls: [], ...overrides }), { logger: false, rateLimit: false });
+  const h = await createApp(config({ dataDir, databaseUrl: '', port: 3001, maxUsers: 100, roomShares: 0, globalShares: 0, bootstrapSecret: 'test-bootstrap-secret', stunUrls: [], ...overrides }), { logger: false, rateLimit: false, ...options });
   await h.app.listen({ port: 0, host: '127.0.0.1' }); const url = `http://127.0.0.1:${(h.app.server.address() as any).port}`;
   const sockets: Socket[] = [];
   async function register(n: string) {

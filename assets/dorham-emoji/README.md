@@ -4,4 +4,4 @@
 
 Edit the SVGs directly, or run `python assets/dorham-emoji/source/rebuild.py` to regenerate them from the supplied emoji.py/core.py. Run `node scripts/emoji-assets.mjs` afterwards to update the hashed public directory and typed UI catalog. Normal dev/web builds run this step automatically. Only SVG image files are displayed; user message text never becomes SVG markup.
 
-Messages store readable shortcodes such as :dorham-tea-time:. Existing clients show those codes as text. No new message schema or backend reaction values are needed. Existing supported reactions use matching art where available.
+Messages store readable shortcodes such as :dorham-tea-time:. Existing clients show those codes as text. Registered reaction values are generated into shared contracts, retaining existing Unicode keys for historical counts.

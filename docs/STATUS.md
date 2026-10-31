@@ -1,4 +1,6 @@
-Current web update **1.0.3** adds all 64 supplied emojis and a searchable localized picker. All 167 unit/API tests and the two-client, history, mobile Persian and offline-artwork browser checks pass. Web 1.0.3 is live: all 124 public files match, the fresh rollback backup is verified and voice services were not restarted. Native builds remain deferred. See [1.0.3 details](RELEASE-1.0.3.md).
+Current web/server update **1.0.4** adds full emoji reactions, multi-selection, large single emojis and voice-channel TTS with local Farsi/English models. All 171 unit/API tests and the emoji/TTS browser cases pass. Combined API/web rollout is prepared; the operator authorized its brief API restart. Native builds remain deferred. See [1.0.4 details](RELEASE-1.0.4.md).
+
+Previous web update **1.0.3** adds all 64 supplied emojis and a searchable localized picker. All 167 unit/API tests and the two-client, history, mobile Persian and offline-artwork browser checks pass. Web 1.0.3 is live: all 124 public files match, the fresh rollback backup is verified and voice services were not restarted. Native builds remain deferred. See [1.0.3 details](RELEASE-1.0.3.md).
 
 Previous web update **1.0.2** requests selected-application sound directly from Chrome and passes both real-window and synthetic two-client SFU checks. All 163 unit/API tests pass. Web-only 1.0.2 is live: all 60 public files match, fresh rollback backup is independently verified, and voice services were not restarted. Backend/stable native releases remain 1.0.0. See [1.0.2 details](RELEASE-1.0.2.md).
 

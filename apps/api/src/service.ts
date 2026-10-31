@@ -1,3 +1,4 @@
+import { ttsMessage } from '../../../packages/contracts/src/tts';
 import { randomUUID, createHmac } from 'node:crypto';
 import { z } from 'zod';
 import { resolveCustomPermissions, canManage, requestId as requestIdSchema, type Role, type Permission, type PublicUser, type Message, type VoiceRoom, type VoicePresence, type CustomRole } from '@dorham/contracts';
@@ -12,6 +13,7 @@ import { reconcileShares, shareView } from './share-policy';
 export const publicUser = (u: Row): PublicUser => ({ id: u.id, username: u.username, displayName: u.display_name, bio: u.bio, avatar: u.avatar, status: u.status, instanceAdmin: Boolean(u.instance_admin), guest: Boolean(u.guest), banned: Boolean(u.banned), language: u.language === 'fa-IR' ? 'fa-IR' : u.language === 'en-US' ? 'en-US' : undefined, mustChangePassword: Boolean(u.must_change_password) });
 export class Service {
   notify: (kind: string, payload: any) => Promise<void> = async () => {};
+  onTts?: (userId: string, message: Message) => void;
   private cloudflareTurn: CloudflareTurn | null;
   constructor(public db: Database, public c: Config) { this.cloudflareTurn = c.cloudflareTurnKeyId ? new CloudflareTurn(c.cloudflareTurnKeyId, c.cloudflareTurnApiToken) : null; }
   async mutate<T>(userId: string, requestId: string, operation: string, payload: unknown, fn: (tx: Connection) => Promise<T>): Promise<T> {
@@ -350,9 +352,10 @@ export class Service {
     if ((await tx.one('SELECT COUNT(*) AS count FROM events'))!.count >= 50000) await tx.run('DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY created_at LIMIT 200)');
     await tx.run('INSERT INTO events(id,conversation_id,sequence,kind,payload,created_at) VALUES(?,?,?,?,?,?)', [randomUUID(), conversationId, event.sequence, kind, JSON.stringify(payload), Date.now()]); return event;
   }
-  async send(userId: string, requestId: string, conversationId: string, content: string, replyTo?: string | null, attachmentIds: string[] = []) {
-    let reopened = false;
-    const event = await this.mutate(userId, requestId, 'message.send', { conversationId, content, replyTo, attachmentIds }, async tx => {
+  async send(userId: string, requestId: string, conversationId: string, content: string, replyTo?: string | null, attachmentIds: string[] = [], asTts = false) {
+    let reopened = false; const spoken = ttsMessage(content);
+    if (!spoken.text && !attachmentIds.length) fail(400, 'VALIDATION', 'Type a message after /tts.');
+    const event = await this.mutate(userId, requestId, 'message.send', { conversationId, content, replyTo, attachmentIds, ...(asTts ? { tts: true } : {}) }, async tx => {
       const cv = await this.conversation(tx, userId, conversationId, true);
       const account = await tx.one('SELECT guest FROM users WHERE id=?', [userId]);
       if (account!.guest && (await tx.one('SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND created_at>?', [userId, Date.now() - 60000]))!.count >= 20) fail(429, 'GUEST_RATE', 'Guests may send at most 20 messages per minute.');
@@ -363,11 +366,11 @@ export class Service {
         await tx.run('DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY created_at LIMIT 200)');
       }
       const messageId = randomUUID();
-      await tx.run('INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)', [messageId, conversationId, Number(cv.sequence) + 1, userId, content, replyTo || null, Date.now()]);
+      await tx.run('INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)', [messageId, conversationId, Number(cv.sequence) + 1, userId, spoken.text, replyTo || null, Date.now()]);
       for (const a of attachmentIds) await tx.run('UPDATE attachments SET message_id=? WHERE id=?', [messageId, a]);
       if (cv.kind === 'dm') { reopened = Boolean(await tx.one('SELECT user_id FROM dm_members WHERE conversation_id=? AND hidden=1', [conversationId])); await tx.run('UPDATE dm_members SET hidden=0 WHERE conversation_id=?', [conversationId]); }
       return this.event(tx, conversationId, 'message', await this.messageView(tx, messageId));
-    }); if (reopened) await this.notify('state:changed', {}); await this.notify('conversation:event', event); return event;
+    }); if (reopened) await this.notify('state:changed', {}); await this.notify('conversation:event', event); if ((spoken.requested || asTts) && spoken.text) this.onTts?.(userId, event.payload as Message); return event;
   }
   async changeMessage(userId: string, requestId: string, messageId: string, body: { content?: string; delete?: boolean; emoji?: string; removeReaction?: boolean }) {
     const event = await this.mutate(userId, requestId, 'message.change', { messageId, ...body }, async tx => {

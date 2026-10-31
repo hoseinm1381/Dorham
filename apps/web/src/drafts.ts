@@ -1,5 +1,5 @@
 import type { Attachment, Message } from '@dorham/contracts';
-export type PendingSend = { requestId: string; content: string; replyTo: string | null; attachmentIds: string[]; createdAt: number; status: 'sending' | 'failed'; error?: string; editMessageId?: string };
+export type PendingSend = { requestId: string; content: string; replyTo: string | null; attachmentIds: string[]; createdAt: number; status: 'sending' | 'failed'; error?: string; editMessageId?: string; tts?: boolean };
 export type Draft = { text: string; reply: Message | null; editing: Message | null; files: Attachment[]; pending: PendingSend | null; updatedAt: number };
 const storageKey = 'dorham-drafts-v1', maximumBytes = 1048576, maximumAge = 7 * 86400000;
 const empty = (): Draft => ({ text: '', reply: null, editing: null, files: [], pending: null, updatedAt: Date.now() });
@@ -15,7 +15,7 @@ export class DraftStore {
         const conversation = key.split('\n').at(-1)!;
         const files = Array.isArray(value.files) ? value.files.filter((f: Attachment) => f && typeof f.id === 'string' && typeof f.name === 'string' && Number(f.expiresAt) > Date.now()).slice(0, 4) : [];
         const p = value.pending;
-        const pending: PendingSend | null = p && typeof p.requestId === 'string' && p.requestId.length <= 100 && typeof p.content === 'string' && p.content.length <= 4000 && Number.isFinite(p.createdAt) && p.createdAt <= Date.now() + 60000 && (p.replyTo === null || typeof p.replyTo === 'string') && Array.isArray(p.attachmentIds) && p.attachmentIds.length <= 4 && p.attachmentIds.every((id: unknown) => typeof id === 'string' && id.length <= 100) ? { requestId: p.requestId, content: p.content, createdAt: p.createdAt, replyTo: p.replyTo, attachmentIds: p.attachmentIds, editMessageId: typeof p.editMessageId === 'string' ? p.editMessageId : undefined, status: 'failed', error: 'Delivery was interrupted. Retry explicitly.' } : null;
+        const pending: PendingSend | null = p && typeof p.requestId === 'string' && p.requestId.length <= 100 && typeof p.content === 'string' && p.content.length <= 4000 && Number.isFinite(p.createdAt) && p.createdAt <= Date.now() + 60000 && (p.replyTo === null || typeof p.replyTo === 'string') && Array.isArray(p.attachmentIds) && p.attachmentIds.length <= 4 && p.attachmentIds.every((id: unknown) => typeof id === 'string' && id.length <= 100) ? { requestId: p.requestId, content: p.content, tts: p.tts === true, createdAt: p.createdAt, replyTo: p.replyTo, attachmentIds: p.attachmentIds, editMessageId: typeof p.editMessageId === 'string' ? p.editMessageId : undefined, status: 'failed', error: 'Delivery was interrupted. Retry explicitly.' } : null;
         this.data.set(key, { text: value.text, files, reply: target(value.replyId, conversation), editing: target(value.editingId, conversation), pending, updatedAt: value.updatedAt });
       }
     } catch { /* Storage is optional; malformed records are never sent. */ }
