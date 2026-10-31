@@ -1,4 +1,5 @@
 import { microphoneUnavailable, listenOnlyNotice } from './microphone-access';
+import { captureScreen, captureDetails } from './screen-capture';
 import type { NoiseRemoval } from './strong-denoiser';
 import { clampScreenBandwidth, screenSettings, type ScreenQuality } from './screen-quality';
 import { Room, RoomEvent, ParticipantEvent, Track, type LocalAudioTrack, type RemoteTrack, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
@@ -23,6 +24,8 @@ export class LiveKitTransport implements MediaTransport {
   private deliveredScreens = new Set<string>(); private hiddenScreens = new Set<string>();
   private watchedShares = new Set<string>(); private streamVolumes = new Map<string, number>();
   private sharePermissionWait: AbortController | null = null;
+  private screenCapture: MediaStream | null = null;
+  private screenCaptureDetails: ReturnType<typeof captureDetails> | null = null;
   private listenOnly = false; private joining = false; private generation = 0;
   private audioProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private captureProcessing: AudioProcessing = { ...defaultAudioProcessing };
@@ -205,13 +208,23 @@ export class LiveKitTransport implements MediaTransport {
       // The control-plane acknowledgement and SFU signaling are separate
       // connections. A committed lease does not mean the SDK has its grant yet.
       const participant = this.media.localParticipant;
-      await waitForCondition(() => { const p = participant.permissions; return Boolean(p?.canPublish && (!p.canPublishSources.length || p.canPublishSources.includes(Track.sourceToProto(Track.Source.ScreenShare)))); }, check => { participant.on(ParticipantEvent.ParticipantPermissionsChanged, check); return () => participant.off(ParticipantEvent.ParticipantPermissionsChanged, check); }, wait.signal);
-      await participant.setScreenShareEnabled(true, { audio: includeAudio ? { restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false, systemAudio: includeAudio ? 'include' : 'exclude', selfBrowserSurface: 'exclude', resolution: { width: settings.width, height: settings.height, frameRate: maxFramerate } }, { videoCodec: 'vp8', simulcast: false, screenShareEncoding: { maxBitrate, maxFramerate }, audioPreset: { maxBitrate: settings.audioBitrate || 48000 }, forceStereo: true });
+      await waitForCondition(() => { const p = participant.permissions; return Boolean(p?.canPublish && (!p.canPublishSources.length || (p.canPublishSources.includes(Track.sourceToProto(Track.Source.ScreenShare)) && (!includeAudio || p.canPublishSources.includes(Track.sourceToProto(Track.Source.ScreenShareAudio)))))); }, check => { participant.on(ParticipantEvent.ParticipantPermissionsChanged, check); return () => participant.off(ParticipantEvent.ParticipantPermissionsChanged, check); }, wait.signal);
+      const generation = this.generation;
+      const current = () => { if (wait.signal.aborted || generation !== this.generation) throw new Error('Screen sharing was cancelled.'); };
+      current(); const stream = await captureScreen(settings, includeAudio);
+      if (wait.signal.aborted || generation !== this.generation) { stream.getTracks().forEach(t => t.stop()); current(); }
+      this.screenCapture = stream; this.screenCaptureDetails = captureDetails(stream);
+      const video = stream.getVideoTracks()[0];
+      if (!video) throw new Error('No screen video was captured.');
+      await participant.publishTrack(video, { source: Track.Source.ScreenShare, videoCodec: 'vp8', simulcast: false, screenShareEncoding: { maxBitrate, maxFramerate } }); current();
+      if (includeAudio) for (const audio of stream.getAudioTracks()) {
+        await participant.publishTrack(audio, { source: Track.Source.ScreenShareAudio, audioPreset: { maxBitrate: settings.audioBitrate || 48000 }, forceStereo: true, dtx: false }); current();
+      }
       const audioSender = participant.getTrackPublication(Track.Source.ScreenShareAudio)?.audioTrack?.sender;
       if (audioSender) { const parameters = audioSender.getParameters(); for (const encoding of parameters.encodings || []) encoding.maxBitrate = settings.audioBitrate || 48000; await audioSender.setParameters(parameters); }
       if (includeAudio && !participant.getTrackPublication(Track.Source.ScreenShareAudio)) {
         const applied = await ack(this.options.socket, 'share:update', { requestId: crypto.randomUUID(), leaseId: this.lease!.id, expectedRevision: this.lease!.policyRevision, includeAudio: false }); this.lease = applied.lease;
-        this.options.emit('notice', 'This capture source did not provide sound. Video sharing continues.');
+        this.options.emit('notice', 'Chrome did not provide an audio track. Restart sharing and enable audio in Chrome’s picker. For browser games, choose the game tab.');
       }
       this.emitLocalScreen();
     } catch (e) { await this.stopShare(); throw e; } finally { if (this.sharePermissionWait === wait) this.sharePermissionWait = null; }
@@ -230,7 +243,7 @@ export class LiveKitTransport implements MediaTransport {
     if(publication?.options)publication.options.screenShareEncoding={maxBitrate:settings.bitrate,maxFramerate:settings.fps};
     }catch(e){await this.stopShare();throw e;}
   }
-  async stopShare() { this.sharePermissionWait?.abort(); this.sharePermissionWait = null; const lease = this.lease; this.lease = null; this.options.emit('localScreen', null); await this.media.localParticipant.setScreenShareEnabled(false); if (lease) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {}); }
+  async stopShare() { this.sharePermissionWait?.abort(); this.screenCapture?.getTracks().forEach(t => t.stop()); this.screenCapture = null; this.sharePermissionWait = null; const lease = this.lease; this.lease = null; this.options.emit('localScreen', null); await this.media.localParticipant.setScreenShareEnabled(false); if (lease) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {}); }
   private updateSubscriptions() {
     for (const participant of this.media.remoteParticipants.values()) {
       const share = this.room?.shares.find(s => s.userId === participant.identity.split(':')[0]);
@@ -241,7 +254,7 @@ export class LiveKitTransport implements MediaTransport {
     }
   }
   async subscribe(share: Share, enabled: boolean) { if (enabled) { this.resumePlayback(); this.hiddenScreens.delete(share.id); this.watchedShares.add(share.id); } else { this.hiddenScreens.add(share.id); this.watchedShares.delete(share.id); } this.updateSubscriptions(); this.applyVolumes(); if (!enabled) { this.deliveredScreens.delete(share.id); this.options.emit('screenRemoved', share.id); } }
-  async getStats() { const participants: Record<string, any> = { audioProcessing: this.getAudioProcessing(), noiseRemoval: this.getNoiseRemoval() }; for (const p of this.media.remoteParticipants.values()) { const tracks = []; for (const t of p.trackPublications.values()) if (t.track) tracks.push(await t.track.getRTCStatsReport()); participants[p.identity] = { quality: p.connectionQuality, tracks }; } return participants; }
+  async getStats() { const participants: Record<string, any> = { screenCapture: this.screenCaptureDetails, audioProcessing: this.getAudioProcessing(), noiseRemoval: this.getNoiseRemoval() }; for (const p of this.media.remoteParticipants.values()) { const tracks = []; for (const t of p.trackPublications.values()) if (t.track) tracks.push(await t.track.getRTCStatsReport()); participants[p.identity] = { quality: p.connectionQuality, tracks }; } return participants; }
   async leave() { this.generation++; this.joining = false; const was = this.channelId; this.channelId = null; clearInterval(this.heartbeat); await this.stopShare().catch(() => {}); await this.microphoneTask?.catch(() => {}); await this.media.disconnect(); await this.inputGain.destroy(); this.appliedMicrophone = undefined; this.deliveredScreens.clear(); this.watchedShares.clear(); this.hiddenScreens.clear(); this.streamVolumes.clear(); for (const e of this.elements.values()) e.remove(); this.elements.clear(); if (was && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {}); this.room = null; this.listenOnly = false; this.options.emit('listenOnly', false); this.options.emit('room', null); }
   async destroy() { await this.leave(); if (this.playbackContext.state !== 'closed') await this.playbackContext.close(); this.options.socket.off('voice:move', this.onMoved); this.options.socket.off('voice:room', this.onRoom); this.options.socket.off('voice:removed', this.onRemoved); this.options.socket.off('connect', this.onConnect); }
 }

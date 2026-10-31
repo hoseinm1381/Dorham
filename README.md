@@ -1,4 +1,6 @@
-**Current web update: 1.0.1** — Chrome screen sound, fullscreen sound controls and visible Watch stream buttons. Applied without restarting voice services. Windows/Android stable downloads remain 1.0.0; native work is deferred. See [web verification](docs/RELEASE-1.0.1.md).
+**Current web update: 1.0.2** � selected-window sound requests, clearer Chrome audio-picker instructions and verified native window audio through the SFU. Windows/Android releases remain deferred. See [web verification](docs/RELEASE-1.0.2.md).
+
+**Previous web update: 1.0.1** — Chrome screen sound, fullscreen sound controls and visible Watch stream buttons. Applied without restarting voice services. Windows/Android stable downloads remain 1.0.0; native work is deferred. See [web verification](docs/RELEASE-1.0.1.md).
 
 **Native release: 1.0.0** — deployed at **https://dorhamapp.ir/** with public Windows/Android downloads, a small Get apps menu and native update notices. See [release and update verification](docs/RELEASE-1.0.0.md).
 

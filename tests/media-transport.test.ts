@@ -52,17 +52,23 @@ it('a positive volume gesture resumes playback and reapplies the latest amplific
     expect(participant.setVolume).toHaveBeenCalledWith(2, 'microphone');
   } finally { await f.transport.destroy(); }
 });
-it('requests Chrome system audio only when the user opts in, retaining own-audio exclusion', async () => {
-  const f = fixture();
+it('passes selected-window audio to native Chrome and publishes screen audio independently from the microphone', async () => {
+  const f = fixture(), video = { kind: 'video', stop: vi.fn(), getSettings: () => ({ displaySurface: 'window' }) }, audio = { kind: 'audio', stop: vi.fn(), getSettings: () => ({ channelCount: 2 }) };
   try {
-    const media = (f.transport as any).media, participant = media.localParticipant;
+    const participant = (f.transport as any).media.localParticipant, published = new Map();
     participant.permissions = { canPublish: true, canPublishSources: [] };
-    participant.getTrackPublication = () => undefined;
+    const capture = vi.fn(async (options: any) => ({ getVideoTracks: () => [video], getAudioTracks: () => options.audio ? [audio] : [], getTracks: () => options.audio ? [video, audio] : [video] }));
+    (navigator.mediaDevices as any).getDisplayMedia = capture;
+    participant.publishTrack = vi.fn(async (track: any, options: any) => { published.set(options.source, { audioTrack: track.kind === 'audio' ? track : undefined }); });
+    participant.getTrackPublication = (source: string) => published.get(source);
     (f.socket as any).timeout = () => ({ emit: (_name: string, body: any, reply: any) => reply(null, { ok: true, data: { lease: { id: 'screen', policyRevision: 1, includeAudio: Boolean(body.includeAudio), maxFrameRate: 30 } } }) });
     await f.transport.startShare('720p15', { includeAudio: true });
-    expect(participant.setScreenShareEnabled).toHaveBeenCalledWith(true, expect.objectContaining({ systemAudio: 'include', audio: expect.objectContaining({ restrictOwnAudio: true }), selfBrowserSurface: 'exclude' }), expect.anything());
-    await f.transport.stopShare(); await f.transport.startShare('720p15', { includeAudio: false });
-    expect(participant.setScreenShareEnabled).toHaveBeenLastCalledWith(true, expect.objectContaining({ systemAudio: 'exclude', audio: false }), expect.anything());
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ windowAudio: 'window', systemAudio: 'include', audio: expect.objectContaining({ restrictOwnAudio: true }), selfBrowserSurface: 'exclude' }));
+    expect(participant.publishTrack).toHaveBeenCalledWith(video, expect.objectContaining({ source: 'screen_share', screenShareEncoding: { maxBitrate: 402000, maxFramerate: 15 } }));
+    expect(participant.publishTrack).toHaveBeenCalledWith(audio, expect.objectContaining({ source: 'screen_share_audio', forceStereo: true, audioPreset: { maxBitrate: 48000 } }));
+    await f.transport.stopShare(); expect(video.stop).toHaveBeenCalled(); expect(audio.stop).toHaveBeenCalled();
+    published.clear(); await f.transport.startShare('720p15', { includeAudio: false });
+    expect(capture).toHaveBeenLastCalledWith(expect.objectContaining({ windowAudio: 'exclude', systemAudio: 'exclude', audio: false }));
   } finally { await f.transport.destroy(); }
 });
 it('a stream sound gesture resumes suspended playback while mute never wakes it', async () => {
@@ -73,6 +79,34 @@ it('a stream sound gesture resumes suspended playback while mute never wakes it'
     media.startAudio = vi.fn(async () => {});
     f.transport.setStreamVolume('share', 0); expect(media.startAudio).not.toHaveBeenCalled();
     f.transport.setStreamVolume('share', 1); expect(media.startAudio).toHaveBeenCalledOnce();
+  } finally { await f.transport.destroy(); }
+});
+it('stops native window tracks and releases the lease if publication fails', async () => {
+  const f = fixture(), stop = vi.fn(), video = { kind: 'video', stop, getSettings: () => ({ displaySurface: 'window' }) };
+  try {
+    (navigator.mediaDevices as any).getDisplayMedia = async () => ({ getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] });
+    const participant = (f.transport as any).media.localParticipant;
+    participant.permissions = { canPublish: true, canPublishSources: [] };
+    participant.publishTrack.mockRejectedValueOnce(new Error('SFU publication failed'));
+    (f.socket as any).timeout = () => ({ emit: (_name: string, _body: any, reply: any) => reply(null, { ok: true, data: { lease: { id: 'screen', includeAudio: true, policyRevision: 1 } } }) });
+    await expect(f.transport.startShare('720p15', { includeAudio: true })).rejects.toThrow('SFU publication failed');
+    expect(stop).toHaveBeenCalled(); expect((f.transport as any).lease).toBeNull();
+    expect(participant.setScreenShareEnabled).toHaveBeenCalledWith(false);
+  } finally { await f.transport.destroy(); }
+});
+it('cancelling a native picker stops its late tracks without publishing them', async () => {
+  const f = fixture(), stop = vi.fn(), video = { kind: 'video', stop, getSettings: () => ({}) };
+  let acquired!: (stream: any) => void;
+  try {
+    const capture = vi.fn(() => new Promise(resolve => { acquired = resolve; }));
+    (navigator.mediaDevices as any).getDisplayMedia = capture;
+    const participant = (f.transport as any).media.localParticipant;
+    participant.permissions = { canPublish: true, canPublishSources: [] };
+    (f.socket as any).timeout = () => ({ emit: (_name: string, _body: any, reply: any) => reply(null, { ok: true, data: { lease: { id: 'screen', includeAudio: true, policyRevision: 1 } } }) });
+    const pending = f.transport.startShare('720p15', { includeAudio: true }), rejected = expect(pending).rejects.toThrow('cancelled');
+    await vi.waitFor(() => expect(capture).toHaveBeenCalledOnce()); await f.transport.stopShare();
+    acquired({ getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] });
+    await rejected; expect(stop).toHaveBeenCalled(); expect(participant.publishTrack).not.toHaveBeenCalled();
   } finally { await f.transport.destroy(); }
 });
 it('coalesces overlapping microphone state acknowledgements without losing the final mute', async () => {
