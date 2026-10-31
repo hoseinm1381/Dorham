@@ -1,0 +1,15 @@
+# Import this snippet inside the existing Dorham site block before its app handler.
+# Copy only artifacts/v<version>/downloads/* into /var/lib/dorham-downloads/.
+# Publish the immutable version directory first; replace latest.json last.
+(dorham_downloads) {
+    handle_path /downloads/* {
+        root * /var/lib/dorham-downloads
+        @latest path /latest.json
+        header @latest Cache-Control "no-store"
+        @packages path_regexp packages ^/[0-9]+\.[0-9]+\.[0-9]+/[^/]+$
+        header @packages Cache-Control "public, max-age=31536000, immutable"
+        header Access-Control-Allow-Origin "*"
+        header X-Content-Type-Options "nosniff"
+        file_server
+    }
+}
