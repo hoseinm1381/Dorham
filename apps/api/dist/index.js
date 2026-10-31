@@ -7,6 +7,7 @@ import {
   fail,
   hash,
   id,
+  initialRecoveryCodes,
   messageSchema,
   passwordHash,
   passwordSchema,
@@ -22,11 +23,11 @@ import {
   shareUpdateSchema,
   signalSchema,
   token
-} from "./chunk-Q4STIB6F.js";
+} from "./chunk-2GUYZ3ZR.js";
 import {
   config,
   openDatabase
-} from "./chunk-EUCIOHE4.js";
+} from "./chunk-GUKVT4SI.js";
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
@@ -37,13 +38,13 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import { Server as SocketServer } from "socket.io";
-import { z as z6, ZodError } from "zod";
-import { randomUUID as randomUUID4 } from "crypto";
+import { z as z7, ZodError } from "zod";
+import { randomUUID as randomUUID5 } from "crypto";
 import { monitorEventLoopDelay } from "perf_hooks";
 import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from "fs";
-import { mkdir as mkdir2, writeFile, unlink as unlink2, readdir, stat as stat3 } from "fs/promises";
-import path3 from "path";
-import sharp from "sharp";
+import { mkdir as mkdir2, writeFile as writeFile2, unlink as unlink3, readdir as readdir2, stat as stat4 } from "fs/promises";
+import path4 from "path";
+import sharp2 from "sharp";
 
 // apps/api/src/sfu.ts
 import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
@@ -2221,12 +2222,73 @@ var ChessService = class {
   }
 };
 
+// apps/api/src/server-icons.ts
+import { randomUUID as randomUUID4 } from "crypto";
+import { readdir, stat as stat3, writeFile, unlink as unlink2 } from "fs/promises";
+import path3 from "path";
+import sharp from "sharp";
+import { z as z6 } from "zod";
+function serverIcons(api, service, directory) {
+  api.post("/servers/:id/icon", async (req) => {
+    const serverId = id.parse(req.params.id), rid = requestId.parse(req.headers["x-request-id"]);
+    await service.member(service.db, req.account.id, serverId, "manageChannels");
+    const file = await req.file();
+    if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.mimetype)) fail(400, "INVALID_IMAGE", "Choose a PNG, JPG or WebP image.");
+    const bytes = await file.toBuffer();
+    let image;
+    try {
+      image = await sharp(bytes, { limitInputPixels: 16e6 }).rotate().resize(128, 128, { fit: "cover" }).webp({ quality: 80 }).toBuffer();
+    } catch {
+      fail(400, "INVALID_IMAGE", "Image could not be decoded.");
+    }
+    if (image.length > 96 * 1024) fail(400, "IMAGE_TOO_LARGE", "Compressed image is too large.");
+    let written = "", retired = null;
+    try {
+      const result = await service.mutate(req.account.id, rid, "server.icon", { serverId, digest: hash(bytes.toString("base64")) }, async (tx) => {
+        await service.member(tx, req.account.id, serverId, "manageChannels");
+        let size = 0;
+        for (const name2 of await readdir(directory)) size += (await stat3(path3.join(directory, name2))).size;
+        if (size + image.length > service.c.maxAvatarsMiB * 1024 * 1024) fail(507, "AVATAR_QUOTA", "Avatar storage is full.");
+        const name = `${randomUUID4()}.webp`;
+        await writeFile(path3.join(directory, name), image, { flag: "wx" });
+        written = name;
+        retired = (await tx.one("SELECT icon FROM servers WHERE id=?", [serverId]))?.icon || null;
+        await tx.run("UPDATE servers SET icon=? WHERE id=?", [`/avatars/${name}`, serverId]);
+        return { icon: `/avatars/${name}` };
+      });
+      written = "";
+      if (retired) await unlink2(path3.join(directory, path3.basename(retired))).catch(() => {
+      });
+      await service.notify("state:changed", {});
+      return result;
+    } catch (error) {
+      if (written) await unlink2(path3.join(directory, written)).catch(() => {
+      });
+      throw error;
+    }
+  });
+  api.delete("/servers/:id/icon", async (req) => {
+    const serverId = id.parse(req.params.id), b = z6.object({ requestId }).parse(req.body);
+    let retired = null;
+    const result = await service.mutate(req.account.id, b.requestId, "server.icon.remove", { serverId }, async (tx) => {
+      await service.member(tx, req.account.id, serverId, "manageChannels");
+      retired = (await tx.one("SELECT icon FROM servers WHERE id=?", [serverId]))?.icon || null;
+      await tx.run("UPDATE servers SET icon=NULL WHERE id=?", [serverId]);
+      return { success: true };
+    });
+    if (retired) await unlink2(path3.join(directory, path3.basename(retired))).catch(() => {
+    });
+    await service.notify("state:changed", {});
+    return result;
+  });
+}
+
 // apps/api/src/app.ts
 async function createApp(c = config(), options = {}) {
   const logging = options.logger ?? !process.env.VITEST;
   const app2 = Fastify({ logger: logging ? { serializers: { req: (req) => ({ method: req.method, url: String(req.url).split("?")[0], hostname: req.hostname, remoteAddress: req.ip }) } } : false, bodyLimit: 128 * 1024, trustProxy: c.trustedProxies.length ? c.trustedProxies : false, requestTimeout: 9e5, connectionTimeout: 3e4 });
   await mkdir2(c.dataDir, { recursive: true });
-  const lockPath = path3.join(c.dataDir, "instance.lock");
+  const lockPath = path4.join(c.dataDir, "instance.lock");
   if (existsSync(lockPath)) {
     const pid = Number(readFileSync(lockPath, "utf8"));
     if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("Invalid instance.lock. Verify no server is running before removing it.");
@@ -2259,12 +2321,12 @@ async function createApp(c = config(), options = {}) {
     await tx.run("DELETE FROM voice_members");
     await tx.run("UPDATE coordinators SET user_id=NULL,epoch=epoch+1,expires_at=0");
   });
-  const avatarDir = path3.join(c.dataDir, "avatars");
+  const avatarDir = path4.join(c.dataDir, "avatars");
   await mkdir2(avatarDir, { recursive: true });
   async function storageStatus() {
     const databaseBytes = c.databaseUrl ? null : Number((await db.one("PRAGMA page_count")).page_count) * Number((await db.one("PRAGMA page_size")).page_size);
     let avatarBytes = 0;
-    for (const name of await readdir(avatarDir)) avatarBytes += (await stat3(path3.join(avatarDir, name))).size;
+    for (const name of await readdir2(avatarDir)) avatarBytes += (await stat4(path4.join(avatarDir, name))).size;
     const databaseBudgetBytes = c.maxDatabaseMiB * 1048576, avatarBudgetBytes = c.maxAvatarsMiB * 1048576;
     const warnings = [];
     if (databaseBytes !== null && databaseBytes >= databaseBudgetBytes * 0.8) warnings.push("Database is at least 80% of its page budget. Prune data or migrate storage.");
@@ -2334,7 +2396,7 @@ async function createApp(c = config(), options = {}) {
     await db.transaction(async (tx) => {
       const old = await tx.all("SELECT id FROM sessions WHERE user_id=? ORDER BY created_at DESC", [userId]);
       for (const s of old.slice(2)) await tx.run("DELETE FROM sessions WHERE id=?", [s.id]);
-      await tx.run("INSERT INTO sessions(id,user_id,access_hash,refresh_hash,csrf,native,access_expires,expires_at,created_at,device_name,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [randomUUID4(), userId, hash(access), refresh ? hash(refresh) : null, csrf, Number(native), now + (native ? 15 * 6e4 : 30 * 864e5), now + 30 * 864e5, now, device.slice(0, 160), now]);
+      await tx.run("INSERT INTO sessions(id,user_id,access_hash,refresh_hash,csrf,native,access_expires,expires_at,created_at,device_name,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [randomUUID5(), userId, hash(access), refresh ? hash(refresh) : null, csrf, Number(native), now + (native ? 15 * 6e4 : 30 * 864e5), now + 30 * 864e5, now, device.slice(0, 160), now]);
     });
     const account = await db.one("SELECT * FROM users WHERE id=?", [userId]);
     if (!native) setCookie(reply, access);
@@ -2365,16 +2427,16 @@ async function createApp(c = config(), options = {}) {
     if (!c.registrationOpen) fail(403, "REGISTRATION_CLOSED", "Registration is closed.");
     const body = registerSchema.parse(req.body), username = body.username.toLowerCase();
     const encoded = await passwordHash(body.password);
-    const userId = await db.transaction(async (tx) => {
+    const created = await db.transaction(async (tx) => {
       const count = await tx.one("SELECT COUNT(*) AS count FROM users");
       if (count.count >= c.maxUsers) fail(409, "ACCOUNT_LIMIT", "This instance has reached its account limit.");
       if (await tx.one("SELECT id FROM users WHERE username=?", [username])) fail(409, "USERNAME_TAKEN", "This username is unavailable.");
-      const userId2 = randomUUID4();
-      await tx.run("INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)", [userId2, username, body.displayName, encoded, Date.now(), body.language || ""]);
-      return userId2;
+      const userId = randomUUID5();
+      await tx.run("INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)", [userId, username, body.displayName, encoded, Date.now(), body.language || ""]);
+      return { userId, codes: await initialRecoveryCodes(tx, userId) };
     });
     await service.notify("state:changed", {});
-    return reply.code(201).send(await sessionFor(userId, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Unknown device")));
+    return reply.code(201).send({ ...await sessionFor(created.userId, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Unknown device")), recoveryCodes: created.codes });
   });
   app2.post("/api/v1/auth/login", { config: authRate }, async (req, reply) => {
     const body = credentialsSchema.extend({ requestId }).parse(req.body);
@@ -2387,7 +2449,7 @@ async function createApp(c = config(), options = {}) {
     return sessionFor(user.id, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Unknown device"));
   });
   app2.post("/api/v1/auth/refresh", { config: authRate }, async (req) => {
-    const body = z6.object({ refreshToken: z6.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
+    const body = z7.object({ refreshToken: z7.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
     const outcome2 = await db.transaction(async (tx) => {
       const reused = await tx.one("SELECT session_id FROM used_refresh WHERE hash=?", [fingerprint]);
       if (reused) {
@@ -2424,8 +2486,9 @@ async function createApp(c = config(), options = {}) {
     api.get("/chess/:id", async (req) => chess.get(req.account.id, id.parse(req.params.id)));
     api.post("/chess/:id", async (req) => chess.command(req.account.id, id.parse(req.params.id), chessCommand.parse(req.body)));
     attachments.register(api);
+    serverIcons(api, service, avatarDir);
     api.post("/auth/renew", async (req, reply) => {
-      z6.object({ requestId }).parse(req.body);
+      z7.object({ requestId }).parse(req.body);
       if (req.session.native) fail(400, "NATIVE_REFRESH", "Use native credential renewal.");
       const access = token(), now = Date.now();
       await db.run("UPDATE sessions SET access_hash=?,access_expires=?,expires_at=?,last_seen=? WHERE id=?", [hash(access), now + 30 * 864e5, now + 30 * 864e5, now, req.session.id]);
@@ -2434,14 +2497,14 @@ async function createApp(c = config(), options = {}) {
     });
     api.get("/auth/me", async (req) => ({ user: publicUser(req.account), csrf: req.session.csrf }));
     api.post("/auth/logout", async (req, reply) => {
-      z6.object({ requestId }).parse(req.body);
+      z7.object({ requestId }).parse(req.body);
       await db.run("DELETE FROM sessions WHERE id=?", [req.session.id]);
       for (const s of io.sockets.sockets.values()) if (s.data.sessionId === req.session.id) s.disconnect(true);
       reply.clearCookie("dorham_session", { path: "/" });
       return { success: true };
     });
     api.post("/auth/password", async (req) => {
-      const b = z6.object({ currentPassword: z6.string().max(128), password: passwordSchema, requestId }).parse(req.body);
+      const b = z7.object({ currentPassword: z7.string().max(128), password: passwordSchema, requestId }).parse(req.body);
       if (req.account.guest || !await passwordVerify(req.account.password_hash, b.currentPassword)) fail(401, "INVALID_CREDENTIALS", "Current password is incorrect.");
       const encoded = await passwordHash(b.password);
       const result = await service.mutate(req.account.id, b.requestId, "password.change", { fingerprint: hash(b.password) }, async (tx) => {
@@ -2453,7 +2516,7 @@ async function createApp(c = config(), options = {}) {
       return result;
     });
     api.post("/admin/claim", async (req) => {
-      const b = z6.object({ secret: z6.string().max(256), requestId }).parse(req.body);
+      const b = z7.object({ secret: z7.string().max(256), requestId }).parse(req.body);
       if (!c.bootstrapSecret || !equal(c.bootstrapSecret, b.secret)) fail(403, "FORBIDDEN", "Bootstrap secret is invalid.");
       return service.mutate(req.account.id, b.requestId, "admin.claim", {}, async (tx) => {
         if (await tx.one("SELECT value FROM meta WHERE key='admin_claimed'")) fail(409, "ALREADY_CLAIMED", "Instance administration has already been claimed.");
@@ -2483,7 +2546,7 @@ async function createApp(c = config(), options = {}) {
       const bytes = await file.toBuffer();
       let image;
       try {
-        image = await sharp(bytes, { limitInputPixels: 16e6 }).rotate().resize(128, 128, { fit: "cover" }).webp({ quality: 80 }).toBuffer();
+        image = await sharp2(bytes, { limitInputPixels: 16e6 }).rotate().resize(128, 128, { fit: "cover" }).webp({ quality: 80 }).toBuffer();
       } catch {
         fail(400, "INVALID_IMAGE", "Image could not be decoded.");
       }
@@ -2491,16 +2554,16 @@ async function createApp(c = config(), options = {}) {
       let retiredAvatar = null;
       const result = await service.mutate(req.account.id, rid, "avatar.change", { hash: hash(bytes.toString("base64")) }, async (tx) => {
         let size = 0;
-        for (const f of await readdir(avatarDir)) size += (await stat3(path3.join(avatarDir, f))).size;
+        for (const f of await readdir2(avatarDir)) size += (await stat4(path4.join(avatarDir, f))).size;
         if (size + image.length > c.maxAvatarsMiB * 1024 * 1024) fail(507, "AVATAR_QUOTA", "Avatar storage is full.");
-        const name = `${randomUUID4()}.webp`;
-        await writeFile(path3.join(avatarDir, name), image, { flag: "wx" });
+        const name = `${randomUUID5()}.webp`;
+        await writeFile2(path4.join(avatarDir, name), image, { flag: "wx" });
         const old = await tx.one("SELECT avatar FROM users WHERE id=?", [req.account.id]);
         await tx.run("UPDATE users SET avatar=? WHERE id=?", [`/avatars/${name}`, req.account.id]);
         retiredAvatar = old?.avatar || null;
         return { avatar: `/avatars/${name}` };
       });
-      if (retiredAvatar) await unlink2(path3.join(avatarDir, path3.basename(retiredAvatar))).catch(() => {
+      if (retiredAvatar) await unlink3(path4.join(avatarDir, path4.basename(retiredAvatar))).catch(() => {
       });
       await service.notify("state:changed", {});
       await service.notify("voice:changed", {});
@@ -2509,11 +2572,11 @@ async function createApp(c = config(), options = {}) {
     api.get("/channels/:id", async (req) => service.channel(db, req.account.id, id.parse(req.params.id)));
     api.get("/channels/:id/overrides", async (req) => service.channelOverrides(req.account.id, id.parse(req.params.id), schemas.role.parse(req.query.role)));
     api.post("/servers", async (req) => {
-      const b = z6.object({ name: schemas.name, requestId }).parse(req.body);
+      const b = z7.object({ name: schemas.name, requestId }).parse(req.body);
       return service.createServer(req.account.id, b.requestId, b.name);
     });
     api.patch("/servers/:id", async (req) => {
-      const b = z6.object({ name: schemas.name.optional(), delete: z6.boolean().optional(), allowGuests: z6.boolean().optional(), allowMemberInvites: z6.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
+      const b = z7.object({ name: schemas.name.optional(), delete: z7.boolean().optional(), allowGuests: z7.boolean().optional(), allowMemberInvites: z7.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
       return service.changeServer(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/channels", async (req) => {
@@ -2521,52 +2584,52 @@ async function createApp(c = config(), options = {}) {
       return service.createChannel(req.account.id, b.requestId, id.parse(req.params.id), b.name, b.kind);
     });
     api.patch("/channels/:id", async (req) => {
-      const b = z6.object({ name: schemas.name.optional(), delete: z6.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z6.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
+      const b = z7.object({ name: schemas.name.optional(), delete: z7.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z7.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
       return service.changeChannel(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/invites", async (req) => {
-      const b = z6.object({ hours: z6.number().int().min(1).max(168).default(24), uses: z6.number().int().min(1).max(100).default(10), requestId }).parse(req.body);
-      return service.invite(req.account.id, b.requestId, id.parse(req.params.id), token(), b.hours, b.uses);
+      const b = z7.object({ hours: z7.number().int().min(1).max(168).default(24), uses: z7.number().int().min(1).max(100).default(10), channelId: id.optional(), requestId }).parse(req.body);
+      return service.invite(req.account.id, b.requestId, id.parse(req.params.id), token(), b.hours, b.uses, b.channelId);
     });
     api.get("/servers/:id/invites", async (req) => service.invitations(req.account.id, id.parse(req.params.id)));
     api.delete("/servers/:id/invites/:code", async (req) => {
-      const b = z6.object({ requestId }).parse(req.body), p = req.params;
-      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z6.string().min(10).max(100).parse(p.code));
+      const b = z7.object({ requestId }).parse(req.body), p = req.params;
+      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z7.string().min(10).max(100).parse(p.code));
     });
     api.get("/servers/:id/roles", async (req) => service.customRoles(req.account.id, id.parse(req.params.id)));
     api.post("/servers/:id/roles", async (req) => {
-      const b = z6.object({ roleId: z6.string().uuid().optional(), name: z6.string().trim().min(1).max(32).optional(), color: z6.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z6.boolean().optional(), userId: id.optional(), assigned: z6.boolean().optional(), requestId }).strict().parse(req.body);
+      const b = z7.object({ roleId: z7.string().uuid().optional(), name: z7.string().trim().min(1).max(32).optional(), color: z7.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z7.boolean().optional(), userId: id.optional(), assigned: z7.boolean().optional(), requestId }).strict().parse(req.body);
       return service.changeCustomRole(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/invites/join", async (req) => {
-      const b = z6.object({ code: z6.string().min(10).max(100), requestId }).parse(req.body);
+      const b = z7.object({ code: z7.string().min(10).max(100), requestId }).parse(req.body);
       return service.joinInvite(req.account.id, b.requestId, b.code);
     });
     api.get("/servers/:id/members", async (req) => service.members(req.account.id, id.parse(req.params.id)));
     api.patch("/servers/:serverId/members/:userId", async (req) => {
-      const b = z6.object({ role: schemas.role.optional(), remove: z6.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
+      const b = z7.object({ role: schemas.role.optional(), remove: z7.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
       return service.changeMember(req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b);
     });
     api.post("/servers/:id/leave", async (req) => {
-      const b = z6.object({ requestId }).parse(req.body);
+      const b = z7.object({ requestId }).parse(req.body);
       return service.leaveServer(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/dms/:id/close", async (req) => {
-      const b = z6.object({ requestId }).parse(req.body);
+      const b = z7.object({ requestId }).parse(req.body);
       return service.closeDirectMessage(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/users/:id/block", async (req) => {
-      const b = z6.object({ blocked: z6.boolean(), requestId }).parse(req.body);
+      const b = z7.object({ blocked: z7.boolean(), requestId }).parse(req.body);
       return service.blockUser(req.account.id, b.requestId, id.parse(req.params.id), b.blocked);
     });
     api.post("/dms", async (req) => {
-      const b = z6.object({ userId: id, requestId }).parse(req.body);
+      const b = z7.object({ userId: id, requestId }).parse(req.body);
       const result = await service.dm(req.account.id, b.requestId, b.userId);
       await service.notify("state:changed", {});
       return result;
     });
     api.get("/conversations/:id/messages", async (req) => {
-      const b = z6.object({ before: z6.coerce.number().int().min(1).optional(), after: z6.coerce.number().int().min(0).optional() }).parse(req.query);
+      const b = z7.object({ before: z7.coerce.number().int().min(1).optional(), after: z7.coerce.number().int().min(0).optional() }).parse(req.query);
       return service.history(req.account.id, id.parse(req.params.id), b.before, b.after);
     });
     api.post("/messages", async (req) => {
@@ -2574,36 +2637,36 @@ async function createApp(c = config(), options = {}) {
       return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds);
     });
     api.patch("/messages/:id", async (req) => {
-      const b = z6.object({ content: z6.string().trim().min(1).max(4e3).optional(), delete: z6.boolean().optional(), emoji: z6.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z6.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
+      const b = z7.object({ content: z7.string().trim().min(1).max(4e3).optional(), delete: z7.boolean().optional(), emoji: z7.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z7.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
       return service.changeMessage(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/conversations/:id/read", async (req) => {
-      const b = z6.object({ sequence: z6.number().int().min(0), requestId }).parse(req.body);
+      const b = z7.object({ sequence: z7.number().int().min(0), requestId }).parse(req.body);
       return service.read(req.account.id, b.requestId, id.parse(req.params.id), b.sequence);
     });
     api.get("/voice/:id", async (req) => service.room(req.account.id, id.parse(req.params.id)));
     api.post("/voice/:id/moderate", async (req) => {
-      const b = z6.object({ userId: id, action: z6.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
+      const b = z7.object({ userId: id, action: z7.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
       return service.moderate(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.action);
     });
     api.patch("/voice/:id/policy", async (req) => {
-      const b = z6.object({ locked: z6.boolean(), userLimit: z6.number().int().min(1).max(c.maxVoice), tagMode: z6.enum(["ANY", "ALL"]), requiredTags: z6.array(z6.string().uuid()).max(32), requestId }).parse(req.body);
+      const b = z7.object({ locked: z7.boolean(), userLimit: z7.number().int().min(1).max(c.maxVoice), tagMode: z7.enum(["ANY", "ALL"]), requiredTags: z7.array(z7.string().uuid()).max(32), requestId }).parse(req.body);
       return service.voicePolicy(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/voice/:id/move", async (req) => {
-      const b = z6.object({ userId: id, channelId: id, requestId }).parse(req.body);
+      const b = z7.object({ userId: id, channelId: id, requestId }).parse(req.body);
       return service.moveVoice(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.channelId);
     });
     api.get("/servers/:id/tags", async (req) => ({ tags: await service.tags(req.account.id, id.parse(req.params.id)) }));
     api.post("/servers/:id/tags", async (req) => {
-      const b = z6.object({ tagId: z6.string().uuid().optional(), name: z6.string().trim().min(1).max(32).optional(), color: z6.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z6.boolean().optional(), userId: id.optional(), assigned: z6.boolean().optional(), requestId }).parse(req.body);
+      const b = z7.object({ tagId: z7.string().uuid().optional(), name: z7.string().trim().min(1).max(32).optional(), color: z7.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z7.boolean().optional(), userId: id.optional(), assigned: z7.boolean().optional(), requestId }).parse(req.body);
       return service.changeTag(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.get("/admin/metrics", async (req) => {
       if (!req.account.instance_admin) fail(403, "FORBIDDEN", "Instance administrator required.");
       let disk = 0;
-      for (const f of await readdir(c.dataDir)) {
-        const s = await stat3(path3.join(c.dataDir, f));
+      for (const f of await readdir2(c.dataDir)) {
+        const s = await stat4(path4.join(c.dataDir, f));
         if (s.isFile()) disk += s.size;
       }
       return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, realtime, sfuControl: sfu.metrics, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map((s) => s.data.userId)).size, accounts: (await db.one("SELECT COUNT(*) AS count FROM users")).count, messages: (await db.one("SELECT COUNT(*) AS count FROM messages")).count, shares: (await db.one("SELECT COUNT(*) AS count FROM share_leases")).count };
@@ -2779,31 +2842,31 @@ async function createApp(c = config(), options = {}) {
       return {};
     });
     handle("typing", async (b) => {
-      const v = z6.object({ conversationId: id, active: z6.boolean() }).parse(b);
+      const v = z7.object({ conversationId: id, active: z7.boolean() }).parse(b);
       const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter((s) => s.id !== socket.id).map((s) => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId);
       for (const id2 of audience) io.sockets.sockets.get(id2)?.emit("typing", { ...v, userId: socket.data.userId });
       return {};
     });
     handle("voice:join", async (b) => {
-      const v = z6.object({ channelId: id, eligible: z6.boolean() }).parse(b);
+      const v = z7.object({ channelId: id, eligible: z7.boolean() }).parse(b);
       const result = await service.joinVoice(socket.data.userId, socket.id, v.channelId, v.eligible);
       socket.data.voiceChannel = v.channelId;
       return result;
     });
     handle("voice:leave", async (b) => {
-      z6.object({ requestId }).parse(b);
+      z7.object({ requestId }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "leave");
       socket.data.voiceChannel = null;
       return result;
     });
     handle("voice:heartbeat", async (b) => {
-      const v = z6.object({ eligible: z6.boolean().optional() }).parse(b);
+      const v = z7.object({ eligible: z7.boolean().optional() }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "heartbeat", v);
       if ("room" in result) socket.emit("voice:room", result.room);
       return result;
     });
     handle("voice:state", async (b) => {
-      const v = z6.object({ muted: z6.boolean(), deafened: z6.boolean(), requestId }).parse(b);
+      const v = z7.object({ muted: z7.boolean(), deafened: z7.boolean(), requestId }).parse(b);
       return service.voiceAction(socket.data.userId, socket.id, "state", v);
     });
     handle("share:start", async (b) => {
@@ -2816,11 +2879,11 @@ async function createApp(c = config(), options = {}) {
       return service.updateShare(socket.data.userId, socket.id, v.requestId, v);
     });
     handle("share:stop", async (b) => {
-      const v = z6.object({ requestId }).parse(b);
+      const v = z7.object({ requestId }).parse(b);
       return service.share(socket.data.userId, socket.id, v.requestId, true);
     });
     handle("voice:sfu", async (b) => {
-      const v = z6.object({ channelId: id }).parse(b);
+      const v = z7.object({ channelId: id }).parse(b);
       return sfu.credentials(socket.data.userId, socket.id, v.channelId);
     });
     handle("voice:signal", async (b) => {
@@ -2852,7 +2915,7 @@ async function createApp(c = config(), options = {}) {
   });
   app2.get("/api/v1/presence", { preHandler: authenticate }, async () => ({ online: [...new Set([...io.sockets.sockets.values()].map((s) => s.data.userId))], latencies: connectionLatency.snapshot(io.sockets.sockets.values()) }));
   await app2.register(staticPlugin, { root: avatarDir, prefix: "/avatars/", decorateReply: false, maxAge: 36e5, immutable: true });
-  const webRoot = path3.resolve("apps/web/dist");
+  const webRoot = path4.resolve("apps/web/dist");
   if (existsSync(webRoot)) {
     await app2.register(staticPlugin, { root: webRoot, prefix: "/" });
     app2.setNotFoundHandler((req, reply) => {
@@ -2904,11 +2967,11 @@ async function createApp(c = config(), options = {}) {
 }
 
 // apps/api/src/index.ts
-import { writeFile as writeFile2 } from "fs/promises";
-import path4 from "path";
+import { writeFile as writeFile3 } from "fs/promises";
+import path5 from "path";
 var { app, config: config2 } = await createApp();
 await app.listen({ port: config2.port, host: config2.host });
-await writeFile2(path4.join(config2.dataDir, "runtime-status.json"), JSON.stringify({
+await writeFile3(path5.join(config2.dataDir, "runtime-status.json"), JSON.stringify({
   startedAt: (/* @__PURE__ */ new Date()).toISOString(),
   node: process.version,
   platform: process.platform,

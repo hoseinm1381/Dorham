@@ -307,7 +307,7 @@ var Service = class {
     return this.db.transaction(async (connection) => {
       const tx = readSnapshot(connection);
       const me = await tx.one("SELECT * FROM users WHERE id=?", [userId]);
-      const servers = (await tx.all("SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at", [userId, me.instance_admin])).map((s) => ({ id: s.id, name: s.name, ownerId: s.owner_id, role: me.instance_admin ? "owner" : s.role, allowGuests: Boolean(s.allow_guests), allowMemberInvites: Boolean(s.allow_member_invites) }));
+      const servers = (await tx.all("SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at", [userId, me.instance_admin])).map((s) => ({ id: s.id, name: s.name, ownerId: s.owner_id, icon: s.icon, role: me.instance_admin ? "owner" : s.role, allowGuests: Boolean(s.allow_guests), allowMemberInvites: Boolean(s.allow_member_invites) }));
       for (const server of servers) Object.assign(server, { permissions: await this.memberPermissions(tx, server.role, userId, server.id) });
       const allChannels = await tx.all("SELECT c.* FROM channels c LEFT JOIN members m ON c.server_id=m.server_id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY c.created_at", [userId, me.instance_admin]);
       const channels = [];
@@ -318,7 +318,7 @@ var Service = class {
         } catch {
         }
       }
-      const dms = await tx.all("SELECT d.conversation_id,u.id,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin FROM dm_members d JOIN dm_members other ON other.conversation_id=d.conversation_id AND other.user_id<>d.user_id JOIN users u ON u.id=other.user_id WHERE d.user_id=? AND d.hidden=0", [userId]);
+      const dms = await tx.all("SELECT d.conversation_id,u.id,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,(SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id=d.conversation_id) AS last_message_at FROM dm_members d JOIN dm_members other ON other.conversation_id=d.conversation_id AND other.user_id<>d.user_id JOIN users u ON u.id=other.user_id WHERE d.user_id=? AND d.hidden=0 ORDER BY last_message_at DESC,d.conversation_id", [userId]);
       const blockedUsers = (await tx.all("SELECT u.* FROM users u JOIN user_blocks b ON b.blocked_id=u.id WHERE b.user_id=?", [userId])).map(publicUser);
       const blockedPeers = new Set((await tx.all("SELECT user_id,blocked_id FROM user_blocks WHERE user_id=? OR blocked_id=?", [userId, userId])).map((b) => b.user_id === userId ? b.blocked_id : b.user_id));
       const unread = {};
@@ -327,7 +327,7 @@ var Service = class {
         const read = await tx.one("SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?", [conversationId, userId]);
         unread[conversationId] = { sequence: Number(cv?.sequence || 0), readSequence: Number(read?.sequence || 0) };
       }
-      return { me: publicUser(me), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map((d) => ({ id: d.conversation_id, user: publicUser(d), blocked: blockedPeers.has(d.id), blockedByMe: blockedUsers.some((u) => u.id === d.id) })), blockedUsers, users: (await tx.all("SELECT * FROM users ORDER BY username LIMIT 250")).map(publicUser), unread, mediaTransport: this.c.mediaTransport, screenPolicy: { maxBitrate: this.c.screenMaxBitrate, maxFrameRate: this.c.screenMaxFrameRate }, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
+      return { me: publicUser(me), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map((d) => ({ id: d.conversation_id, lastMessageAt: Number(d.last_message_at || 0), user: publicUser(d), blocked: blockedPeers.has(d.id), blockedByMe: blockedUsers.some((u) => u.id === d.id) })), blockedUsers, users: (await tx.all("SELECT * FROM users ORDER BY username LIMIT 250")).map(publicUser), unread, mediaTransport: this.c.mediaTransport, screenPolicy: { maxBitrate: this.c.screenMaxBitrate, maxFrameRate: this.c.screenMaxFrameRate }, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
     });
   }
   async createServer(userId, requestId2, name) {
@@ -432,18 +432,22 @@ var Service = class {
     await this.notify("voice:changed", {});
     return result;
   }
-  async invite(userId, requestId2, serverId, value, expiresHours, uses) {
-    return this.mutate(userId, requestId2, "invite.create", { serverId, expiresHours, uses }, async (tx) => {
+  async invite(userId, requestId2, serverId, value, expiresHours, uses, channelId) {
+    return this.mutate(userId, requestId2, "invite.create", { serverId, expiresHours, uses, channelId }, async (tx) => {
       await this.member(tx, userId, serverId, "createInvites");
       if ((await tx.one("SELECT COUNT(*) AS count FROM invites WHERE server_id=? AND expires_at>? AND remaining>0", [serverId, Date.now()])).count >= 50) fail(409, "LIMIT", "Revoke an active invitation before creating another.");
-      await tx.run("INSERT INTO invites(hash,server_id,expires_at,remaining,created_by,code) VALUES(?,?,?,?,?,?)", [hash(value), serverId, Date.now() + expiresHours * 36e5, uses, userId, value]);
+      if (channelId) {
+        const channel = await this.channel(tx, userId, channelId);
+        if (channel.server_id !== serverId) fail(400, "INVALID_CHANNEL", "Choose a channel in this server.");
+      }
+      await tx.run("INSERT INTO invites(hash,server_id,expires_at,remaining,created_by,code,channel_id) VALUES(?,?,?,?,?,?,?)", [hash(value), serverId, Date.now() + expiresHours * 36e5, uses, userId, value, channelId || null]);
       return { code: value, url: `${this.c.publicUrl}/?invite=${value}` };
     });
   }
   async invitations(userId, serverId) {
     return this.db.transaction(async (tx) => {
       const member = await this.member(tx, userId, serverId, "createInvites"), manageAll = await this.authority(tx, member) !== "member";
-      return { invites: (await tx.all("SELECT code,expires_at,remaining FROM invites WHERE server_id=? AND expires_at>? AND remaining>0 AND code IS NOT NULL" + (manageAll ? "" : " AND created_by=?") + " ORDER BY expires_at DESC", [serverId, Date.now(), ...manageAll ? [] : [userId]])).map((r) => ({ code: r.code, url: `${this.c.publicUrl}/?invite=${r.code}`, expiresAt: Number(r.expires_at), remaining: r.remaining })) };
+      return { invites: (await tx.all("SELECT code,expires_at,remaining,channel_id FROM invites WHERE server_id=? AND expires_at>? AND remaining>0 AND code IS NOT NULL" + (manageAll ? "" : " AND created_by=?") + " ORDER BY expires_at DESC", [serverId, Date.now(), ...manageAll ? [] : [userId]])).map((r) => ({ code: r.code, url: `${this.c.publicUrl}/?invite=${r.code}`, expiresAt: Number(r.expires_at), remaining: r.remaining, channelId: r.channel_id })) };
     });
   }
   async revokeInvitation(userId, rid, serverId, code) {
@@ -498,11 +502,11 @@ var Service = class {
       if (!inv || inv.expires_at < Date.now() || inv.remaining < 1) fail(404, "INVITE_EXPIRED", "Invite is invalid, expired, or exhausted.");
       const account = await tx.one("SELECT guest FROM users WHERE id=?", [userId]);
       if (account.guest && !(await tx.one("SELECT allow_guests FROM servers WHERE id=?", [inv.server_id]))?.allow_guests) fail(403, "GUESTS_DISABLED", "This server does not allow guests.");
-      if (await tx.one("SELECT role FROM members WHERE user_id=? AND server_id=?", [userId, inv.server_id])) return { id: inv.server_id };
+      if (await tx.one("SELECT role FROM members WHERE user_id=? AND server_id=?", [userId, inv.server_id])) return { id: inv.server_id, channelId: inv.channel_id };
       if ((await tx.one("SELECT COUNT(*) AS count FROM members WHERE user_id=?", [userId])).count >= 20) fail(409, "LIMIT", "Server membership limit reached.");
       await tx.run("INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,?,?)", [inv.server_id, userId, "member", Date.now()]);
       await tx.run("UPDATE invites SET remaining=remaining-1 WHERE hash=?", [hash(code)]);
-      return { id: inv.server_id };
+      return { id: inv.server_id, channelId: inv.channel_id };
     });
     await this.notify("state:changed", {});
     return result;
@@ -995,6 +999,11 @@ var schemas = {
 };
 
 // apps/api/src/accounts.ts
+async function initialRecoveryCodes(tx, userId) {
+  const codes = Array.from({ length: 8 }, () => token().slice(0, 24));
+  for (const code of codes) await tx.run("INSERT INTO recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)", [userId, hash(code), Date.now()]);
+  return codes;
+}
 var normalizeAnswer = (answer) => answer.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
 async function audit(tx, actor, action, target, details = {}) {
   await tx.run("INSERT INTO audit_log(id,actor_id,action,target_id,details,created_at) VALUES(?,?,?,?,?,?)", [randomUUID2(), actor, action, target, JSON.stringify(details), Date.now()]);
@@ -1015,11 +1024,11 @@ function publicAccountRoutes(app, service, authRate, sessionFor, disconnect) {
     if (!c.guestsEnabled) fail(403, "GUESTS_DISABLED", "Guest access is disabled.");
     const userId = await db.transaction(async (tx) => {
       const fingerprint = hash(JSON.stringify({ code: b.code, displayName: b.displayName }));
-      const previous = await tx.one("SELECT m.user_id,m.fingerprint,u.guest FROM mutations m JOIN users u ON u.id=m.user_id WHERE m.request_id=? AND m.operation='guest.create'", [b.requestId]);
+      const previous = await tx.one("SELECT m.user_id,m.fingerprint,m.response,u.guest FROM mutations m JOIN users u ON u.id=m.user_id WHERE m.request_id=? AND m.operation='guest.create'", [b.requestId]);
       if (previous) {
         if (!previous.guest) fail(409, "NOT_GUEST", "This account is already registered.");
         if (previous.fingerprint !== fingerprint) fail(409, "IDEMPOTENCY_CONFLICT", "Request identifier was already used with different input.");
-        return previous.user_id;
+        return { userId: previous.user_id, ...JSON.parse(previous.response || "{}") };
       }
       const inv = await tx.one("SELECT i.*,s.allow_guests FROM invites i JOIN servers s ON s.id=i.server_id WHERE i.hash=? AND i.expires_at>=? AND i.remaining>0", [hash(b.code), Date.now()]);
       if (!inv?.allow_guests) fail(403, "GUEST_INVITE_REQUIRED", "A valid invitation to a guest-enabled server is required.");
@@ -1029,12 +1038,12 @@ function publicAccountRoutes(app, service, authRate, sessionFor, disconnect) {
       await tx.run("INSERT INTO users(id,username,display_name,password_hash,guest,created_at,language) VALUES(?,?,?,?,1,?,?)", [uid, `guest_${uid.replaceAll("-", "").slice(0, 20)}`, b.displayName, "!guest-no-password", now, b.language || ""]);
       await tx.run("INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,?,?)", [inv.server_id, uid, "member", now]);
       await tx.run("UPDATE invites SET remaining=remaining-1 WHERE hash=?", [hash(b.code)]);
-      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [uid, b.requestId, "guest.create", fingerprint, '{"success":true}', now]);
+      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [uid, b.requestId, "guest.create", fingerprint, JSON.stringify({ serverId: inv.server_id, channelId: inv.channel_id }), now]);
       await audit(tx, uid, "guest.create", inv.server_id);
-      return uid;
+      return { userId: uid, serverId: inv.server_id, channelId: inv.channel_id };
     });
     await service.notify("state:changed", {});
-    return reply.code(201).send(await sessionFor(userId, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Guest device")));
+    return reply.code(201).send({ ...await sessionFor(userId.userId, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Guest device")), landing: { serverId: userId.serverId, channelId: userId.channelId } });
   });
   app.post("/api/v1/auth/recover", { config: authRate }, async (req) => {
     const b = z4.object({ username: z4.string().trim().min(1).max(32), code: z4.string().max(128), password: passwordSchema, requestId }).parse(req.body);
@@ -1103,7 +1112,13 @@ function protectedAccountRoutes(api, service, disconnect) {
     });
     return { codes };
   });
-  api.get("/auth/recovery", async (req) => ({ question: (await db.one("SELECT question FROM recovery_questions WHERE user_id=?", [req.account.id]))?.question || null, codesRemaining: Number((await db.one("SELECT COUNT(*) AS count FROM recovery_codes WHERE user_id=?", [req.account.id])).count), questions: ["What was your favorite school subject?", "What is a memorable personal preference?", "Custom question"] }));
+  api.get("/auth/recovery", async (req) => ({ prompt: !req.account.guest && !req.account.recovery_prompt_seen, question: (await db.one("SELECT question FROM recovery_questions WHERE user_id=?", [req.account.id]))?.question || null, codesRemaining: Number((await db.one("SELECT COUNT(*) AS count FROM recovery_codes WHERE user_id=?", [req.account.id])).count), questions: ["What was your favorite school subject?", "What is a memorable personal preference?", "Custom question"] }));
+  api.post("/auth/recovery-acknowledge", async (req) => {
+    z4.object({ requestId }).parse(req.body);
+    if (req.account.guest) fail(403, "GUEST_ACCOUNT", "Register before setting up recovery.");
+    await db.run("UPDATE users SET recovery_prompt_seen=1 WHERE id=?", [req.account.id]);
+    return { success: true };
+  });
   api.post("/auth/recovery-question", async (req) => {
     const b = z4.object({ password: z4.string().max(128), question: z4.string().trim().min(5).max(200), answer: z4.string().min(1).max(200), requestId }).parse(req.body);
     await verifyCurrent(req.account, b.password);
@@ -1170,6 +1185,7 @@ export {
   equal,
   passwordHash,
   passwordVerify,
+  initialRecoveryCodes,
   audit,
   publicAccountRoutes,
   protectedAccountRoutes,
@@ -1178,4 +1194,4 @@ export {
   Service,
   schemas
 };
-//# sourceMappingURL=chunk-Q4STIB6F.js.map
+//# sourceMappingURL=chunk-2GUYZ3ZR.js.map

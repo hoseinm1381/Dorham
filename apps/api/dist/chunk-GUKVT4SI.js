@@ -169,6 +169,14 @@ async function migrateExpansion(db) {
     await tx.run("CREATE INDEX games_user ON game_players(user_id,game_id)");
     await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(8,?)", [Date.now()]);
   });
+  await db.transaction(async (tx) => {
+    if (await tx.one("SELECT version FROM schema_migrations WHERE version=9")) return;
+    await tx.run("ALTER TABLE users ADD COLUMN recovery_prompt_seen INTEGER NOT NULL DEFAULT 0");
+    await tx.run("ALTER TABLE servers ADD COLUMN icon TEXT");
+    await tx.run("ALTER TABLE invites ADD COLUMN channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL");
+    await tx.run("CREATE INDEX messages_activity ON messages(conversation_id,created_at)");
+    await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(9,?)", [Date.now()]);
+  });
 }
 
 // apps/api/src/db.ts
@@ -305,4 +313,4 @@ export {
   config,
   openDatabase
 };
-//# sourceMappingURL=chunk-EUCIOHE4.js.map
+//# sourceMappingURL=chunk-GUKVT4SI.js.map

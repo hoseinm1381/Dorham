@@ -1,7 +1,7 @@
 import {
   config,
   openDatabase
-} from "./chunk-EUCIOHE4.js";
+} from "./chunk-GUKVT4SI.js";
 
 // scripts/database.ts
 import { existsSync } from "fs";

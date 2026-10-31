@@ -2,6 +2,12 @@
 
 The expansion does not delete accounts during startup, migration or deployment. The owner explicitly chose to keep live accounts. No production reset has been performed.
 
+## Recover a forgotten password
+
+From 0.7.5, registration displays eight one-use recovery codes. Save them in a password manager or private offline file. Existing users receive a one-time account reminder; saved old codes stay valid unless replaced explicitly with password confirmation. Recovery setup is also under Account settings → Privacy → Account recovery. Plaintext codes are not recoverable from their database hashes.
+
+On the sign-in screen, open **Forgot password?**, enter your username, one unused recovery code and a new password, then sign in with that password. The code is consumed and previous sessions are revoked. Without a saved code, contact the instance administrator for a temporary password. Supporting security questions cannot reset a password alone. The in-app guide gives the same steps.
+
 ## Initial global administrator
 
 Normal registration never grants global administration. An existing registered user may claim it once through Settings using the private `BOOTSTRAP_ADMIN_SECRET`. Alternatively stop the application and initialize a fresh administrator with the CLI below. Once claimed, another initialization is rejected. Server owners/administrators cannot ban, reset, demote or remove the protected global administrator through the administration APIs.
