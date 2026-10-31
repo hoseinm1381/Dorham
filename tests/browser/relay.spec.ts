@@ -95,7 +95,7 @@ test('external TURN carries decoded audio and two screen streams with direct ICE
     for (const p of [page, other]) await expect.poll(async () => (await measurements(p)).some(peer => peer.localCandidateType === 'relay' && peer.remoteCandidateType === 'relay' && peer.media.some(r => r.kind === 'audio' && r.totalSamplesReceived > 1000)), { timeout: 45000 }).toBe(true);
     console.log('Relay test: both clients decode audio over selected TURN pairs.');
     await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click();
-    await expect(other.getByRole('checkbox', { name: 'Noise suppression', exact: true })).toBeChecked();
+    await expect(other.getByRole('combobox', { name: 'Noise removal', exact: true })).toHaveValue('standard'); await other.locator('.audio-advanced > summary').click();
     await expect(other.getByRole('checkbox', { name: 'Echo cancellation', exact: true })).toBeChecked();
     for (const p of [page, other]) expect((await measurements(p)).flatMap(peer => peer.microphoneProcessing)[0]).toMatchObject({ echoCancellation: true, noiseSuppression: true });
     await other.screenshot({ path: `artifacts/evidence/${evidenceName}-audio-controls.png` });

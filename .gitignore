@@ -25,3 +25,5 @@ apps/android/android/**/build/
 __pycache__/
 apps/desktop/native/*.exe
 apps/desktop/voice-keys.json
+
+apps/web/public/audio/

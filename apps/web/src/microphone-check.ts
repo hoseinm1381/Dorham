@@ -1,3 +1,4 @@
+import { StrongDenoiser, type NoiseRemoval } from '../../../packages/media/src/strong-denoiser';
 import { BoostNoiseFilter } from '../../../packages/media/src/boost-noise-filter';
 import { VoiceClarity } from '../../../packages/media/src/voice-clarity';
 import type { AudioProcessing } from '../../../packages/media/src/audio-processing';
@@ -17,15 +18,19 @@ export class MicrophoneCheck {
   private deadline?: ReturnType<typeof setTimeout>;
   private value = 1; private clarity = true; private clarityGraph?: VoiceClarity;
   setClarity(value: boolean) { this.clarity = value; this.clarityGraph?.setEnabled(value); }
+  private noiseRemoval: NoiseRemoval = 'standard'; private denoiser?: StrongDenoiser; private denoiseOutput?: GainNode;
+  async setNoiseRemoval(mode: NoiseRemoval) { this.noiseRemoval = mode; await this.denoiser?.configure(mode); this.updateNoise(); }
+  getNoiseRemoval() { return this.denoiser?.state; }
+  private updateNoise() { this.denoiser?.setGain(this.value); this.noiseFilter?.configure(this.noiseRemoval !== 'off' && this.denoiser?.state.active !== 'strong' && this.noiseEnabled && this.value > 10, this.noiseThreshold); }
   private noiseEnabled = true; private noiseThreshold = -70; private noiseFilter?: BoostNoiseFilter; private noiseInput?: GainNode;
-  setNoiseFilter(enabled: boolean, threshold: number) { this.noiseEnabled = enabled; this.noiseThreshold = threshold; this.noiseFilter?.configure(enabled && this.value > 10, threshold); }
+  setNoiseFilter(enabled: boolean, threshold: number) { this.noiseEnabled = enabled; this.noiseThreshold = threshold; this.updateNoise(); }
   private releaseIsolation?: () => Promise<void>;
   private release() { const release = this.releaseIsolation; this.releaseIsolation = undefined; void release?.().catch(this.failed); }
   private async isolate(epoch: number) { const release = await this.isolation?.(); if (epoch !== this.epoch) { await release?.(); return false; } this.releaseIsolation = release; return true; }
   private state: CheckState = 'idle';
   constructor(private changed: (state: CheckState) => void, private level: (rms: number, clipped: boolean) => void, private failed: (error: unknown) => void, private isolation?: () => Promise<() => Promise<void>>) {}
   private update(state: CheckState) { this.state = state; this.changed(state); }
-  setGain(value: number) { this.value = value; if (this.gain) this.gain.gain.value = value; this.noiseFilter?.configure(this.noiseEnabled && value > 10, this.noiseThreshold); }
+  setGain(value: number) { this.value = value; if (this.gain) this.gain.gain.value = value; this.updateNoise(); }
   private stopMeter() { clearInterval(this.meter); this.source?.disconnect(); this.analyser?.disconnect(); this.source = undefined; this.analyser = undefined; this.level(0, false); }
   private measure(node: AudioNode) {
     this.stopMeter(); this.analyser = this.context!.createAnalyser(); this.analyser.fftSize = 1024; node.connect(this.analyser);
@@ -36,7 +41,7 @@ export class MicrophoneCheck {
     this.destroy(); const epoch = this.epoch; this.update('requesting');
     try {
       if (!await this.isolate(epoch)) return;
-      this.context = new AudioContext(); await this.context.resume(); if (epoch !== this.epoch) return;
+      this.context = new AudioContext({ sampleRate: 48000 }); await this.context.resume(); if (epoch !== this.epoch) return;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { ...processing, ...(input ? { deviceId: { exact: input } } : {}) } });
       if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
       this.capture = stream; const source = this.context!.createMediaStreamSource(stream); this.measure(source); this.source = source;
@@ -64,11 +69,12 @@ export class MicrophoneCheck {
       this.player = this.context.createBufferSource(); this.player.buffer = this.buffer; this.gain = this.context.createGain(); this.gain.gain.value = this.value;
       this.noiseInput = this.context.createGain();
       this.clarityGraph = new VoiceClarity(this.context, this.player, this.noiseInput); this.clarityGraph.setEnabled(this.clarity);
-      this.noiseFilter = new BoostNoiseFilter(this.context, this.noiseInput, this.gain); this.noiseFilter.configure(this.noiseEnabled && this.value > 10, this.noiseThreshold); this.gain.connect(this.context.destination); this.measure(this.gain); this.update('playing');
+      this.denoiseOutput = this.context.createGain(); this.denoiser = new StrongDenoiser(this.context, this.noiseInput, this.denoiseOutput);
+      this.noiseFilter = new BoostNoiseFilter(this.context, this.denoiseOutput, this.gain); this.updateNoise(); await this.denoiser.configure(this.noiseRemoval); if (epoch !== this.epoch) return; this.updateNoise(); this.gain.connect(this.context.destination); this.measure(this.gain); this.update('playing');
       this.player.onended = () => { if (epoch === this.epoch) this.stopPlayback(); }; this.player.start();
     } catch (error) { if (epoch === this.epoch) { this.stopPlayback(); this.failed(error); } }
   }
-  stopPlayback() { this.epoch++; this.release(); this.noiseFilter?.destroy(); this.noiseFilter = undefined; this.noiseInput?.disconnect(); this.noiseInput = undefined; this.clarityGraph?.destroy(); this.clarityGraph = undefined; if (this.player) { this.player.onended = null; try { this.player.stop(); } catch { /* Already ended. */ } this.player.disconnect(); this.player = undefined; } this.gain?.disconnect(); this.gain = undefined; this.stopMeter(); if (this.buffer) this.update('ready'); }
+  stopPlayback() { this.epoch++; this.release(); this.noiseFilter?.destroy(); this.noiseFilter = undefined; this.denoiser?.destroy(); this.denoiser = undefined; this.denoiseOutput?.disconnect(); this.denoiseOutput = undefined; this.noiseInput?.disconnect(); this.noiseInput = undefined; this.clarityGraph?.destroy(); this.clarityGraph = undefined; if (this.player) { this.player.onended = null; try { this.player.stop(); } catch { /* Already ended. */ } this.player.disconnect(); this.player = undefined; } this.gain?.disconnect(); this.gain = undefined; this.stopMeter(); if (this.buffer) this.update('ready'); }
   destroy() {
     this.epoch++; clearTimeout(this.deadline); this.stopPlayback();
     if (this.recorder) { this.recorder.onstop = null; this.recorder.ondataavailable = null; this.recorder.onerror = null; if (this.recorder.state !== 'inactive') this.recorder.stop(); this.recorder = undefined; }

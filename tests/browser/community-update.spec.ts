@@ -112,14 +112,14 @@ test('server icon updates immediately and microphone boost requires opt-in with 
   const image = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#886ef0' } }).png().toBuffer();
   await page.getByLabel('Change server icon', { exact: true }).setInputFiles({ name: 'server.png', mimeType: 'image/png', buffer: image });
   await expect(page.getByRole('button', { name: 'Open Icon and audio', exact: true }).locator('img')).toBeVisible(); await screenshot(page, 'server-icon');
-  await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click();
-  const gain = page.getByRole('slider', { name: 'My microphone gain', exact: true }), boost = page.getByLabel('Allow microphone boost up to +45 dB', { exact: true });
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.locator('.audio-advanced > summary').click();
+  const gain = page.getByRole('slider', { name: 'Microphone volume', exact: true }), boost = page.getByLabel('Allow microphone boost up to +45 dB', { exact: true });
   await expect(gain).toHaveAttribute('max', '250'); await expect(boost).not.toBeChecked();
   await boost.check(); await expect(gain).toHaveAttribute('max', '45'); await gain.fill('30'); await expect(page.locator('.microphone-gain output').first()).toHaveText('+30.0 dB');
   expect(await page.evaluate(() => Number(localStorage.getItem('dorham.microphoneGain.v1')))).toBeCloseTo(10 ** 1.5);
   await expect(page.locator('.boost-warning')).toBeVisible(); await page.getByLabel('Voice clarity', { exact: true }).uncheck(); await screenshot(page, 'audio-boost');
   await boost.uncheck(); await expect(gain).toHaveValue('250'); await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.reload();
-  await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await expect(boost).not.toBeChecked(); await expect(gain).toHaveValue('250'); await expect(page.getByLabel('Voice clarity', { exact: true })).not.toBeChecked();
+  await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.locator('.audio-advanced > summary').click(); await expect(boost).not.toBeChecked(); await expect(gain).toHaveValue('250'); await expect(page.getByLabel('Voice clarity', { exact: true })).not.toBeChecked();
   expect((await api(page, '/bootstrap')).servers.find((s: any) => s.id === server.id).icon).toMatch(/^\/avatars\//);
 });
 

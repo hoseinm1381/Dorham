@@ -1,6 +1,6 @@
 {
   "name": "dorham",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "private": true,
   "overrides": {
     "xcode": {
@@ -16,11 +16,11 @@
     "node": ">=24.22.1 <25"
   },
   "scripts": {
-    "dev": "concurrently -k -n api,web \"tsx watch apps/api/src/index.ts\" \"vite --config apps/web/vite.config.ts\"",
+    "dev": "node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && concurrently -k -n api,web \"tsx watch apps/api/src/index.ts\" \"vite --config apps/web/vite.config.ts\"",
     "start": "node --env-file-if-exists=.env deployment/start.mjs",
     "build": "npm run build:api && npm run build:web && npm run build:desktop",
     "build:api": "tsup --config tsup.config.ts",
-    "build:web": "node scripts/icons.mjs && vite build --config apps/web/vite.config.ts && node scripts/pwa-build.mjs",
+    "build:web": "node scripts/icons.mjs && node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && vite build --config apps/web/vite.config.ts && node scripts/pwa-build.mjs",
     "build:desktop": "node scripts/desktop-build.mjs",
     "package:windows": "npm run build && node scripts/windows-package.mjs",
     "android:sync": "npm run build:web && npm exec --workspace @dorham/android -- cap sync android",
@@ -71,6 +71,7 @@
     "@electric-sql/pglite-socket": "0.2.15",
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.64.1",
+    "@sapphi-red/web-noise-suppressor": "0.4.1",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.6.5",
     "@types/pg": "8.23.1",

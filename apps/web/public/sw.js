@@ -5,7 +5,7 @@ self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/') || url.pathname.startsWith('/avatars/')) return;
-  if (!event.request.mode.includes('navigate') && !url.pathname.includes('/assets/') && !['/icon.svg', '/manifest.webmanifest', '/'].includes(url.pathname)) return;
+  if (!event.request.mode.includes('navigate') && !url.pathname.includes('/assets/') && !url.pathname.startsWith('/profile-pictures/') && !url.pathname.startsWith('/audio/') && !['/icon.svg', '/manifest.webmanifest', '/'].includes(url.pathname)) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     // Public shell bytes are identical for every Origin; CORS Vary headers must

@@ -1,4 +1,6 @@
-**Current release: 0.7.6** — [dorhamapp.ir](https://dorhamapp.ir/), signed-in password reset, existing-conversation badges, private voice-test isolation and optional +45 dB boost with local noise reduction. See [behavior and verification](docs/RELEASE-0.7.6.md).
+**Current release: 0.7.7** — simpler audio settings, local Strong noise removal, 16 built-in profile pictures and matching DM avatar colours. Deployed at **https://dorhamapp.ir/** after isolated SFU and verified rollback-backup checks. See [release verification](docs/RELEASE-0.7.7.md).
+
+**Previous release: 0.7.6** — [dorhamapp.ir](https://dorhamapp.ir/), signed-in password reset, existing-conversation badges, private voice-test isolation and optional +45 dB boost with local noise reduction. See [behavior and verification](docs/RELEASE-0.7.6.md).
 
 **Previous release: 0.7.5** — Recent DM conversations, invitation destinations, recovery onboarding, server icons, optional voice clarity and +30 dB boost, and a simpler screen-sharing setup popup. See [behavior and verification](docs/RELEASE-0.7.5.md).
 

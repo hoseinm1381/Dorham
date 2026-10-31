@@ -3,8 +3,10 @@ export const microphoneGainChanged = 'dorham-microphone-gain';
 const key = 'dorham.microphoneGain.v1';
 const boostKey = 'dorham.microphoneBoost.v1';
 export const boostNoiseChanged = 'dorham-boost-noise';
+// The removed manual threshold now uses the quiet-microphone-friendly default.
+// Preserve the old on/off choice, but do not strand users on a hidden cutoff.
 export function readBoostNoise(): { enabled: boolean; threshold: number } {
-  try { const value = JSON.parse(localStorage.getItem('dorham.boostNoise.v1') || '{}'); return { enabled: value.enabled !== false, threshold: Number.isFinite(value.threshold) ? Math.max(-90, Math.min(-40, value.threshold)) : -70 }; } catch { return { enabled: true, threshold: -70 }; }
+  try { const value = JSON.parse(localStorage.getItem('dorham.boostNoise.v1') || '{}'); return { enabled: value.enabled !== false, threshold: -70 }; } catch { return { enabled: true, threshold: -70 }; }
 }
 export function saveBoostNoise(value: { enabled: boolean; threshold: number }) {
   try { localStorage.setItem('dorham.boostNoise.v1', JSON.stringify(value)); } catch { /* In-memory graph still changes. */ }

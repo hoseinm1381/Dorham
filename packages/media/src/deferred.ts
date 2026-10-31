@@ -1,3 +1,4 @@
+import type { NoiseRemoval } from './strong-denoiser';
 import type { Share } from '@dorham/contracts';
 import type { MediaTransport, MediaOptions } from './index';
 import { browserAudioProcessing, type AudioProcessing } from './audio-processing';
@@ -49,6 +50,8 @@ export class DeferredTransport implements MediaTransport {
   async setOutputDevice(value: string) { await this.inner?.setOutputDevice?.(value); }
   getLocalAudioStream() { return this.inner?.getLocalAudioStream?.() || null; }
   getAudioProcessing() { return this.inner?.getAudioProcessing?.() || browserAudioProcessing(this.options.audioProcessing || { noiseSuppression: true, echoCancellation: true, autoGainControl: true }); }
+  getNoiseRemoval() { return this.inner?.getNoiseRemoval?.() ?? { requested: this.options.noiseRemoval ?? 'standard', active: 'standard' as const, status: 'inactive' as const }; }
+  async setNoiseRemoval(mode: NoiseRemoval) { this.options.noiseRemoval = mode; await this.inner?.setNoiseRemoval?.(mode); }
   async setVoiceClarity(enabled: boolean) { this.options.voiceClarity = enabled; await this.inner?.setVoiceClarity?.(enabled); }
   async setBoostNoise(value: { enabled: boolean; threshold: number }) { this.options.boostNoise = value; await this.inner?.setBoostNoise?.(value); }
   async setMicrophoneGain(value: number) { this.options.microphoneGain = value; await this.inner?.setMicrophoneGain?.(value); }

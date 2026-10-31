@@ -47,7 +47,7 @@ test('talk bindings preserve toggle across tab switches, recover PTT after mic c
   try {
     await instrument(page); await register(page, `Hotkey${Date.now().toString().slice(-7)}`); await api(page,'/servers',{name:'Hotkey lab'});
     await page.getByRole('button',{name:'Open Hotkey lab',exact:true}).click(); await page.getByRole('button',{name:'Account settings',exact:true}).click();
-    await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.getByLabel('Voice input mode',{exact:true}).selectOption('push'); await page.getByRole('button',{name:'Record talk hotkey',exact:true}).click(); await page.keyboard.press('F9'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+    await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.locator('.audio-advanced > summary').click(); await page.getByLabel('Voice input mode',{exact:true}).selectOption('push'); await page.getByRole('button',{name:'Record talk hotkey',exact:true}).click(); await page.keyboard.press('F9'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
     await page.getByRole('button',{name:'Lounge',exact:true}).click(); await expect(page.locator('.voice-stage')).toBeVisible();
     const mic = () => page.evaluate(() => (window as any).__microphones.flatMap((s:MediaStream)=>s.getAudioTracks()).filter((t:MediaStreamTrack)=>t.readyState==='live').map((t:MediaStreamTrack)=>t.enabled));
     await expect.poll(mic).toEqual([false]); await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.up('F9'); await expect.poll(mic).toEqual([false]);
@@ -56,7 +56,7 @@ test('talk bindings preserve toggle across tab switches, recover PTT after mic c
     await page.getByRole('button',{name:'Mute microphone',exact:true}).click(); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9');
     await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.up('F9'); await expect.poll(mic).toEqual([false]);
     await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.evaluate(()=>window.dispatchEvent(new Event('blur'))); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9');
-    await page.getByRole('button',{name:'Account settings',exact:true}).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.getByLabel('Voice input mode',{exact:true}).selectOption('toggle'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+    await page.getByRole('button',{name:'Account settings',exact:true}).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.locator('.audio-advanced > summary').click(); await page.getByLabel('Voice input mode',{exact:true}).selectOption('toggle'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
     await page.keyboard.press('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.press('F9'); await expect.poll(mic).toEqual([false]);
     await page.getByRole('textbox',{name:'Message',exact:true}).focus(); await page.keyboard.press('F9'); await expect.poll(mic).toEqual([true]);
     const other = await context.newPage(); await other.goto('/'); await other.bringToFront(); await page.evaluate(() => window.dispatchEvent(new Event('blur'))); await expect.poll(mic).toEqual([true]); await other.close(); await page.bringToFront();
@@ -65,7 +65,7 @@ test('talk bindings preserve toggle across tab switches, recover PTT after mic c
     await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('dorham-voice-input')!); localStorage.setItem('dorham-voice-input', JSON.stringify({ ...p, binding: { code: 'KeyV', ctrl: false, alt: false, shift: false } })); window.dispatchEvent(new Event('dorham-voice-input-changed')); });
     await page.getByRole('textbox',{name:'Message',exact:true}).focus(); await page.keyboard.press('v'); await expect.poll(mic).toEqual([false]); await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('v');
     await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('dorham-voice-input')!); localStorage.setItem('dorham-voice-input', JSON.stringify({ ...p, binding: { code: 'F9', ctrl: false, alt: false, shift: false } })); window.dispatchEvent(new Event('dorham-voice-input-changed')); });
-    await page.reload(); await page.getByRole('button',{name:'Account settings',exact:true}).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await expect(page.getByLabel('Voice input mode',{exact:true})).toHaveValue('toggle'); await expect(page.getByRole('button',{name:'Record talk hotkey',exact:true})).toHaveText('F9');
+    await page.reload(); await page.getByRole('button',{name:'Account settings',exact:true}).click(); await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.locator('.audio-advanced > summary').click(); await expect(page.getByLabel('Voice input mode',{exact:true})).toHaveValue('toggle'); await expect(page.getByRole('button',{name:'Record talk hotkey',exact:true})).toHaveText('F9');
   } finally { await context.close(); }
 });
 
@@ -198,7 +198,7 @@ test('microphone processing defaults on, changes live, persists and never unmute
   let fixtureRoom: string | undefined;
   page.setDefaultTimeout(15000);
   const settings = () => page.evaluate(() => [...new Set(((window as any).__microphones as MediaStream[]).flatMap(stream => stream.getAudioTracks()))].filter(track => track.readyState === 'live').map(track => ({ ...track.getSettings(), enabled: track.enabled, trackId: track.id })));
-  const open = () => page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click();
+  const open = async () => { await page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); await page.locator('.audio-advanced > summary').click(); };
   const close = () => page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   const join = () => page.getByRole('button', { name: 'Lounge', exact: true }).click();
   try {
@@ -208,7 +208,7 @@ test('microphone processing defaults on, changes live, persists and never unmute
     await page.getByRole('button', { name: 'Voice controls', exact: true }).click(); await expect(page.locator('.voice-card')).toHaveCount(1); await open();
     fixtureRoom = (await api(page, '/bootstrap')).channels.find((c: any) => c.kind === 'voice').id;
     const initial = await settings(); expect(initial[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true });
-    for (const label of ['Noise suppression', 'Echo cancellation']) { await expect(page.getByRole('checkbox', { name: label, exact: true })).toBeChecked(); await page.getByRole('checkbox', { name: label, exact: true }).uncheck(); }
+    await expect(page.getByRole('combobox', { name: 'Noise removal', exact: true })).toHaveValue('standard'); await page.getByRole('combobox', { name: 'Noise removal', exact: true }).selectOption('off'); await page.getByRole('checkbox', { name: 'Echo cancellation', exact: true }).uncheck();
     await expect(page.getByText('Saved. Leave and rejoin voice to apply these changes.', { exact: true })).toHaveCount(0);
     await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false });
     await page.getByRole('checkbox', { name: 'Automatic microphone level', exact: true }).uncheck();
@@ -218,7 +218,7 @@ test('microphone processing defaults on, changes live, persists and never unmute
     await page.reload(); await page.getByRole('button', { name: 'Open Microphone lab', exact: true }).click(); await join();
     await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false });
     await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await open();
-    for (const label of ['Noise suppression', 'Echo cancellation']) { await expect(page.getByRole('checkbox', { name: label, exact: true })).not.toBeChecked(); await page.getByRole('checkbox', { name: label, exact: true }).check(); }
+    await expect(page.getByRole('combobox', { name: 'Noise removal', exact: true })).toHaveValue('off'); await page.getByRole('combobox', { name: 'Noise removal', exact: true }).selectOption('standard'); await page.getByRole('checkbox', { name: 'Echo cancellation', exact: true }).check();
     await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true, enabled: false });
     const pendingWhileMuted = await settings();
     await close(); await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(page.locator('.voice-panel')).toHaveCount(0); await join();

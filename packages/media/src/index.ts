@@ -2,6 +2,8 @@ import type { Socket } from 'socket.io-client';
 import type { VoiceRoom, Signal, Share } from '@dorham/contracts';
 import type { AudioProcessing, AudioProcessingState } from './audio-processing';
 import type { ScreenQuality } from './screen-quality';
+import type { NoiseRemoval, NoiseRemovalState } from './strong-denoiser';
+export type { NoiseRemoval, NoiseRemovalState };
 export { screenQualities, screenSettings } from './screen-quality';
 export type { ScreenQuality };
 export { defaultAudioProcessing, browserAudioProcessing } from './audio-processing';
@@ -9,7 +11,7 @@ export type { AudioProcessing, AudioProcessingState };
 export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream; attach?: (element: HTMLVideoElement) => () => void };
 export type MediaEvents = { room: VoiceRoom | null; localScreen: RemoteScreen | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; notice: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };
 export type ScreenPolicy = { maxBitrate: number; maxFrameRate: number };
-export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; microphoneGain?: number; voiceClarity?: boolean; boostNoise?: { enabled: boolean; threshold: number }; screenPolicy?: ScreenPolicy; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
+export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; noiseRemoval?: NoiseRemoval; microphoneGain?: number; voiceClarity?: boolean; boostNoise?: { enabled: boolean; threshold: number }; screenPolicy?: ScreenPolicy; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
 export type MediaCapabilities = { audio: boolean; screenCapture: boolean; nativeVideo: boolean; amplification: boolean; microphoneGain?: boolean; sharedAudio?: boolean; outputSelection?: boolean };
 export interface MediaTransport {
   room: VoiceRoom | null;
@@ -18,6 +20,7 @@ export interface MediaTransport {
   setMuted(value: boolean): Promise<void>; setDeafened(value: boolean): Promise<void>;
   setVolume(userId: string, value: number): void; setDevice(deviceId: string): Promise<void>;
   setMicrophoneGain?(value: number): Promise<void>;
+  setNoiseRemoval?(mode: NoiseRemoval): Promise<void>; getNoiseRemoval?(): NoiseRemovalState;
   setVoiceClarity?(enabled: boolean): Promise<void>;
   setBoostNoise?(value: { enabled: boolean; threshold: number }): Promise<void>;
   getAudioProcessing?(): AudioProcessingState; setAudioProcessing?(settings: AudioProcessing): Promise<void>;

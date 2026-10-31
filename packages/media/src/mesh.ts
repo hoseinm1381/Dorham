@@ -1,3 +1,4 @@
+import type { NoiseRemoval } from './strong-denoiser';
 import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
 import { ack } from './signaling';
 import type { MediaTransport, MediaOptions } from './index';
@@ -39,7 +40,7 @@ export class MeshTransport implements MediaTransport {
   private onDisconnect = () => { this.options.emit('status', 'Reconnecting voice…'); };
   constructor(protected options: MediaOptions) {
     this.audioProcessing = { ...defaultAudioProcessing, ...options.audioProcessing };
-    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false); this.inputGain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold);
+    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); void this.inputGain.setNoiseRemoval(this.options.noiseRemoval ?? 'standard'); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false); this.inputGain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold);
     const s = options.socket; s.on('voice:move', this.onMoved); s.on('voice:room', this.onRoom); s.on('voice:signal', this.onSignal); s.on('voice:removed', this.onRemoved); s.on('connect', this.onConnect); s.on('disconnect', this.onDisconnect);
   }
   protected error(e: any) { if (!this.destroyed) this.options.emit('error', e.message || String(e)); }
@@ -54,7 +55,7 @@ export class MeshTransport implements MediaTransport {
       acquired = await navigator.mediaDevices.getUserMedia({ audio: { ...processing }, video: false }); current(); this.mic = acquired;
       for (const track of this.mic.getAudioTracks()) track.enabled = !this.muted && !this.deafened;
       this.captureProcessing = processing;
-      context = new AudioContext(); this.context = context; await context.resume(); current(); await this.prepareMicrophone(this.mic); current(); this.channelId = channelId;
+      context = new AudioContext({ sampleRate: 48000 }); this.context = context; await context.resume(); current(); await this.prepareMicrophone(this.mic); current(); this.channelId = channelId;
       await this.rejoin(); current();
       this.heartbeat = setInterval(() => { if (this.options.socket.connected && this.room) void ack(this.options.socket, 'voice:heartbeat', { eligible: this.peers.size === 0 || [...this.peers.values()].some(p => p.pc.connectionState === 'connected') }).catch(e => this.error(e)); }, 5000);
       this.attachMicMeter();
@@ -206,6 +207,8 @@ export class MeshTransport implements MediaTransport {
   async setDevice(deviceId: string) { await this.replaceMicrophone(deviceId, this.captureProcessing); }
   async setOutputDevice(deviceId: string) { if (!this.context || typeof (this.context as any).setSinkId !== 'function') throw new Error('Speaker selection is not supported in this browser.'); await (this.context as any).setSinkId(deviceId); }
   getLocalAudioStream() { return this.outgoing; }
+  getNoiseRemoval() { return this.inputGain.getNoiseRemoval(); }
+  async setNoiseRemoval(mode: NoiseRemoval) { this.options.noiseRemoval = mode; await this.inputGain.setNoiseRemoval(mode); await this.inputGain.resume(); }
   async setBoostNoise(value: { enabled: boolean; threshold: number }) { this.options.boostNoise = value; this.inputGain.setNoiseFilter(value.enabled, value.threshold); await this.inputGain.resume(); }
   async setVoiceClarity(enabled: boolean) { this.options.voiceClarity = enabled; this.inputGain.setClarity(enabled); await this.inputGain.resume(); }
   async setMicrophoneGain(value: number) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
 import type { MediaTransport } from '@dorham/media';
 import { readAudioProcessingPreferences } from './AudioProcessingControls';
 import { serverUrl } from './api';
@@ -28,9 +28,9 @@ export function useAudioRouting(transport: RefObject<MediaTransport | null>, act
     return () => { stopped = true; navigator.mediaDevices.removeEventListener('devicechange', refresh); window.removeEventListener('dorham-audio-devices', refresh); };
   }, [active, account]);
 }
-export function AudioDeviceSettings({ account, transport, error }: { account: string; transport: MediaTransport | null; error: (e: unknown) => void }) {
+export function AudioDeviceSettings({ account, transport, error, advancedControls }: { account: string; transport: MediaTransport | null; error: (e: unknown) => void; advancedControls?: ReactNode }) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]), [choices, setChoices] = useState(() => readAudioChoices(account));
-  const [testing, setTesting] = useState(false), [level, setLevel] = useState(0), [notice, setNotice] = useState('');
+  const [testing, setTesting] = useState(false), [level, setLevel] = useState(0), [notice, setNotice] = useState(''), [voiceTestOpen, setVoiceTestOpen] = useState(false);
   const cleanup = useRef<() => void>(() => {}), speakerCleanup = useRef<() => void>(() => {}), generation = useRef(0);
   useEffect(() => { const refresh = () => { void navigator.mediaDevices?.enumerateDevices().then(setDevices).catch(error); }; refresh(); navigator.mediaDevices?.addEventListener('devicechange', refresh); return () => { generation.current++; cleanup.current(); speakerCleanup.current(); navigator.mediaDevices?.removeEventListener('devicechange', refresh); }; }, []);
   function choose(kind: 'input' | 'output', value: string) { const next = { ...readAudioChoices(account), [kind]: value }; setChoices(next); try { localStorage.setItem(storageKey(account), JSON.stringify(next)); } catch { /* memory UI still reflects choice */ } window.dispatchEvent(new Event('dorham-audio-devices')); }
@@ -57,12 +57,16 @@ export function AudioDeviceSettings({ account, transport, error }: { account: st
     catch (e) { finish(); error(e); }
   }
   const outputSupported = transport?.getCapabilities().outputSelection ?? (typeof (AudioContext.prototype as any).setSinkId === 'function');
-  return <section className="audio-device-settings"><h3>{t('Audio devices')}</h3>
-    <label>{t('Microphone')}<select aria-label={t('Microphone')} value={choices.input} onChange={e => choose('input', e.target.value)}><option value="">{t('System default')}</option>{devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default').map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || t('Microphone')}</option>)}</select></label>
-    <label>{t('Speakers or headset')}<select aria-label={t('Speakers or headset')} disabled={!outputSupported} value={choices.output} onChange={e => choose('output', e.target.value)}><option value="">{t('System default')}</option>{devices.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default').map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || t('Speaker')}</option>)}</select></label>
-    {!outputSupported && <p>{t('Speaker selection is not supported in this browser.')}</p>}
-    <div className="audio-test-actions"><button type="button" className="secondary" onClick={() => { void microphoneTest(); }}>{t(testing ? 'Stop microphone test' : 'Test microphone')}</button><button type="button" className="secondary" onClick={() => { void speakerTest(); }}>{t('Test speakers')}</button></div>
-    {testing && <meter aria-label={t('Microphone level')} min={0} max={1} value={level}/>}<p role="status">{t(notice)}</p>
-    <MicrophoneVoiceTest input={choices.input} output={choices.output} transport={transport} error={error}/>
+  return <section className="audio-device-settings">
+    <details className="audio-voice-test" onToggle={e => { const open = e.currentTarget.open; setVoiceTestOpen(open); if (!open) { generation.current++; cleanup.current(); speakerCleanup.current(); setTesting(false); setLevel(0); } }}><summary>{t('Test your voice')}</summary>
+      {voiceTestOpen && <MicrophoneVoiceTest input={choices.input} output={choices.output} transport={transport} error={error}/>}</details>
+    <details className="audio-advanced" onToggle={e => { if (!e.currentTarget.open) { generation.current++; cleanup.current(); speakerCleanup.current(); setTesting(false); setLevel(0); } }}><summary>{t('Advanced audio')}</summary><div className="audio-advanced-body"><div className="audio-device-options">
+      <label>{t('Microphone')}<select aria-label={t('Microphone')} value={choices.input} onChange={e => choose('input', e.target.value)}><option value="">{t('System default')}</option>{devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default').map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || t('Microphone')}</option>)}</select></label>
+      <label>{t('Speakers or headset')}<select aria-label={t('Speakers or headset')} disabled={!outputSupported} value={choices.output} onChange={e => choose('output', e.target.value)}><option value="">{t('System default')}</option>{devices.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default').map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || t('Speaker')}</option>)}</select></label>
+    </div>{!outputSupported && <p>{t('Speaker selection is not supported in this browser.')}</p>}
+    {advancedControls}
+    <details className="audio-device-checks"><summary>{t('Device checks')}</summary><div className="audio-test-actions"><button type="button" className="secondary" onClick={() => { void microphoneTest(); }}>{t(testing ? 'Stop microphone test' : 'Test microphone')}</button><button type="button" className="secondary" onClick={() => { void speakerTest(); }}>{t('Test speakers')}</button></div>
+    {testing && <meter aria-label={t('Microphone level')} min={0} max={1} value={level}/>}<p role="status">{t(notice)}</p></details>
+    </div></details>
   </section>;
 }

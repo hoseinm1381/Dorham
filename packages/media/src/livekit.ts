@@ -1,3 +1,4 @@
+import type { NoiseRemoval } from './strong-denoiser';
 import { clampScreenBandwidth, screenSettings, type ScreenQuality } from './screen-quality';
 import { Room, RoomEvent, ParticipantEvent, Track, type LocalAudioTrack, type RemoteTrack, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 import { MicrophoneGain, clampMicrophoneGain } from './microphone-gain';
@@ -11,7 +12,8 @@ export class LiveKitTransport implements MediaTransport {
   getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true, microphoneGain: true, sharedAudio: !(globalThis as any).desktop || Boolean((globalThis as any).desktop.systemAudioSafe), outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' || (typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype.setSinkId === 'function') }; }
   async reconnect() { const channel = this.channelId; if (channel) { await this.leave(); await this.join(channel); } }
   private screenBandwidth?:number;
-  room: VoiceRoom | null = null; private media = new Room({ webAudioMix: true, adaptiveStream: true, dynacast: true, publishDefaults: { audioPreset: { maxBitrate: 24000 }, dtx: true, forceStereo: false } });
+  private playbackContext = new AudioContext({ sampleRate: 48000 });
+  room: VoiceRoom | null = null; private media = new Room({ webAudioMix: { audioContext: this.playbackContext }, adaptiveStream: true, dynacast: true, publishDefaults: { audioPreset: { maxBitrate: 24000 }, dtx: true, forceStereo: false } });
   private heartbeat?: ReturnType<typeof setInterval>; private channelId: string | null = null; private muted = false; private deafened = false;
   private volumes = new Map<string, number>(); private elements = new Map<string, HTMLMediaElement>(); private lease: Share | null = null;
   private playbackTask: Promise<void> | null = null;
@@ -40,7 +42,7 @@ export class LiveKitTransport implements MediaTransport {
   private onConnect = () => { if (this.channelId && !this.joining) { const channel = this.channelId; void this.leave().then(() => this.join(channel)).catch(e => this.options.emit('error', e.message)); } };
   constructor(private options: MediaOptions) {
     this.audioProcessing = { ...defaultAudioProcessing, ...options.audioProcessing };
-    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false); this.inputGain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold);
+    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); void this.inputGain.setNoiseRemoval(this.options.noiseRemoval ?? 'standard'); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false); this.inputGain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold);
     options.socket.on('voice:move', this.onMoved); options.socket.on('voice:room', this.onRoom); options.socket.on('voice:removed', this.onRemoved); options.socket.on('connect', this.onConnect);
     this.media.on(RoomEvent.TrackPublished, () => this.updateSubscriptions());
     this.media.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
@@ -79,13 +81,15 @@ export class LiveKitTransport implements MediaTransport {
     const generation = this.generation;
     const [track] = await this.media.localParticipant.createTracks({ audio: { ...this.captureProcessing }, video: false }) as LocalAudioTrack[];
     if (generation !== this.generation || !this.channelId) { track.stop(); throw new Error('Voice connection was cancelled.'); }
-    const gain = new MicrophoneGain(this.gainValue); gain.setClarity(this.options.voiceClarity !== false); gain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold); gain.setEnabled(false); this.inputGain = gain;
+    const gain = new MicrophoneGain(this.gainValue); void gain.setNoiseRemoval(this.options.noiseRemoval ?? 'standard'); gain.setClarity(this.options.voiceClarity !== false); gain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold); gain.setEnabled(false); this.inputGain = gain;
     try {
       await track.mute(); await track.setProcessor(gain);
       if (generation !== this.generation || !this.channelId) throw new Error('Voice connection was cancelled.');
       await this.media.localParticipant.publishTrack(track, { source: Track.Source.Microphone });
     } catch (error) { track.stop(); await gain.destroy(); throw error; }
   }
+  getNoiseRemoval() { return this.inputGain.getNoiseRemoval(); }
+  async setNoiseRemoval(mode: NoiseRemoval) { this.options.noiseRemoval = mode; await this.inputGain.setNoiseRemoval(mode); await this.inputGain.resume(); }
   async setBoostNoise(value: { enabled: boolean; threshold: number }) { this.options.boostNoise = value; this.inputGain.setNoiseFilter(value.enabled, value.threshold); await this.inputGain.resume(); }
   async setVoiceClarity(enabled: boolean) { this.options.voiceClarity = enabled; this.inputGain.setClarity(enabled); await this.inputGain.resume(); }
   async setMicrophoneGain(value: number) {
@@ -108,7 +112,7 @@ export class LiveKitTransport implements MediaTransport {
         if (!self?.serverMuted && !self?.serverDeafened && !this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack) await this.createMicrophone();
         const existing = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
         if (existing?.getProcessor && (!existing.getProcessor()?.processedTrack || existing.getProcessor() !== this.inputGain)) {
-          const gain = new MicrophoneGain(this.gainValue); gain.setClarity(this.options.voiceClarity !== false); gain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold); gain.setEnabled(false); this.inputGain = gain; await existing.setProcessor(gain);
+          const gain = new MicrophoneGain(this.gainValue); void gain.setNoiseRemoval(this.options.noiseRemoval ?? 'standard'); gain.setClarity(this.options.voiceClarity !== false); gain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold); gain.setEnabled(false); this.inputGain = gain; await existing.setProcessor(gain);
         }
         const enabled = this.microphoneEnabled();
         await this.media.localParticipant.setMicrophoneEnabled(enabled, { ...this.captureProcessing });
@@ -229,7 +233,7 @@ export class LiveKitTransport implements MediaTransport {
     }
   }
   async subscribe(share: Share, enabled: boolean) { if (enabled) { this.hiddenScreens.delete(share.id); this.watchedShares.add(share.id); } else { this.hiddenScreens.add(share.id); this.watchedShares.delete(share.id); } this.updateSubscriptions(); this.applyVolumes(); if (!enabled) { this.deliveredScreens.delete(share.id); this.options.emit('screenRemoved', share.id); } }
-  async getStats() { const participants: Record<string, any> = { audioProcessing: this.getAudioProcessing() }; for (const p of this.media.remoteParticipants.values()) { const tracks = []; for (const t of p.trackPublications.values()) if (t.track) tracks.push(await t.track.getRTCStatsReport()); participants[p.identity] = { quality: p.connectionQuality, tracks }; } return participants; }
+  async getStats() { const participants: Record<string, any> = { audioProcessing: this.getAudioProcessing(), noiseRemoval: this.getNoiseRemoval() }; for (const p of this.media.remoteParticipants.values()) { const tracks = []; for (const t of p.trackPublications.values()) if (t.track) tracks.push(await t.track.getRTCStatsReport()); participants[p.identity] = { quality: p.connectionQuality, tracks }; } return participants; }
   async leave() { this.generation++; this.joining = false; const was = this.channelId; this.channelId = null; clearInterval(this.heartbeat); await this.stopShare().catch(() => {}); await this.microphoneTask?.catch(() => {}); await this.media.disconnect(); await this.inputGain.destroy(); this.appliedMicrophone = undefined; this.deliveredScreens.clear(); this.watchedShares.clear(); this.hiddenScreens.clear(); this.streamVolumes.clear(); for (const e of this.elements.values()) e.remove(); this.elements.clear(); if (was && this.options.socket.connected) await ack(this.options.socket, 'voice:leave', { requestId: crypto.randomUUID() }).catch(() => {}); this.room = null; this.options.emit('room', null); }
-  async destroy() { await this.leave(); this.options.socket.off('voice:move', this.onMoved); this.options.socket.off('voice:room', this.onRoom); this.options.socket.off('voice:removed', this.onRemoved); this.options.socket.off('connect', this.onConnect); }
+  async destroy() { await this.leave(); if (this.playbackContext.state !== 'closed') await this.playbackContext.close(); this.options.socket.off('voice:move', this.onMoved); this.options.socket.off('voice:room', this.onRoom); this.options.socket.off('voice:removed', this.onRemoved); this.options.socket.off('connect', this.onConnect); }
 }
