@@ -1,4 +1,4 @@
-**Current web/server update: 1.0.4** — all 64 emoji reactions, keep-open selection, larger single emojis and local Farsi/English voice-channel TTS. Native builds remain deferred. See [release details](docs/RELEASE-1.0.4.md).
+**Current web/server update: 1.0.4, live at https://dorhamapp.ir/** — all 64 emoji reactions, keep-open selection, larger single emojis and local Farsi/English voice-channel TTS. Native builds remain deferred. See [release details](docs/RELEASE-1.0.4.md).
 
 **Previous web update: 1.0.3** — 64 supplied Soft Bubble emojis, including nine Dorham exclusives, with a searchable message picker, Persian labels and offline artwork. See [web verification](docs/RELEASE-1.0.3.md).
 
