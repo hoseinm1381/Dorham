@@ -1,7 +1,8 @@
+import { completeRecovery, chooseScreen } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { mkdir } from 'node:fs/promises';
-async function register(page: Page, username: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('correct-horse-123'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible(); }
+async function register(page: Page, username: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('correct-horse-123'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible(); }
 async function api(page: Page, route: string, body?: any, method = body ? 'POST' : 'GET') { return page.evaluate(async ({ route, body, method }) => { const auth = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch(`/api/v1${route}`, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': auth.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(await r.text()); return r.json(); }, { route, body, method }); }
 async function instrument(page: Page, relayOnly = false) {
   await page.addInitScript((relayOnly: boolean) => {
@@ -78,7 +79,7 @@ test('real accounts, channel chat, reactions, editing, unread state and private 
   await expect(other.getByTestId('message')).toContainText('Hello <script>'); expect(await other.evaluate(() => (window as any).pwned)).toBeUndefined();
   await other.getByTestId('message').hover(); await other.getByRole('button', { name: 'React with thumbs up' }).click(); await expect(page.locator('.reactions')).toContainText('1');
   await page.getByTestId('message').hover(); await page.getByRole('button', { name: 'Edit message', exact: true }).click(); await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Edited together.'); await page.getByRole('button', { name: 'Send message', exact: true }).click(); await expect(other.getByTestId('message')).toContainText('Edited together.');
-  const robin = snapshot.users.find((u: any) => u.username.startsWith('robin')); const dm = await api(page, '/dms', { userId: robin.id }); await page.getByRole('button', { name: 'Home', exact: true }).click(); await page.getByRole('button', { name: new RegExp(robin.displayName), exact: false }).first().click();
+  const robin = snapshot.users.find((u: any) => u.username.startsWith('robin')); const dm = await api(page, '/dms', { userId: robin.id }); await page.getByRole('button', { name: 'Home', exact: true }).click(); await page.getByRole('button', { name: 'New direct message', exact: true }).first().click(); await page.getByRole('dialog').getByRole('button').filter({ hasText: robin.displayName }).click();
   await api(page, '/messages', { conversationId: dm.id, content: 'Just between us.' });
   await other.reload(); await other.getByRole('button', { name: 'Home', exact: true }).click(); await expect(other.locator('.dm-item .unread-dot')).toBeVisible(); await other.locator('.dm-item').first().click(); await expect(other.getByTestId('message')).toContainText('Just between us.');
   await page.getByRole('button', { name: 'Home', exact: true }).click(); await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: 'artifacts/evidence/web-home.png', fullPage: true }); await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: 'artifacts/evidence/web-mobile.png', fullPage: true });
@@ -112,12 +113,12 @@ test('actual WebRTC decodes audio/video, applies volume and mute, unsubscribes a
   expect(await other.evaluate(() => { (window as any).__voiceGains = (window as any).__gains.filter((g: GainNode) => g.gain.value === 0.5); return (window as any).__voiceGains.length > 0; })).toBe(true);
   await other.getByRole('button', { name: 'Deafen', exact: true }).click(); expect(await other.evaluate(() => (window as any).__voiceGains.every((g: GainNode) => g.gain.value === 0))).toBe(true); await other.getByRole('button', { name: 'Undeafen', exact: true }).click();
   await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect(other.locator('.voice-card').first()).toContainText('Microphone muted'); await page.getByRole('button', { name: 'Unmute microphone', exact: true }).click();
-  await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+  await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page);
   await other.getByRole('button', { name: 'Watch stream', exact: true }).click();
   await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'video' && r.framesDecoded > 0), { timeout: 30000 }).toBe(true); await expect(other.locator('.screen video')).toBeVisible();
   await other.getByRole('button', { name: 'Stop watching stream', exact: true }).click(); await expect(other.locator('.screen')).toHaveCount(0);
   await other.getByRole('button', { name: /Watch stream/ }).click(); await expect(other.locator('.screen video')).toBeVisible();
-  await other.getByRole('button', { name: 'Share screen', exact: true }).click(); await expect(page.locator('.share-list>div')).toHaveCount(2); await page.getByRole('button', { name: 'Watch stream', exact: true }).click(); await expect(page.locator('.screen video')).toBeVisible();
+  await other.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(other); await expect(page.locator('.share-list>div')).toHaveCount(2); await page.getByRole('button', { name: 'Watch stream', exact: true }).click(); await expect(page.locator('.screen video')).toBeVisible();
   const decodedMedia = { sender: await stats(page), receiver: await stats(other) };
   await page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); const before = await page.locator('.diagnostics').innerText(); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(other.locator('.voice-card')).toHaveCount(1); await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); await expect(other.locator('.diagnostics')).toContainText(`VoiceB${suffix}`);
@@ -158,7 +159,7 @@ test('quiet decoded audio lights the avatar independently of volume and shared s
     await page.evaluate(() => { (window as any).__quietTone.gain.value = 0.02; }); await expect(speaker).toHaveClass(/speaking/);
     await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect(speaker).not.toHaveClass(/speaking/);
     await page.getByRole('button', { name: 'Unmute microphone', exact: true }).click(); await expect(speaker).toHaveClass(/speaking/);
-    await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+    await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page);
     await other.getByRole('button', { name: 'Watch stream', exact: true }).click(); await expect(other.locator('main')).toHaveClass(/stream-viewer-active/); await expect(other.locator('.screen video')).toBeVisible();
     await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'video' && r.framesDecoded > 5)).toBe(true);
     await other.getByRole('button', { name: 'Show chat', exact: true }).click(); const video = await other.locator('.screen video').boundingBox(), chat = await other.locator('.message-scroll').boundingBox(); expect(video!.height).toBeGreaterThan(chat!.height);
@@ -179,7 +180,7 @@ test('blocked ICE reports missing media and waiting video instead of a successfu
   await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await other.getByRole('button', { name: 'Lounge', exact: true }).click();
   await other.getByRole('button', { name: 'Voice controls', exact: true }).click(); await expect(other.locator('.voice-card')).toHaveCount(2);
   await expect(other.locator('.voice-signal')).not.toContainText('Voice connected');
-  await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+  await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page);
   await other.getByRole('button', { name: 'Watch stream', exact: true }).click(); await expect(other.locator('.screen-status')).toContainText('Connecting to screen');
   await expect(other.locator('.screen-status')).toContainText('No video received yet', { timeout: 22000 });
   await expect(other.getByRole('alert')).toContainText('enable a media relay', { timeout: 16000 });

@@ -1,3 +1,4 @@
+import { completeRecovery } from './recovery-helper';
 import {test,expect} from '@playwright/test';
 import {writeFile} from 'node:fs/promises';
 test.use({trace:'off',video:'off'});
@@ -7,7 +8,7 @@ test('local voice recording plays at the selected gain, releases capture and is 
     navigator.mediaDevices.getUserMedia=async()=>{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain(),d=c.createMediaStreamDestination();o.frequency.value=440;g.gain.value=.04*((window as any).__inputScale||1);o.connect(g).connect(d);o.start();await c.resume();const s=d.stream;(window as any).__testCapture.push(s);s.getAudioTracks()[0].addEventListener('ended',()=>{o.stop();void c.close();});return s;};
     const connect=AudioNode.prototype.connect;AudioNode.prototype.connect=function(d:any,...a:any[]):any{if(d===this.context.destination){const m=this.context.createAnalyser();m.fftSize=2048;(connect as any).call(this,m);(window as any).__testOutput.push(m);}return(connect as any).call(this,d,...a);};
   });
-  await page.goto('/');await page.getByRole('button',{name:'Create an account',exact:true}).click();const name='SelfTest'+Date.now().toString().slice(-7);await page.getByLabel('Display name',{exact:true}).fill(name);await page.getByLabel('Username',{exact:true}).fill(name);await page.getByLabel('Password',{exact:true}).fill('Synthetic-selftest-2026');await page.getByRole('button',{name:'Create account',exact:true}).click();await expect(page.locator('.app')).toBeVisible();
+  await page.goto('/');await page.getByRole('button',{name:'Create an account',exact:true}).click();const name='SelfTest'+Date.now().toString().slice(-7);await page.getByLabel('Display name',{exact:true}).fill(name);await page.getByLabel('Username',{exact:true}).fill(name);await page.getByLabel('Password',{exact:true}).fill('Synthetic-selftest-2026');await page.getByRole('button',{name:'Create account',exact:true}).click(); await completeRecovery(page);await expect(page.locator('.app')).toBeVisible();
   await page.getByRole('button',{name:'Account settings',exact:true}).click();await page.getByRole('tab',{name:'Audio',exact:true}).click();
   let mediaUploads=0;page.on('request',r=>{if(r.method()==='POST'&&/attachments|upload|audio|recording/i.test(new URL(r.url()).pathname))mediaUploads++;});
   const open=async()=>{await page.getByRole('button',{name:'Account settings',exact:true}).click();await page.getByRole('tab',{name:'Audio',exact:true}).click();};

@@ -1,3 +1,4 @@
+import { completeRecovery, chooseScreen } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import project from '../../package.json' with { type: 'json' };
@@ -8,7 +9,7 @@ async function api(page: Page, route: string, body?: any, method = body ? 'POST'
 async function register(page: Page, username: string) {
   await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('eight888');
-  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible();
+  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible();
 }
 test('restricted network supports guests, persistent conversion, safe links, attachments and RTL', async ({ browser, baseURL }) => {
   const a = await browser.newContext({ locale: 'en-US' }), b = await browser.newContext({ locale: 'en-US' });
@@ -69,7 +70,7 @@ test('offers four capture modes and changes quality during a share without chang
     await register(page, `Quality${Date.now().toString().slice(-7)}`); const server = await api(page, '/servers', { name: 'Quality controls' }); await page.getByRole('button', { name: 'Open Quality controls', exact: true }).click();
     await page.getByRole('button', { name: 'Lounge', exact: true }).click();
     const quality = page.getByLabel('Screen quality', { exact: true }); await expect(quality).toBeVisible(); expect(await quality.locator('option').evaluateAll(options => options.map(o => (o as HTMLOptionElement).value))).toEqual(['720p15', '720p30', '480p15', '480p30']);
-    await quality.selectOption('480p15');  await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+    await quality.selectOption('480p15');  await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page);
     await expect.poll(async () => (await api(page, '/bootstrap')).voicePresence[0]?.shares).toBe(1);
     const channel = (await api(page, '/bootstrap')).channels.find((c: any) => c.serverId === server.id && c.kind === 'voice'), before = (await api(page, `/voice/${channel.id}`)).shares[0].id;
     expect(await page.evaluate(() => (window as any).__captureCalls[0].video.height.ideal)).toBe(480);

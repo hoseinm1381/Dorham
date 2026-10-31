@@ -35,6 +35,7 @@ export class DeferredTransport implements MediaTransport {
   async setOutputDevice(value: string) { await this.inner?.setOutputDevice?.(value); }
   getLocalAudioStream() { return this.inner?.getLocalAudioStream?.() || null; }
   getAudioProcessing() { return this.inner?.getAudioProcessing?.() || browserAudioProcessing(this.options.audioProcessing || { noiseSuppression: true, echoCancellation: true, autoGainControl: true }); }
+  async setVoiceClarity(enabled: boolean) { this.options.voiceClarity = enabled; await this.inner?.setVoiceClarity?.(enabled); }
   async setMicrophoneGain(value: number) { this.options.microphoneGain = value; await this.inner?.setMicrophoneGain?.(value); }
   async setAudioProcessing(value: AudioProcessing) { if (this.inner) await this.inner.setAudioProcessing?.(value); this.options.audioProcessing = { ...value }; }
   async startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean; bandwidth?: number }) { if (!this.inner?.room) throw new Error('Join a voice channel first.'); await this.inner.startShare(quality, options); }

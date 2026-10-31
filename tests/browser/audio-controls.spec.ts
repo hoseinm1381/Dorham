@@ -1,3 +1,4 @@
+import { completeRecovery } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -12,7 +13,7 @@ async function api(page: Page, route: string, body?: object) {
 async function register(page: Page, name: string) {
   await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('fixture-password-123');
-  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.getByRole('heading', { name: `Hey, ${name}.` })).toBeVisible();
+  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.getByRole('heading', { name: `Hey, ${name}.` })).toBeVisible();
 }
 async function instrument(page: Page) {
   await page.addInitScript(() => {

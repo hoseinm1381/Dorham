@@ -1,3 +1,4 @@
+import { completeRecovery, chooseScreen } from './recovery-helper';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { test, expect, type Page } from '@playwright/test';
 import sharp from 'sharp';
@@ -5,7 +6,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { makeVideo } from '../media-fixtures';
 test.use({ trace: 'off', video: 'off' });
 async function api(page: Page, route: string, body?: any) { return page.evaluate(async ({ route, body }) => { const me = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch('/api/v1' + route, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(`API ${r.status}`); return r.json(); }, { route, body }); }
-async function register(page: Page, name: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('fixture888'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.getByRole('heading', { name: `Hey, ${name}.` })).toBeVisible(); }
+async function register(page: Page, name: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('fixture888'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.getByRole('heading', { name: `Hey, ${name}.` })).toBeVisible(); }
 async function sendFile(page: Page, name: string, mimeType: string, buffer: Buffer) { await page.locator('.file-composer input[type=file]').setInputFiles({ name, mimeType, buffer }); await expect(page.locator('.attachment-draft').filter({ hasText: name })).toBeVisible(); await page.getByRole('button', { name: 'Send message', exact: true }).click(); }
 test('inline image viewer and seekable video decode uploaded attachments, including after reload', async ({ browser }) => {
   const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1440, height: 1000 } }), page = await context.newPage(), ranges: number[] = [];
@@ -41,7 +42,7 @@ test('screen-first layout, optional own capture preview, minimized members and p
     const server = await api(page, '/servers', { name: 'Screen focus lab' }); fixtureRoom = (await api(page, '/bootstrap')).channels.find((c: any) => c.serverId === server.id && c.kind === 'voice').id; const invite = await api(page, `/servers/${server.id}/invites`, {}); await api(other, '/invites/join', { code: invite.code });
     for (const p of [page, other]) { await p.getByRole('button', { name: 'Open Screen focus lab', exact: true }).click(); await p.getByRole('button', { name: 'Lounge', exact: true }).click(); }
     await expect(page.locator('.voice-mini-members button')).toHaveCount(2);
-    await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await expect(other.locator('.screen video')).toBeVisible();
+    await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page); await expect(other.locator('.screen video')).toBeVisible();
     await expect.poll(() => other.locator('.screen video').evaluate((v: HTMLVideoElement) => v.videoWidth)).toBeGreaterThan(300);
     await expect.poll(() => other.locator('.screen video').evaluate((v: HTMLVideoElement) => v.getVideoPlaybackQuality().totalVideoFrames)).toBeGreaterThan(2);
     const screen = (await other.locator('.screen video').boundingBox())!, main = (await other.locator('main').boundingBox())!, chat = (await other.locator('.message-scroll').boundingBox())!;

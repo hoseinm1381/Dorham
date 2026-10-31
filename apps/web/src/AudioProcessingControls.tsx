@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { defaultAudioProcessing, browserAudioProcessing, type AudioProcessing } from '../../../packages/media/src/audio-processing';
 import type { MediaTransport } from '@dorham/media';
 import './audio-processing.css';
+import { readVoiceClarity, saveVoiceClarity } from './voice-clarity-preferences';
 
 const preferenceKey = 'dorham.audioProcessing.v1';
 export function readAudioProcessingPreferences(): AudioProcessing {
@@ -14,6 +15,7 @@ export function readAudioProcessingPreferences(): AudioProcessing {
 
 export function AudioProcessingControls({ transport, onError }: { transport: MediaTransport | null; onError: (error: unknown) => void }) {
   const [busy, setBusy] = useState(false);
+  const [clarity, setClarity] = useState(readVoiceClarity);
   const [pending, setPending] = useState<AudioProcessing | null>(null);
   const [, refresh] = useState(0);
   if (transport && (!transport.getAudioProcessing || !transport.setAudioProcessing)) return <p>{tr("Android manages microphone noise and echo processing automatically.")}</p>;
@@ -31,6 +33,7 @@ export function AudioProcessingControls({ transport, onError }: { transport: Med
       <label><input type="checkbox" checked={pending?.[key] ?? state.requested[key]} disabled={!state.supported[key]} onChange={e => { void update(key, e.target.checked); }}/>{tr(label)}</label>
       <small role="status">{busy ? tr("Applying…") : !state.supported[key] ? tr("Not supported by this browser") : !state.active ? tr("Applies when you join voice") : state.effective[key] === undefined ? tr("Browser does not report its applied setting") : tr('Microphone: {state}', { state: tr(state.effective[key] ? 'On' : 'Off') })}</small>
     </div>)}
+    <div><label><input type="checkbox" aria-label={tr('Voice clarity')} checked={clarity} onChange={e => { const enabled = e.target.checked; setBusy(true); void Promise.resolve(transport?.setVoiceClarity?.(enabled)).then(() => { setClarity(enabled); saveVoiceClarity(enabled); }).catch(onError).finally(() => setBusy(false)); }}/>{tr('Voice clarity')}</label><small>{tr('Reduces low rumble and gently clarifies speech on this device. Turn off to save processing on a weak PC. No extra server processing.')}</small></div>
     {state.pending && <p role="status">{tr("Saved. Leave and rejoin voice to apply these changes.")}</p>}
     <p>{tr("Changes apply during your call and are saved for future calls. These settings affect your microphone only.")}</p>
     <p>{tr("Your browser controls noise reduction strength; it offers on/off, not an adjustable strength slider.")}</p>

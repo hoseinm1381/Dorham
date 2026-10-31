@@ -1,9 +1,10 @@
+import { completeRecovery } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 async function register(page: Page, name: string) {
   await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('Member-invite-fixture');
-  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.locator('.app')).toBeVisible();
+  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.locator('.app')).toBeVisible();
 }
 async function api(page: Page, route: string, body: object) {
   return page.evaluate(async ({ route, body }) => {

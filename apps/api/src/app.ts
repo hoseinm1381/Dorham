@@ -23,8 +23,9 @@ import { SingleFlight } from './single-flight';
 import { ConnectionLatencyMonitor } from './connection-latency';
 import { Attachments } from './attachments';
 import { mediaAdmission } from './media-admission';
-import { publicAccountRoutes, protectedAccountRoutes, audit } from './accounts';
+import { publicAccountRoutes, protectedAccountRoutes, audit, initialRecoveryCodes } from './accounts';
 import { ChessService, chessCreate, chessCommand } from './chess';
+import { serverIcons } from './server-icons';
 import { GameService, gameCreate, gameCommand } from './games/service';
 
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
@@ -139,13 +140,13 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     if (!c.registrationOpen) fail(403, 'REGISTRATION_CLOSED', 'Registration is closed.');
     const body = registerSchema.parse(req.body), username = body.username.toLowerCase();
     const encoded = await passwordHash(body.password);
-    const userId = await db.transaction(async tx => {
+    const created = await db.transaction(async tx => {
       const count = await tx.one('SELECT COUNT(*) AS count FROM users');
       if (count!.count >= c.maxUsers) fail(409, 'ACCOUNT_LIMIT', 'This instance has reached its account limit.');
       if (await tx.one('SELECT id FROM users WHERE username=?', [username])) fail(409, 'USERNAME_TAKEN', 'This username is unavailable.');
-      const userId = randomUUID(); await tx.run('INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)', [userId, username, body.displayName, encoded, Date.now(), body.language || '']); return userId;
+      const userId = randomUUID(); await tx.run('INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)', [userId, username, body.displayName, encoded, Date.now(), body.language || '']); return { userId, codes: await initialRecoveryCodes(tx, userId) };
     });
-    await service.notify('state:changed', {}); return reply.code(201).send(await sessionFor(userId, req.headers['x-dorham-native'] === '1', reply, String(req.headers['user-agent'] || 'Unknown device')));
+    await service.notify('state:changed', {}); return reply.code(201).send({ ...await sessionFor(created.userId, req.headers['x-dorham-native'] === '1', reply, String(req.headers['user-agent'] || 'Unknown device')), recoveryCodes: created.codes });
   });
   app.post('/api/v1/auth/login', { config: authRate }, async (req, reply) => {
     const body = credentialsSchema.extend({ requestId }).parse(req.body);
@@ -183,6 +184,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.get('/chess/:id', async req => chess.get(req.account.id, id.parse((req.params as any).id)));
     api.post('/chess/:id', async req => chess.command(req.account.id, id.parse((req.params as any).id), chessCommand.parse(req.body)));
     attachments.register(api);
+    serverIcons(api, service, avatarDir);
     api.post('/auth/renew', async (req, reply) => {
       z.object({ requestId }).parse(req.body);
       if (req.session.native) fail(400, 'NATIVE_REFRESH', 'Use native credential renewal.');
@@ -237,7 +239,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.patch('/servers/:id', async req => { const b = z.object({ name: schemas.name.optional(), delete: z.boolean().optional(), allowGuests: z.boolean().optional(), allowMemberInvites: z.boolean().optional(), requestId }).refine(b => b.name || b.delete || b.allowGuests !== undefined || b.allowMemberInvites !== undefined).parse(req.body); return service.changeServer(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/servers/:id/channels', async req => { const b = schemas.channel.parse(req.body); return service.createChannel(req.account.id, b.requestId, id.parse((req.params as any).id), b.name, b.kind); });
     api.patch('/channels/:id', async req => { const b = z.object({ name: schemas.name.optional(), delete: z.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z.number().int().min(0).optional(), requestId }).refine(b => b.name || b.delete || (b.role && b.permissions)).parse(req.body); return service.changeChannel(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
-    api.post('/servers/:id/invites', async req => { const b = z.object({ hours: z.number().int().min(1).max(168).default(24), uses: z.number().int().min(1).max(100).default(10), requestId }).parse(req.body); return service.invite(req.account.id, b.requestId, id.parse((req.params as any).id), token(), b.hours, b.uses); });
+    api.post('/servers/:id/invites', async req => { const b = z.object({ hours: z.number().int().min(1).max(168).default(24), uses: z.number().int().min(1).max(100).default(10), channelId: id.optional(), requestId }).parse(req.body); return service.invite(req.account.id, b.requestId, id.parse((req.params as any).id), token(), b.hours, b.uses, b.channelId); });
     api.get('/servers/:id/invites', async req => service.invitations(req.account.id, id.parse((req.params as any).id)));
     api.delete('/servers/:id/invites/:code', async req => { const b = z.object({ requestId }).parse(req.body), p = req.params as any; return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z.string().min(10).max(100).parse(p.code)); });
     api.get('/servers/:id/roles', async req => service.customRoles(req.account.id, id.parse((req.params as any).id)));

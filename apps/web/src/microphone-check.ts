@@ -1,3 +1,4 @@
+import { VoiceClarity } from '../../../packages/media/src/voice-clarity';
 import type { AudioProcessing } from '../../../packages/media/src/audio-processing';
 export type CheckState = 'idle' | 'requesting' | 'recording' | 'ready' | 'playing';
 // A bounded, local recording; no socket, upload, persisted blob or call track.
@@ -13,7 +14,8 @@ export class MicrophoneCheck {
   private analyser?: AnalyserNode;
   private meter?: ReturnType<typeof setInterval>;
   private deadline?: ReturnType<typeof setTimeout>;
-  private value = 1;
+  private value = 1; private clarity = true; private clarityGraph?: VoiceClarity;
+  setClarity(value: boolean) { this.clarity = value; this.clarityGraph?.setEnabled(value); }
   private state: CheckState = 'idle';
   constructor(private changed: (state: CheckState) => void, private level: (rms: number, clipped: boolean) => void, private failed: (error: unknown) => void) {}
   private update(state: CheckState) { this.state = state; this.changed(state); }
@@ -52,11 +54,11 @@ export class MicrophoneCheck {
       if (typeof (this.context as any).setSinkId === 'function') await (this.context as any).setSinkId(output || 'default');
       await this.context.resume(); if (epoch !== this.epoch) return;
       this.player = this.context.createBufferSource(); this.player.buffer = this.buffer; this.gain = this.context.createGain(); this.gain.gain.value = this.value;
-      this.player.connect(this.gain).connect(this.context.destination); this.measure(this.gain); this.update('playing');
+      this.clarityGraph = new VoiceClarity(this.context, this.player, this.gain); this.clarityGraph.setEnabled(this.clarity); this.gain.connect(this.context.destination); this.measure(this.gain); this.update('playing');
       this.player.onended = () => { if (epoch === this.epoch) this.stopPlayback(); }; this.player.start();
     } catch (error) { if (epoch === this.epoch) { this.stopPlayback(); this.failed(error); } }
   }
-  stopPlayback() { if (this.player) { this.player.onended = null; try { this.player.stop(); } catch { /* Already ended. */ } this.player.disconnect(); this.player = undefined; } this.gain?.disconnect(); this.gain = undefined; this.stopMeter(); if (this.buffer) this.update('ready'); }
+  stopPlayback() { this.clarityGraph?.destroy(); this.clarityGraph = undefined; if (this.player) { this.player.onended = null; try { this.player.stop(); } catch { /* Already ended. */ } this.player.disconnect(); this.player = undefined; } this.gain?.disconnect(); this.gain = undefined; this.stopMeter(); if (this.buffer) this.update('ready'); }
   destroy() {
     this.epoch++; clearTimeout(this.deadline); this.stopPlayback();
     if (this.recorder) { this.recorder.onstop = null; this.recorder.ondataavailable = null; this.recorder.onerror = null; if (this.recorder.state !== 'inactive') this.recorder.stop(); this.recorder = undefined; }

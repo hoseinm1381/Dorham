@@ -1,3 +1,4 @@
+import { completeRecovery, chooseScreen } from './recovery-helper';
 import { test, expect, _electron as electron, type Page, type ElectronApplication } from '@playwright/test';
 import { mkdir, writeFile, mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
@@ -54,7 +55,7 @@ test('hosted SFU decodes audio and two screens, applies the traffic policy and s
     for (const [i, page] of [first, second].entries()) {
       await instrument(page); if (i === 1 && desktop) await page.reload(); else await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
       if (i === 1 && desktop) await expect(page.getByLabel('Server address', { exact: true })).toHaveValue(process.env.DORHAM_SFU_BASE_URL!);
-      await page.getByLabel('Display name', { exact: true }).fill(names[i]); await page.getByLabel('Username', { exact: true }).fill(names[i]); await page.getByLabel('Password', { exact: true }).fill(crypto.randomUUID()); await page.getByRole('button', { name: 'Create account', exact: true }).click();
+      await page.getByLabel('Display name', { exact: true }).fill(names[i]); await page.getByLabel('Username', { exact: true }).fill(names[i]); await page.getByLabel('Password', { exact: true }).fill(crypto.randomUUID()); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page);
       await expect(page.getByRole('heading', { name: `Hey, ${names[i]}.` })).toBeVisible();
     }
     const server = await api(first, '/servers', { name: 'Iran SFU pilot' }), invite = await api(first, `/servers/${server.id}/invites`, {});
@@ -65,7 +66,7 @@ test('hosted SFU decodes audio and two screens, applies the traffic policy and s
     await expect.poll(async () => (await media(first)).some(p => p.inbound.some((r: any) => r.kind === 'audio' && r.totalAudioEnergy > 0))).toBe(true);
     const speaker = second.locator('.voice-card').filter({ hasText: names[0] }); await expect(speaker).toHaveClass(/speaking/); await expect(speaker.locator('.avatar')).toHaveCSS('outline-color', 'rgb(131, 218, 186)');
     await first.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect(speaker).not.toHaveClass(/speaking/); await first.getByRole('button', { name: 'Unmute microphone', exact: true }).click(); await expect(speaker).toHaveClass(/speaking/);
-    for (const page of [first, second]) await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+    for (const page of [first, second]) { await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page); }
     for (const page of [first, second]) {
       await expect.poll(async () => (await media(page)).some(p => p.inbound.some((r: any) => r.kind === 'video' && r.framesDecoded > 5)), { timeout: 30000 }).toBe(true);
       await expect(page.locator('main')).toHaveClass(/screen-focused/); await expect(page.locator('.screen-status')).toHaveCount(0);

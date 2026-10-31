@@ -1,8 +1,8 @@
 import { expect, it, vi } from 'vitest';
 import { MicrophoneGain, clampMicrophoneGain } from '../packages/media/src/microphone-gain';
 
-it('limits microphone gain to 50–250% and rejects nonfinite input', () => {
-  expect([-5, 0.5, 1, 2.5, 10, NaN, Infinity].map(clampMicrophoneGain)).toEqual([0.5, 0.5, 1, 2.5, 2.5, 1, 1]);
+it('limits microphone gain to 50% through +30 dB and rejects nonfinite input', () => {
+  expect([-5, 0.5, 1, 2.5, 10, NaN, Infinity].map(clampMicrophoneGain)).toEqual([0.5, 0.5, 1, 2.5, 10, 1, 1]);
 });
 it('gates outgoing audio while muted, rebuilds on capture restart and releases only graph-owned tracks', async () => {
   vi.stubGlobal('MediaStream', class {});

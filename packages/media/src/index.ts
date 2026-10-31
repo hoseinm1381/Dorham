@@ -9,7 +9,7 @@ export type { AudioProcessing, AudioProcessingState };
 export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream; attach?: (element: HTMLVideoElement) => () => void };
 export type MediaEvents = { room: VoiceRoom | null; localScreen: RemoteScreen | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; notice: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };
 export type ScreenPolicy = { maxBitrate: number; maxFrameRate: number };
-export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; microphoneGain?: number; screenPolicy?: ScreenPolicy; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
+export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; microphoneGain?: number; voiceClarity?: boolean; screenPolicy?: ScreenPolicy; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
 export type MediaCapabilities = { audio: boolean; screenCapture: boolean; nativeVideo: boolean; amplification: boolean; microphoneGain?: boolean; sharedAudio?: boolean; outputSelection?: boolean };
 export interface MediaTransport {
   room: VoiceRoom | null;
@@ -18,6 +18,7 @@ export interface MediaTransport {
   setMuted(value: boolean): Promise<void>; setDeafened(value: boolean): Promise<void>;
   setVolume(userId: string, value: number): void; setDevice(deviceId: string): Promise<void>;
   setMicrophoneGain?(value: number): Promise<void>;
+  setVoiceClarity?(enabled: boolean): Promise<void>;
   getAudioProcessing?(): AudioProcessingState; setAudioProcessing?(settings: AudioProcessing): Promise<void>;
   startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean; bandwidth?: number }): Promise<void>; setShareQuality(quality: ScreenQuality, bandwidth?:number): Promise<void>; stopShare(): Promise<void>;
   setOutputDevice?(deviceId: string): Promise<void>; setStreamVolume?(leaseId: string, value: number): void;

@@ -107,14 +107,14 @@ export class Service {
     return this.db.transaction(async connection => {
       const tx = readSnapshot(connection);
       const me = await tx.one('SELECT * FROM users WHERE id=?', [userId]);
-      const servers = (await tx.all('SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at', [userId, me!.instance_admin])).map(s => ({ id: s.id, name: s.name, ownerId: s.owner_id, role: me!.instance_admin ? 'owner' : s.role, allowGuests: Boolean(s.allow_guests), allowMemberInvites: Boolean(s.allow_member_invites) }));
+      const servers = (await tx.all('SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at', [userId, me!.instance_admin])).map(s => ({ id: s.id, name: s.name, ownerId: s.owner_id, icon: s.icon, role: me!.instance_admin ? 'owner' : s.role, allowGuests: Boolean(s.allow_guests), allowMemberInvites: Boolean(s.allow_member_invites) }));
       for (const server of servers) Object.assign(server, { permissions: await this.memberPermissions(tx, server.role as Role, userId, server.id) });
       const allChannels = await tx.all('SELECT c.* FROM channels c LEFT JOIN members m ON c.server_id=m.server_id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY c.created_at', [userId, me!.instance_admin]);
       const channels = [];
       for (const ch of allChannels) {
         try { const access = await this.channel(tx, userId, ch.id); channels.push({ id: ch.id, serverId: ch.server_id, name: ch.name, kind: ch.kind, conversationId: ch.conversation_id, permissions: access.permissions, locked: Boolean(ch.locked), userLimit: Math.min(ch.user_limit, this.c.maxVoice), tagMode: ch.tag_mode, requiredTags: (await tx.all('SELECT tag_id FROM channel_tags WHERE channel_id=?', [ch.id])).map(t => t.tag_id) }); } catch { /* Hidden channel */ }
       }
-      const dms = await tx.all('SELECT d.conversation_id,u.id,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin FROM dm_members d JOIN dm_members other ON other.conversation_id=d.conversation_id AND other.user_id<>d.user_id JOIN users u ON u.id=other.user_id WHERE d.user_id=? AND d.hidden=0', [userId]);
+      const dms = await tx.all('SELECT d.conversation_id,u.id,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,(SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id=d.conversation_id) AS last_message_at FROM dm_members d JOIN dm_members other ON other.conversation_id=d.conversation_id AND other.user_id<>d.user_id JOIN users u ON u.id=other.user_id WHERE d.user_id=? AND d.hidden=0 ORDER BY last_message_at DESC,d.conversation_id', [userId]);
       const blockedUsers = (await tx.all('SELECT u.* FROM users u JOIN user_blocks b ON b.blocked_id=u.id WHERE b.user_id=?', [userId])).map(publicUser);
       const blockedPeers = new Set((await tx.all('SELECT user_id,blocked_id FROM user_blocks WHERE user_id=? OR blocked_id=?', [userId, userId])).map(b => b.user_id === userId ? b.blocked_id : b.user_id));
       const unread: Record<string, { sequence: number; readSequence: number }> = {};
@@ -123,7 +123,7 @@ export class Service {
         const read = await tx.one('SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?', [conversationId, userId]);
         unread[conversationId] = { sequence: Number(cv?.sequence || 0), readSequence: Number(read?.sequence || 0) };
       }
-      return { me: publicUser(me!), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map(d => ({ id: d.conversation_id, user: publicUser(d), blocked: blockedPeers.has(d.id), blockedByMe: blockedUsers.some(u => u.id === d.id) })), blockedUsers, users: (await tx.all('SELECT * FROM users ORDER BY username LIMIT 250')).map(publicUser), unread, mediaTransport: this.c.mediaTransport, screenPolicy: { maxBitrate: this.c.screenMaxBitrate, maxFrameRate: this.c.screenMaxFrameRate }, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
+      return { me: publicUser(me!), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map(d => ({ id: d.conversation_id, lastMessageAt: Number(d.last_message_at || 0), user: publicUser(d), blocked: blockedPeers.has(d.id), blockedByMe: blockedUsers.some(u => u.id === d.id) })), blockedUsers, users: (await tx.all('SELECT * FROM users ORDER BY username LIMIT 250')).map(publicUser), unread, mediaTransport: this.c.mediaTransport, screenPolicy: { maxBitrate: this.c.screenMaxBitrate, maxFrameRate: this.c.screenMaxFrameRate }, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
     });
   }
   async createServer(userId: string, requestId: string, name: string) {
@@ -195,18 +195,19 @@ export class Service {
       return { success: true };
     }); await this.notify('state:changed', {}); await this.notify('voice:changed', {}); return result;
   }
-  async invite(userId: string, requestId: string, serverId: string, value: string, expiresHours: number, uses: number) {
-    return this.mutate(userId, requestId, 'invite.create', { serverId, expiresHours, uses }, async tx => {
+  async invite(userId: string, requestId: string, serverId: string, value: string, expiresHours: number, uses: number, channelId?: string) {
+    return this.mutate(userId, requestId, 'invite.create', { serverId, expiresHours, uses, channelId }, async tx => {
       await this.member(tx, userId, serverId, 'createInvites');
       if ((await tx.one('SELECT COUNT(*) AS count FROM invites WHERE server_id=? AND expires_at>? AND remaining>0', [serverId, Date.now()]))!.count >= 50) fail(409, 'LIMIT', 'Revoke an active invitation before creating another.');
-      await tx.run('INSERT INTO invites(hash,server_id,expires_at,remaining,created_by,code) VALUES(?,?,?,?,?,?)', [hash(value), serverId, Date.now() + expiresHours * 3600000, uses, userId, value]);
+      if (channelId) { const channel = await this.channel(tx, userId, channelId); if (channel.server_id !== serverId) fail(400, 'INVALID_CHANNEL', 'Choose a channel in this server.'); }
+      await tx.run('INSERT INTO invites(hash,server_id,expires_at,remaining,created_by,code,channel_id) VALUES(?,?,?,?,?,?,?)', [hash(value), serverId, Date.now() + expiresHours * 3600000, uses, userId, value, channelId || null]);
       return { code: value, url: `${this.c.publicUrl}/?invite=${value}` };
     });
   }
   async invitations(userId: string, serverId: string) {
     return this.db.transaction(async tx => {
       const member = await this.member(tx, userId, serverId, 'createInvites'), manageAll = await this.authority(tx, member) !== 'member';
-      return { invites: (await tx.all('SELECT code,expires_at,remaining FROM invites WHERE server_id=? AND expires_at>? AND remaining>0 AND code IS NOT NULL' + (manageAll ? '' : ' AND created_by=?') + ' ORDER BY expires_at DESC', [serverId, Date.now(), ...(manageAll ? [] : [userId])])).map(r => ({ code: r.code, url: `${this.c.publicUrl}/?invite=${r.code}`, expiresAt: Number(r.expires_at), remaining: r.remaining })) };
+      return { invites: (await tx.all('SELECT code,expires_at,remaining,channel_id FROM invites WHERE server_id=? AND expires_at>? AND remaining>0 AND code IS NOT NULL' + (manageAll ? '' : ' AND created_by=?') + ' ORDER BY expires_at DESC', [serverId, Date.now(), ...(manageAll ? [] : [userId])])).map(r => ({ code: r.code, url: `${this.c.publicUrl}/?invite=${r.code}`, expiresAt: Number(r.expires_at), remaining: r.remaining, channelId: r.channel_id })) };
     });
   }
   async revokeInvitation(userId: string, rid: string, serverId: string, code: string) {
@@ -255,10 +256,10 @@ export class Service {
       if (!inv || inv.expires_at < Date.now() || inv.remaining < 1) fail(404, 'INVITE_EXPIRED', 'Invite is invalid, expired, or exhausted.');
       const account = await tx.one('SELECT guest FROM users WHERE id=?', [userId]);
       if (account!.guest && !(await tx.one('SELECT allow_guests FROM servers WHERE id=?', [inv!.server_id]))?.allow_guests) fail(403, 'GUESTS_DISABLED', 'This server does not allow guests.');
-      if (await tx.one('SELECT role FROM members WHERE user_id=? AND server_id=?', [userId, inv!.server_id])) return { id: inv!.server_id };
+      if (await tx.one('SELECT role FROM members WHERE user_id=? AND server_id=?', [userId, inv!.server_id])) return { id: inv!.server_id, channelId: inv!.channel_id };
       if ((await tx.one('SELECT COUNT(*) AS count FROM members WHERE user_id=?', [userId]))!.count >= 20) fail(409, 'LIMIT', 'Server membership limit reached.');
       await tx.run('INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,?,?)', [inv!.server_id, userId, 'member', Date.now()]);
-      await tx.run('UPDATE invites SET remaining=remaining-1 WHERE hash=?', [hash(code)]); return { id: inv!.server_id };
+      await tx.run('UPDATE invites SET remaining=remaining-1 WHERE hash=?', [hash(code)]); return { id: inv!.server_id, channelId: inv!.channel_id };
     }); await this.notify('state:changed', {}); return result;
   }
   async members(userId: string, serverId: string) {

@@ -40,7 +40,7 @@ export class LiveKitTransport implements MediaTransport {
   private onConnect = () => { if (this.channelId && !this.joining) { const channel = this.channelId; void this.leave().then(() => this.join(channel)).catch(e => this.options.emit('error', e.message)); } };
   constructor(private options: MediaOptions) {
     this.audioProcessing = { ...defaultAudioProcessing, ...options.audioProcessing };
-    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); this.inputGain.setGain(this.gainValue);
+    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false);
     options.socket.on('voice:move', this.onMoved); options.socket.on('voice:room', this.onRoom); options.socket.on('voice:removed', this.onRemoved); options.socket.on('connect', this.onConnect);
     this.media.on(RoomEvent.TrackPublished, () => this.updateSubscriptions());
     this.media.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
@@ -79,17 +79,18 @@ export class LiveKitTransport implements MediaTransport {
     const generation = this.generation;
     const [track] = await this.media.localParticipant.createTracks({ audio: { ...this.captureProcessing }, video: false }) as LocalAudioTrack[];
     if (generation !== this.generation || !this.channelId) { track.stop(); throw new Error('Voice connection was cancelled.'); }
-    const gain = new MicrophoneGain(this.gainValue); gain.setEnabled(false); this.inputGain = gain;
+    const gain = new MicrophoneGain(this.gainValue); gain.setClarity(this.options.voiceClarity !== false); gain.setEnabled(false); this.inputGain = gain;
     try {
       await track.mute(); await track.setProcessor(gain);
       if (generation !== this.generation || !this.channelId) throw new Error('Voice connection was cancelled.');
       await this.media.localParticipant.publishTrack(track, { source: Track.Source.Microphone });
     } catch (error) { track.stop(); await gain.destroy(); throw error; }
   }
+  async setVoiceClarity(enabled: boolean) { this.options.voiceClarity = enabled; this.inputGain.setClarity(enabled); await this.inputGain.resume(); }
   async setMicrophoneGain(value: number) {
-    this.gainValue = clampMicrophoneGain(value); this.inputGain.setGain(this.gainValue);
+    this.gainValue = clampMicrophoneGain(value); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false);
     if (this.channelId && this.media.state === 'connected') await this.applyMicrophone();
-    this.inputGain.setGain(this.gainValue);
+    this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false);
     await this.inputGain.resume();
   }
   private gainProcessorMissing() {
@@ -106,7 +107,7 @@ export class LiveKitTransport implements MediaTransport {
         if (!self?.serverMuted && !self?.serverDeafened && !this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack) await this.createMicrophone();
         const existing = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
         if (existing?.getProcessor && (!existing.getProcessor()?.processedTrack || existing.getProcessor() !== this.inputGain)) {
-          const gain = new MicrophoneGain(this.gainValue); gain.setEnabled(false); this.inputGain = gain; await existing.setProcessor(gain);
+          const gain = new MicrophoneGain(this.gainValue); gain.setClarity(this.options.voiceClarity !== false); gain.setEnabled(false); this.inputGain = gain; await existing.setProcessor(gain);
         }
         const enabled = this.microphoneEnabled();
         await this.media.localParticipant.setMicrophoneEnabled(enabled, { ...this.captureProcessing });

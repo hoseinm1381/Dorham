@@ -1,5 +1,7 @@
+import { VoiceClarity } from './voice-clarity';
 // This graph feeds the outgoing track only; it never monitors the mic locally.
-export function clampMicrophoneGain(value: number) { return Number.isFinite(value) ? Math.max(0.5, Math.min(2.5, value)) : 1; }
+export const maximumMicrophoneGain = 10 ** (30 / 20);
+export function clampMicrophoneGain(value: number) { return Number.isFinite(value) ? Math.max(0.5, Math.min(maximumMicrophoneGain, value)) : 1; }
 export class MicrophoneGain {
   readonly name = 'dorham-microphone-gain';
   processedTrack?: MediaStreamTrack;
@@ -7,6 +9,8 @@ export class MicrophoneGain {
   private node?: GainNode;
   private context?: AudioContext;
   private enabled = true;
+  private clarity = false; private clarityGraph?: VoiceClarity;
+  setClarity(enabled: boolean) { this.clarity = enabled; this.clarityGraph?.setEnabled(enabled); }
   private value: number;
   constructor(value = 1) { this.value = clampMicrophoneGain(value); }
   setGain(value: number) { this.value = clampMicrophoneGain(value); this.apply(); }
@@ -19,13 +23,14 @@ export class MicrophoneGain {
     this.source = audioContext.createMediaStreamSource(new MediaStream([track]));
     this.node = audioContext.createGain(); this.apply();
     const destination = audioContext.createMediaStreamDestination();
-    this.source.connect(this.node).connect(destination);
+    this.clarityGraph = new VoiceClarity(audioContext, this.source, this.node); this.clarityGraph.setEnabled(this.clarity);
+    this.node.connect(destination);
     this.processedTrack = destination.stream.getAudioTracks()[0];
     await this.resume();
   }
   async restart(options: { track: MediaStreamTrack; audioContext: AudioContext }) { await this.init(options); }
   async destroy() {
-    this.source?.disconnect(); this.node?.disconnect(); this.processedTrack?.stop();
+    this.clarityGraph?.destroy(); this.clarityGraph = undefined; this.source?.disconnect(); this.node?.disconnect(); this.processedTrack?.stop();
     this.source = undefined; this.node = undefined; this.processedTrack = undefined; this.context = undefined;
   }
 }

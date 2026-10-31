@@ -1,3 +1,4 @@
+import { completeRecovery, chooseScreen } from './recovery-helper';
 import { test, expect, _electron as electron, type Page, type BrowserContext, type ElectronApplication } from '@playwright/test';
 import { mkdir, writeFile, mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
@@ -17,7 +18,7 @@ async function register(page: Page, name: string) {
   if (await page.getByLabel('Server address', { exact: true }).count()) await page.getByLabel('Server address', { exact: true }).fill(process.env.DORHAM_RELAY_BASE_URL!);
   await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name);
   await page.getByLabel('Password', { exact: true }).fill(crypto.randomUUID());
-  await page.getByRole('button', { name: 'Create account', exact: true }).click();
+  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page);
   await expect(page.getByRole('heading', { name: `Hey, ${name}.` })).toBeVisible();
   await expect(page.locator('.connection-light.connected')).toBeVisible();
 }
@@ -99,7 +100,7 @@ test('external TURN carries decoded audio and two screen streams with direct ICE
     for (const p of [page, other]) expect((await measurements(p)).flatMap(peer => peer.microphoneProcessing)[0]).toMatchObject({ echoCancellation: true, noiseSuppression: true });
     await other.screenshot({ path: `artifacts/evidence/${evidenceName}-audio-controls.png` });
     await other.getByRole('button', { name: 'Close dialog', exact: true }).click();
-    for (const p of [page, other]) await p.getByRole('button', { name: 'Share screen', exact: true }).click();
+    for (const p of [page, other]) { await p.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(p); }
     for (const p of [page, other]) {
       await expect.poll(async () => (await measurements(p)).some(peer => peer.media.some(r => r.kind === 'video' && r.framesDecoded > 5)), { timeout: 45000 }).toBe(true);
       await expect(p.locator('.screen video')).toBeVisible();

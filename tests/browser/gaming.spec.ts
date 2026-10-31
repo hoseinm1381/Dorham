@@ -1,8 +1,9 @@
+import { completeRecovery, chooseScreen } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import fa from '../../apps/web/src/locales/fa-IR.json' with { type: 'json' };
 test.use({ trace: 'off', video: 'off' });
-async function register(page: Page, name: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('Gaming-fixture-2026'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.locator('.app')).toBeVisible(); }
+async function register(page: Page, name: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('Gaming-fixture-2026'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.locator('.app')).toBeVisible(); }
 async function api(page: Page, route: string, body?: any, method = body ? 'POST' : 'GET') { return page.evaluate(async ({ route, body, method }) => { const me = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch('/api/v1' + route, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(`API ${r.status}: ${await r.text()}`); return r.json(); }, { route, body, method }); }
 
 test('saved permission denials survive reopening and drafts survive navigation and reload', async ({ page }) => {
@@ -64,7 +65,7 @@ test('watch is explicit, decoded video fills the viewer, chat drawer and navigat
     await register(first, `GamingA${Date.now().toString().slice(-7)}`); await register(second, `GamingB${Date.now().toString().slice(-7)}`);
     const server = await api(first, '/servers', { name: 'Stream gaming' }), invite = await api(first, `/servers/${server.id}/invites`, {}); await api(second, '/invites/join', { code: invite.code });
     for (const page of [first, second]) { await page.getByRole('button', { name: 'Open Stream gaming', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
-    await expect(first.locator('.voice-mini-members button')).toHaveCount(2); await first.getByRole('button', { name: 'Share screen', exact: true }).click();
+    await expect(first.locator('.voice-mini-members button')).toHaveCount(2); await first.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(first);
     const watch = second.getByRole('button', { name: 'Watch stream', exact: true }); await expect(watch).toBeVisible(); expect((await watch.boundingBox())!.height).toBeGreaterThanOrEqual(34); await expect(second.locator('.screen video')).toHaveCount(0);
     await watch.click(); await expect.poll(() => second.locator('.screen video').evaluate((v: HTMLVideoElement) => v.videoWidth)).toBeGreaterThan(0);
     const stage = await second.locator('.gaming-voice').boundingBox(); expect(stage!.height).toBeGreaterThan(500);

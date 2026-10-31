@@ -3,19 +3,20 @@ import type { MediaTransport } from '@dorham/media';
 import type { CheckState, MicrophoneCheck } from './microphone-check';
 import { readAudioProcessingPreferences } from './AudioProcessingControls';
 import { microphoneGainChanged, readMicrophoneGain } from './microphone-preferences';
+import { readVoiceClarity, voiceClarityChanged } from './voice-clarity-preferences';
 import { t } from './i18n';
 export function MicrophoneVoiceTest({ input, output, transport, error }: { input: string; output: string; transport: MediaTransport | null; error: (e: unknown) => void }) {
   const check = useRef<MicrophoneCheck | null>(null), generation = useRef(0);
   const [state, setState] = useState<CheckState>('idle'), [level, setLevel] = useState(0), [clipped, setClipped] = useState(false);
   const alive = useRef(true);
-  useEffect(() => { alive.current = true; const changed = (e: Event) => check.current?.setGain((e as CustomEvent<number>).detail); window.addEventListener(microphoneGainChanged, changed); return () => { alive.current = false; generation.current++; check.current?.destroy(); window.removeEventListener(microphoneGainChanged, changed); }; }, []);
+  useEffect(() => { alive.current = true; const changed = (e: Event) => check.current?.setGain((e as CustomEvent<number>).detail); const clarity = (e: Event) => check.current?.setClarity((e as CustomEvent<boolean>).detail); window.addEventListener(voiceClarityChanged, clarity); window.addEventListener(microphoneGainChanged, changed); return () => { alive.current = false; generation.current++; check.current?.destroy(); window.removeEventListener(microphoneGainChanged, changed); window.removeEventListener(voiceClarityChanged, clarity); }; }, []);
   useEffect(() => { generation.current++; check.current?.destroy(); }, [input, output]);
   async function record() {
     const epoch = ++generation.current; setState('requesting');
     try {
       const { MicrophoneCheck } = await import('./microphone-check'); if (!alive.current || epoch !== generation.current) return;
       check.current?.destroy(); check.current = new MicrophoneCheck(s => { if (alive.current) setState(s); }, (v, c) => { if (alive.current) { setLevel(v); setClipped(c); } }, error);
-      check.current.setGain(readMicrophoneGain()); await check.current.record(input, transport?.getAudioProcessing?.().requested || readAudioProcessingPreferences());
+      check.current.setClarity(readVoiceClarity()); check.current.setGain(readMicrophoneGain()); await check.current.record(input, transport?.getAudioProcessing?.().requested || readAudioProcessingPreferences());
     } catch (e) { if (alive.current) { setState('idle'); error(e); } }
   }
   const busy = state === 'requesting' || state === 'recording';

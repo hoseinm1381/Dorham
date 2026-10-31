@@ -1,3 +1,4 @@
+import { completeRecovery } from './recovery-helper';
 import { test, expect, type Page, type Browser } from '@playwright/test';
 import { io, type Socket } from 'socket.io-client';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -22,7 +23,7 @@ test('administrator without explicit membership joins Poker and hosts Chess with
     await writeFile('artifacts/evidence/v072-game-admin-browser.json',JSON.stringify({administratorJoinedWithoutInvite:true,pokerWatchPlayBetting:true,administratorHostedChess:true,twoWayMoves:true,server:server.name},null,2));
   }finally{await Promise.allSettled(contexts.map(c=>c.close()));}
 });
-async function register(p:Page,name:string){await p.goto('/');await p.getByRole('button',{name:'Create an account',exact:true}).click();await p.getByLabel('Display name',{exact:true}).fill(name);await p.getByLabel('Username',{exact:true}).fill(name);await p.getByLabel('Password',{exact:true}).fill('correct-horse-123');await p.getByRole('button',{name:'Create account',exact:true}).click();await expect(p.locator('.app')).toBeVisible();}
+async function register(p:Page,name:string){await p.goto('/');await p.getByRole('button',{name:'Create an account',exact:true}).click();await p.getByLabel('Display name',{exact:true}).fill(name);await p.getByLabel('Username',{exact:true}).fill(name);await p.getByLabel('Password',{exact:true}).fill('correct-horse-123');await p.getByRole('button',{name:'Create account',exact:true}).click(); await completeRecovery(p);await expect(p.locator('.app')).toBeVisible();}
 async function api(p:Page,route:string,body?:any,method=body?'POST':'GET'){return p.evaluate(async({route,body,method})=>{const me=await(await fetch('/api/v1/auth/me')).json();const r=await fetch('/api/v1'+route,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf},body:body?JSON.stringify({requestId:crypto.randomUUID(),...body}):undefined});if(!r.ok)throw Error(await r.text());return r.json();},{route,body,method});}
 async function fixture(browser:Browser,baseURL:string,kind:GameKind,extra=0){
   const contexts=await Promise.all([browser.newContext({permissions:['microphone']}),browser.newContext({permissions:['microphone']})]),[a,b]=await Promise.all(contexts.map(c=>c.newPage())),suffix=Date.now().toString().slice(-7),host='ArcadeA'+suffix,nodes:{id:string;token:string;socket:Socket}[]=[],errors:string[]=[];

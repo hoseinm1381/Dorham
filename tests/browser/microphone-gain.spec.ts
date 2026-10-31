@@ -1,3 +1,4 @@
+import { completeRecovery } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 
@@ -9,8 +10,8 @@ async function api(page: Page, route: string, body?: object) {
     if (!response.ok) throw new Error(`API ${response.status}`); return response.json();
   }, { route, body });
 }
-async function instrument(page: Page) {
-  await page.addInitScript(({ tlsOnly }) => {
+async function instrument(page: Page, amplitude = 0.04) {
+  await page.addInitScript(({ tlsOnly, amplitude }) => {
     localStorage.setItem('dorham-sounds', JSON.stringify({ voice: false, messages: false }));
     const Peer = RTCPeerConnection; (window as any).__volumePeers = [];
     (window as any).RTCPeerConnection = new Proxy(Peer, { construct(Target, args) {
@@ -29,12 +30,31 @@ async function instrument(page: Page) {
     };
     navigator.mediaDevices.getUserMedia = async () => {
       const context = new AudioContext(), oscillator = context.createOscillator(), gain = context.createGain(), output = context.createMediaStreamDestination();
-      oscillator.frequency.value = 440; gain.gain.value = 0.04; oscillator.connect(gain).connect(output); oscillator.start(); await context.resume();
+      oscillator.frequency.value = 440; gain.gain.value = amplitude; oscillator.connect(gain).connect(output); oscillator.start(); await context.resume();
       output.stream.getAudioTracks()[0].addEventListener('ended', () => { oscillator.stop(); void context.close(); });
       return output.stream;
     };
-  }, { tlsOnly: process.env.DORHAM_AUDIO_TLS_ONLY === '1' });
+  }, { tlsOnly: process.env.DORHAM_AUDIO_TLS_ONLY === '1', amplitude });
 }
+
+test('opt-in +30 dB boost reaches a separate listener, stays silent while muted and returns to the normal range', async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ['microphone'] }), b = await browser.newContext({ permissions: ['microphone'] }), sender = await a.newPage(), receiver = await b.newPage();
+  try {
+    for (const page of [sender, receiver]) await instrument(page, 0.002);
+    const run = Date.now().toString().slice(-8); await register(sender, `BoostA${run}`); await register(receiver, `BoostB${run}`);
+    const server = await api(sender, '/servers', { name: 'Boost lab' }), invite = await api(sender, `/servers/${server.id}/invites`, {}); await api(receiver, '/invites/join', { code: invite.code });
+    for (const page of [sender, receiver]) { await page.getByRole('button', { name: 'Open Boost lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
+    await receiver.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect.poll(() => level(receiver)).toBeGreaterThan(0.0005); await receiver.waitForTimeout(1500); const baseline = await level(receiver);
+    await settings(sender); const boost = sender.getByLabel('Allow microphone boost up to +30 dB', { exact: true }), gain = sender.getByRole('slider', { name: 'My microphone gain', exact: true });
+    await boost.check(); await gain.fill('30'); let ratio = 0;
+    await expect.poll(async () => ratio = (await level(receiver)) / baseline).toBeGreaterThan(28); expect(ratio).toBeLessThan(35);
+    await sender.getByRole('button', { name: 'Close dialog', exact: true }).click(); await sender.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
+    await settings(sender); await boost.uncheck(); await expect(gain).toHaveValue('250'); await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
+    await sender.getByRole('button', { name: 'Close dialog', exact: true }).click(); await sender.getByRole('button', { name: 'Unmute microphone', exact: true }).click();
+    await expect.poll(async () => (await level(receiver)) / baseline).toBeGreaterThan(2.2); expect((await level(receiver)) / baseline).toBeLessThan(2.8);
+    await mkdir('artifacts/evidence', { recursive: true }); await writeFile(`artifacts/evidence/v075-boost-${process.env.MEDIA_TRANSPORT || 'mesh'}.json`, JSON.stringify({ baseline, ratio, muteSilence: true, normalRangeRestored: true }, null, 2));
+  } finally { await a.close(); await b.close(); }
+});
 async function level(page: Page) {
   return page.evaluate(async () => {
     let total = 0;
@@ -52,7 +72,7 @@ async function register(page: Page, name: string) {
   await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name);
   await page.getByLabel('Password', { exact: true }).fill('Synthetic-volume-fixture');
-  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await expect(page.locator('.app')).toBeVisible();
+  await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.locator('.app')).toBeVisible();
 }
 
 async function settings(page: Page) {
