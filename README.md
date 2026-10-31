@@ -1,4 +1,6 @@
-**Current release: 0.7.5** — Recent DM conversations, invitation destinations, recovery onboarding, server icons, optional voice clarity and +30 dB boost, and a simpler screen-sharing setup popup. See [behavior and verification](docs/RELEASE-0.7.5.md).
+**Current release: 0.7.6** — [dorhamapp.ir](https://dorhamapp.ir/), signed-in password reset, existing-conversation badges, private voice-test isolation and optional +45 dB boost with local noise reduction. See [behavior and verification](docs/RELEASE-0.7.6.md).
+
+**Previous release: 0.7.5** — Recent DM conversations, invitation destinations, recovery onboarding, server icons, optional voice clarity and +30 dB boost, and a simpler screen-sharing setup popup. See [behavior and verification](docs/RELEASE-0.7.5.md).
 
 **Previous release: 0.7.4** — Visible screen-sharing quality and bandwidth controls, from 300 to 1500 kbps, with live changes and remembered preferences. See [behavior and verification](docs/RELEASE-0.7.4.md).
 
@@ -26,7 +28,7 @@ Earlier audio-controls update: **0.4.3**. See [audio fixes](docs/AUDIO-FIX-0.4.3
 
 A small Discord-style application for a community of up to 100 accounts and 20 online users. React/PWA, Windows/Electron, Android/Capacitor, Fastify, Socket.IO, SQLite/Drizzle, and WebRTC. All branding and application artwork in this repository are original.
 
-The Iranian SFU pilot is running at **https://dorham.45-135-242-146.nip.io/**. Its Windows pilot installer defaults to this address; saved custom server addresses remain available. Public API/socket checks, decoded SFU audio/video in Chrome and installed Windows, and separately forced local TURN/TLS pass with synthetic sources. The older Botkeep instance and its production data remain separate. See [pilot operations, packages and limitations](docs/NINECRAFT.md) and [verification status](docs/STATUS.md). Physical calls, domestic-only outage behavior and Android device tests remain open.
+The Iranian SFU pilot is running at **https://dorhamapp.ir/**. The previous nip.io address remains available; see [domain operations](docs/DOMAIN.md). Its Windows pilot installer defaults to this address; saved custom server addresses remain available. Public API/socket checks, decoded SFU audio/video in Chrome and installed Windows, and separately forced local TURN/TLS pass with synthetic sources. The older Botkeep instance and its production data remain separate. See [pilot operations, packages and limitations](docs/NINECRAFT.md) and [verification status](docs/STATUS.md). Physical calls, domestic-only outage behavior and Android device tests remain open.
 
 The v0.2 expansion adds invited guests, recovery codes, device sessions, safe links, expiring file attachments, Persian/RTL, tags and voice moderation. The reset tool is offline and explicit; upgrades preserve accounts. See [upgrade verification](docs/UPGRADE-STATUS.md), [account operations](docs/ACCOUNT-RESET.md), [upload policy](docs/ATTACHMENTS.md) and [domestic infrastructure](docs/DOMESTIC.md).
 

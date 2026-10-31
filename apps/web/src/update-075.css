@@ -2,3 +2,5 @@
 @media(min-width:600px){.screen-presets{grid-template-columns:repeat(3,minmax(0,1fr))}.screen-presets button{padding:14px}.screen-presets span{line-height:1.6}.screen-share-setup{gap:13px}}
 
 .invite-voice-landing{padding:16px 24px;display:flex;align-items:center;gap:14px;background:#9e8aff18;border-bottom:1px solid #9e8aff30}.invite-voice-landing>span{flex:1;font-size:14px}
+
+.existing-conversation{margin-inline-start:auto;font-size:.72rem;color:var(--mint,#8adbc4);border:1px solid #8adbc433;border-radius:20px;padding:4px 8px;white-space:nowrap}.modal-people .member-row>span:nth-child(2){min-width:0}.signed-in-password-reset{margin:12px 0}.noise-threshold{margin-top:10px}

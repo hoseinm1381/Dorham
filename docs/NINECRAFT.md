@@ -1,8 +1,10 @@
-Current deployed release: **0.7.4**, schema 8. The screen-sharing ceiling is now `SCREEN_MAX_BITRATE=1500000`; selectable bandwidth is 300–1500 kbps and new preferences default to 450 kbps. Current frame-rate policy remains 30fps, with three standard slots and room-first fallback. These encoder ceilings include shared sound; network overhead is additional. See [release verification](RELEASE-0.7.4.md). The older checkpoints below describe their historical configuration.
+Current deployment: **0.7.6**, schema 9, at **https://dorhamapp.ir/**. Signaling and TURN/TLS use `voice.dorhamapp.ir` and `turn.dorhamapp.ir`. All old aliases remain available. The new trusted certificate covers apex/www/voice/turn and expires 29 January 2027; the existing renewal hook now refreshes both lineages. See [domain operations](DOMAIN.md) and [release verification](RELEASE-0.7.6.md).
+
+Historical deployment: **0.7.4**, schema 8. The screen-sharing ceiling is now `SCREEN_MAX_BITRATE=1500000`; selectable bandwidth is 300–1500 kbps and new preferences default to 450 kbps. Current frame-rate policy remains 30fps, with three standard slots and room-first fallback. These encoder ceilings include shared sound; network overhead is additional. See [release verification](RELEASE-0.7.4.md). The older checkpoints below describe their historical configuration.
 
 Earlier update: **0.4.4** — [compact upload allowance](COMPACT-UPLOAD-0.4.4.md).
 
-Current deployed application: **0.5.0**, schema 4, three standard share slots plus room-first fallback, a 30fps selectable ceiling and the combined 450 kbps target. The operator explicitly authorized rollout despite failed capacity tests. See [release verification and limitations](RELEASE-0.5.0.md).
+Historical deployment: **0.5.0**, schema 4, three standard share slots plus room-first fallback, a 30fps selectable ceiling and the combined 450 kbps target. The operator explicitly authorized rollout despite failed capacity tests. See [release verification and limitations](RELEASE-0.5.0.md).
 
 Current audio-controls update: **0.4.3**. See [AUDIO-FIX-0.4.3.md](AUDIO-FIX-0.4.3.md).
 
@@ -14,7 +16,7 @@ The current 0.4.1 voice CPU/hotkey update is deployed; see [optimization, verifi
 
 The operator authorized one month at **348,000 toman**, with reduced screen bitrate and traffic monitoring. The funded account purchased `dorham`: Ubuntu 24.04, 1 vCPU, 2 GB RAM, 20 GB enterprise HDD, 120 GB incoming traffic. The panel showed 30 days and 120 GB after provisioning. Outgoing traffic is free according to the provider; no extra traffic, renewal or automatic top-up was purchased.
 
-Pilot website: **https://dorham.45-135-242-146.nip.io/**. SFU signaling uses `voice.45-135-242-146.nip.io`; integrated TURN/TLS uses `turn.45-135-242-146.nip.io:443`. These temporary hostnames depend on external authoritative DNS. A domestic-only outage has not been tested; an Iranian host alone does not certify that condition. Replace the temporary names with operator-owned domestic DNS before making that availability claim. HTTPS certificates currently expire 27 January 2027 and have a renewal timer and HAProxy reload hook.
+Historical temporary pilot address (retained as an alias): **https://dorham.45-135-242-146.nip.io/**. SFU signaling uses `voice.45-135-242-146.nip.io`; integrated TURN/TLS uses `turn.45-135-242-146.nip.io:443`. These temporary hostnames depend on external authoritative DNS. A domestic-only outage has not been tested; an Iranian host alone does not certify that condition. Replace the temporary names with operator-owned domestic DNS before making that availability claim. HTTPS certificates currently expire 27 January 2027 and have a renewal timer and HAProxy reload hook.
 
 The v0.2 update is deployed with existing accounts retained; see [upgrade capability matrix and new operational gates](UPGRADE-STATUS.md). The private signaling proxy now enforces current admission before every `/rtc` connection, and the backend uses LiveKit's loopback control API. Reset tooling is available but has not been executed on live data.
 

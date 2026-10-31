@@ -8,6 +8,20 @@ import type { ScreenQuality } from './screen-quality';
 export class DeferredTransport implements MediaTransport {
   private inner: MediaTransport | null = null; private loading: Promise<MediaTransport> | null = null;
   private muted = false; private deafened = false; private generation = 0; private destroyed = false;
+  private audioTests = 0; private audioStateTask: Promise<void> = Promise.resolve();
+  private syncAudioState() {
+    const task = this.audioStateTask.catch(() => {}).then(async () => {
+      if (this.destroyed) return;
+      await this.inner?.setMuted(this.audioTests > 0 || this.muted);
+      await this.inner?.setDeafened(this.audioTests > 0 || this.deafened);
+    }); this.audioStateTask = task; return task;
+  }
+  async beginAudioTest() {
+    this.audioTests++; window.dispatchEvent(new CustomEvent('dorham-audio-test', { detail: true }));
+    let released = false;
+    const release = async () => { if (released) return; released = true; this.audioTests--; window.dispatchEvent(new CustomEvent('dorham-audio-test', { detail: this.audioTests > 0 })); await this.syncAudioState(); };
+    try { await this.syncAudioState(); return release; } catch (error) { await release().catch(() => {}); throw error; }
+  }
   constructor(private mode: 'mesh' | 'livekit' | 'native', private options: MediaOptions) {}
   get room() { return this.inner?.room || null; }
   getCapabilities() { return this.inner?.getCapabilities() || { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: this.mode === 'native', amplification: true, microphoneGain: this.mode !== 'native', sharedAudio: this.mode === 'livekit' && (!(globalThis as any).desktop || Boolean((globalThis as any).desktop.systemAudioSafe)), outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' }; }
@@ -18,7 +32,7 @@ export class DeferredTransport implements MediaTransport {
         const inner: MediaTransport = this.mode === 'livekit' ? new (await import('./livekit')).LiveKitTransport(this.options) : this.mode === 'native' ? new (await import('./native')).NativeTransport(this.options) : new (await import('./mesh')).MeshTransport(this.options);
         if (this.destroyed || epoch !== this.generation) { await inner.destroy(); throw new Error('Voice connection was cancelled.'); }
         this.inner = inner;
-        await inner.setMuted(this.muted); await inner.setDeafened(this.deafened); return inner;
+        await inner.setMuted(this.audioTests > 0 || this.muted); await inner.setDeafened(this.audioTests > 0 || this.deafened); return inner;
       })().finally(() => { this.loading = null; });
     }
     return this.loading;
@@ -27,8 +41,8 @@ export class DeferredTransport implements MediaTransport {
   async leave() { this.generation++; await this.inner?.leave(); }
   async destroy() { this.destroyed = true; this.generation++; await this.inner?.destroy(); this.inner = null; }
   async reconnect() { await this.inner?.reconnect(); }
-  async setMuted(value: boolean) { this.muted = value; await this.inner?.setMuted(value); }
-  async setDeafened(value: boolean) { this.deafened = value; await this.inner?.setDeafened(value); }
+  async setMuted(value: boolean) { this.muted = value; if (value) void this.inner?.setMuted(true).catch(() => {}); await this.syncAudioState(); }
+  async setDeafened(value: boolean) { this.deafened = value; if (value) void this.inner?.setDeafened(true).catch(() => {}); await this.syncAudioState(); }
   setVolume(user: string, value: number) { this.inner?.setVolume(user, value); }
   setStreamVolume(lease: string, value: number) { this.inner?.setStreamVolume?.(lease, value); }
   async setDevice(value: string) { await this.inner?.setDevice(value); }
@@ -36,6 +50,7 @@ export class DeferredTransport implements MediaTransport {
   getLocalAudioStream() { return this.inner?.getLocalAudioStream?.() || null; }
   getAudioProcessing() { return this.inner?.getAudioProcessing?.() || browserAudioProcessing(this.options.audioProcessing || { noiseSuppression: true, echoCancellation: true, autoGainControl: true }); }
   async setVoiceClarity(enabled: boolean) { this.options.voiceClarity = enabled; await this.inner?.setVoiceClarity?.(enabled); }
+  async setBoostNoise(value: { enabled: boolean; threshold: number }) { this.options.boostNoise = value; await this.inner?.setBoostNoise?.(value); }
   async setMicrophoneGain(value: number) { this.options.microphoneGain = value; await this.inner?.setMicrophoneGain?.(value); }
   async setAudioProcessing(value: AudioProcessing) { if (this.inner) await this.inner.setAudioProcessing?.(value); this.options.audioProcessing = { ...value }; }
   async startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean; bandwidth?: number }) { if (!this.inner?.room) throw new Error('Join a voice channel first.'); await this.inner.startShare(quality, options); }

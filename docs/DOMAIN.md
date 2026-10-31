@@ -1,0 +1,13 @@
+# dorhamapp.ir operations
+
+Primary application: **https://dorhamapp.ir/**. `www.dorhamapp.ir` also serves the application. Media signaling uses `wss://voice.dorhamapp.ir`, and TURN/TLS uses `turn.dorhamapp.ir` on 443. The former nip.io application, voice and TURN aliases remain routed for existing clients.
+
+The domain is delegated to ParsPack's `storm.parspack.net` and `seedling.parspack.net`. All four A records point directly to `45.135.242.146` with proxying disabled. The website, signaling, TLS and relay run on the same Iranian VPS. Runtime does not require a CDN proxy. Do not enable proxying for voice or TURN without a separately validated media architecture.
+
+The `dorham-domain` Certbot lineage covers all four new names; `dorham-pilot` remains separate for the original aliases. Existing HTTP ACME webroot routing and the certificate-renewal timer are retained. The private deploy hook `/etc/letsencrypt/renewal-hooks/deploy/dorham-haproxy` refreshes both root-only PEM bundles, validates HAProxy, then reloads it. Check timer health, certificate expiry, DNS and ACME reachability periodically. Keep private keys and service secrets out of the repository.
+
+The activation's private snapshot is `/var/lib/dorham-ops/backups/domain-activation-20261031T124455Z`. Staged before/candidate configurations and activation evidence remain in `/var/lib/dorham-ops/domain-dorhamapp-ir`; these contain private values and are not public artifacts. Later release backups include the activated configuration. To roll back routing, use the matching private configuration snapshot, validate Caddy/HAProxy, and coordinate LiveKit/API restarts while no active calls exist. Retain the latest user database and uploaded files; never restore stale user data just to undo a hostname change.
+
+Accounts, memberships, passwords and messages are unchanged. Browser cookies, drafts and local device preferences are origin-scoped: sign in once at the new domain and reselect preferences as needed. The app does not transfer credentials through query strings or silently copy another origin's session. Existing Windows users may keep their saved server address or select the new domain; new installations default to it.
+
+DNS resolution and trusted TLS are verified both from the VPS and the normal public connection. Private internal/media-administration routes remain blocked at the proxy; browser credentials still require CSRF and allowed-origin checks. Public media validation and exact release evidence are recorded in [0.7.6 verification](RELEASE-0.7.6.md) and its release metadata. Ordinary connectivity does not certify a national Internet outage or successful ACME renewal while international certificate services are unreachable.

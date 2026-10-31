@@ -8,6 +8,26 @@ import { hash } from '../apps/api/src/security';
 let h: Awaited<ReturnType<typeof harness>>;
 beforeEach(async () => { h = await harness(); }); afterEach(async () => { await h.close(); });
 
+it('resets a signed-in password without the old password, preserves recovery codes and revokes other sessions', async () => {
+  const user = await h.register('signedin_reset'), other = await h.register('unrelated_reset');
+  const login = (password: string) => h.app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { 'x-dorham-native': '1' }, payload: { username: user.user.username, password, requestId: randomUUID() } });
+  const second = (await login('correct-horse-123')).json(), sock = await h.connect({ token: second.accessToken });
+  const original = await h.db.all('SELECT * FROM recovery_codes WHERE user_id=?', [user.id]);
+  expect((await h.api(user, '/auth/password', { password: 'short' })).statusCode).toBe(400);
+  const payload = { password: 'new-signedin-password', requestId: randomUUID() };
+  expect((await h.api(user, '/auth/password', payload)).statusCode).toBe(200);
+  expect((await h.api(user, '/auth/password', payload)).statusCode).toBe(200);
+  expect((await login('correct-horse-123')).statusCode).toBe(401);
+  expect((await login(payload.password)).statusCode).toBe(200);
+  expect((await h.api(user, '/auth/me')).statusCode).toBe(200);
+  expect((await h.api({ token: second.accessToken }, '/auth/password', { password: 'stolen-session-attempt' })).statusCode).toBe(401);
+  expect(sock.connected).toBe(false); expect((await h.api(other, '/auth/me')).statusCode).toBe(200);
+  expect(await h.db.all('SELECT * FROM recovery_codes WHERE user_id=?', [user.id])).toEqual(original);
+  const audit = await h.db.all("SELECT * FROM audit_log WHERE actor_id=? AND action='password.change'", [user.id]);
+  expect(audit).toHaveLength(1); expect(JSON.stringify(audit)).not.toContain(payload.password);
+  const anonymous = await h.app.inject({ method: 'POST', url: '/api/v1/auth/password', payload }); expect(anonymous.statusCode).toBe(401);
+});
+
 it('issues hashed, single-use recovery codes on registration and remembers acknowledgement across devices', async () => {
   const user = await h.register('initial_recovery');
   expect(user.recoveryCodes).toHaveLength(8);

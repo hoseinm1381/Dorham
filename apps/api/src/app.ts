@@ -195,10 +195,15 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.get('/auth/me', async req => ({ user: publicUser(req.account), csrf: req.session.csrf }));
     api.post('/auth/logout', async (req, reply) => { z.object({ requestId }).parse(req.body); await db.run('DELETE FROM sessions WHERE id=?', [req.session.id]); for (const s of io.sockets.sockets.values()) if (s.data.sessionId === req.session.id) s.disconnect(true); reply.clearCookie('dorham_session', { path: '/' }); return { success: true }; });
     api.post('/auth/password', async req => {
-      const b = z.object({ currentPassword: z.string().max(128), password: passwordSchema, requestId }).parse(req.body);
-      if (req.account.guest || !await passwordVerify(req.account.password_hash, b.currentPassword)) fail(401, 'INVALID_CREDENTIALS', 'Current password is incorrect.');
+      const b = z.object({ password: passwordSchema, requestId }).parse(req.body);
+      if (req.account.guest) fail(403, 'GUEST_ACCOUNT', 'Register this guest account before setting a password.');
       const encoded = await passwordHash(b.password);
-      const result = await service.mutate(req.account.id, b.requestId, 'password.change', { fingerprint: hash(b.password) }, async tx => { await tx.run('UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?', [encoded, req.account.id]); await tx.run('DELETE FROM sessions WHERE user_id=? AND id<>?', [req.account.id, req.session.id]); return { success: true }; });
+      const result = await service.mutate(req.account.id, b.requestId, 'password.change', { fingerprint: hash(b.password) }, async tx => {
+        if (!await tx.one('SELECT id FROM sessions WHERE id=? AND user_id=? AND expires_at>=?', [req.session.id, req.account.id, Date.now()])) fail(401, 'UNAUTHORIZED', 'Sign in again to continue.');
+        await tx.run('UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?', [encoded, req.account.id]);
+        await tx.run('DELETE FROM sessions WHERE user_id=? AND id<>?', [req.account.id, req.session.id]);
+        await audit(tx, req.account.id, 'password.change', req.account.id); return { success: true };
+      });
       await disconnectInvalidSessions(); return result;
     });
     api.post('/admin/claim', async req => {

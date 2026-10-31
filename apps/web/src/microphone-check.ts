@@ -1,3 +1,4 @@
+import { BoostNoiseFilter } from '../../../packages/media/src/boost-noise-filter';
 import { VoiceClarity } from '../../../packages/media/src/voice-clarity';
 import type { AudioProcessing } from '../../../packages/media/src/audio-processing';
 export type CheckState = 'idle' | 'requesting' | 'recording' | 'ready' | 'playing';
@@ -16,10 +17,15 @@ export class MicrophoneCheck {
   private deadline?: ReturnType<typeof setTimeout>;
   private value = 1; private clarity = true; private clarityGraph?: VoiceClarity;
   setClarity(value: boolean) { this.clarity = value; this.clarityGraph?.setEnabled(value); }
+  private noiseEnabled = true; private noiseThreshold = -70; private noiseFilter?: BoostNoiseFilter; private noiseInput?: GainNode;
+  setNoiseFilter(enabled: boolean, threshold: number) { this.noiseEnabled = enabled; this.noiseThreshold = threshold; this.noiseFilter?.configure(enabled && this.value > 10, threshold); }
+  private releaseIsolation?: () => Promise<void>;
+  private release() { const release = this.releaseIsolation; this.releaseIsolation = undefined; void release?.().catch(this.failed); }
+  private async isolate(epoch: number) { const release = await this.isolation?.(); if (epoch !== this.epoch) { await release?.(); return false; } this.releaseIsolation = release; return true; }
   private state: CheckState = 'idle';
-  constructor(private changed: (state: CheckState) => void, private level: (rms: number, clipped: boolean) => void, private failed: (error: unknown) => void) {}
+  constructor(private changed: (state: CheckState) => void, private level: (rms: number, clipped: boolean) => void, private failed: (error: unknown) => void, private isolation?: () => Promise<() => Promise<void>>) {}
   private update(state: CheckState) { this.state = state; this.changed(state); }
-  setGain(value: number) { this.value = value; if (this.gain) this.gain.gain.value = value; }
+  setGain(value: number) { this.value = value; if (this.gain) this.gain.gain.value = value; this.noiseFilter?.configure(this.noiseEnabled && value > 10, this.noiseThreshold); }
   private stopMeter() { clearInterval(this.meter); this.source?.disconnect(); this.analyser?.disconnect(); this.source = undefined; this.analyser = undefined; this.level(0, false); }
   private measure(node: AudioNode) {
     this.stopMeter(); this.analyser = this.context!.createAnalyser(); this.analyser.fftSize = 1024; node.connect(this.analyser);
@@ -29,6 +35,7 @@ export class MicrophoneCheck {
   async record(input: string, processing: AudioProcessing) {
     this.destroy(); const epoch = this.epoch; this.update('requesting');
     try {
+      if (!await this.isolate(epoch)) return;
       this.context = new AudioContext(); await this.context.resume(); if (epoch !== this.epoch) return;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { ...processing, ...(input ? { deviceId: { exact: input } } : {}) } });
       if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
@@ -42,7 +49,7 @@ export class MicrophoneCheck {
         if (epoch !== this.epoch) return;
         clearTimeout(this.deadline); this.capture?.getTracks().forEach(t => t.stop()); this.capture = undefined; this.stopMeter(); this.recorder = undefined;
         const buffer = await this.context!.decodeAudioData(await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer());
-        if (epoch !== this.epoch) return; this.buffer = buffer; this.update('ready');
+        if (epoch !== this.epoch) return; this.buffer = buffer; this.release(); this.update('ready');
       })().catch(error => { if (epoch === this.epoch) { this.destroy(); this.failed(error); } }); };
       recorder.start(250); this.update('recording'); this.deadline = setTimeout(() => this.finish(), 5000);
     } catch (error) { if (epoch === this.epoch) { this.destroy(); this.failed(error); } }
@@ -51,14 +58,17 @@ export class MicrophoneCheck {
   async play(output: string) {
     if (!this.context || !this.buffer) return; this.stopPlayback(); const epoch = this.epoch;
     try {
+      if (!await this.isolate(epoch)) return;
       if (typeof (this.context as any).setSinkId === 'function') await (this.context as any).setSinkId(output || 'default');
       await this.context.resume(); if (epoch !== this.epoch) return;
       this.player = this.context.createBufferSource(); this.player.buffer = this.buffer; this.gain = this.context.createGain(); this.gain.gain.value = this.value;
-      this.clarityGraph = new VoiceClarity(this.context, this.player, this.gain); this.clarityGraph.setEnabled(this.clarity); this.gain.connect(this.context.destination); this.measure(this.gain); this.update('playing');
+      this.noiseInput = this.context.createGain();
+      this.clarityGraph = new VoiceClarity(this.context, this.player, this.noiseInput); this.clarityGraph.setEnabled(this.clarity);
+      this.noiseFilter = new BoostNoiseFilter(this.context, this.noiseInput, this.gain); this.noiseFilter.configure(this.noiseEnabled && this.value > 10, this.noiseThreshold); this.gain.connect(this.context.destination); this.measure(this.gain); this.update('playing');
       this.player.onended = () => { if (epoch === this.epoch) this.stopPlayback(); }; this.player.start();
     } catch (error) { if (epoch === this.epoch) { this.stopPlayback(); this.failed(error); } }
   }
-  stopPlayback() { this.clarityGraph?.destroy(); this.clarityGraph = undefined; if (this.player) { this.player.onended = null; try { this.player.stop(); } catch { /* Already ended. */ } this.player.disconnect(); this.player = undefined; } this.gain?.disconnect(); this.gain = undefined; this.stopMeter(); if (this.buffer) this.update('ready'); }
+  stopPlayback() { this.epoch++; this.release(); this.noiseFilter?.destroy(); this.noiseFilter = undefined; this.noiseInput?.disconnect(); this.noiseInput = undefined; this.clarityGraph?.destroy(); this.clarityGraph = undefined; if (this.player) { this.player.onended = null; try { this.player.stop(); } catch { /* Already ended. */ } this.player.disconnect(); this.player = undefined; } this.gain?.disconnect(); this.gain = undefined; this.stopMeter(); if (this.buffer) this.update('ready'); }
   destroy() {
     this.epoch++; clearTimeout(this.deadline); this.stopPlayback();
     if (this.recorder) { this.recorder.onstop = null; this.recorder.ondataavailable = null; this.recorder.onerror = null; if (this.recorder.state !== 'inactive') this.recorder.stop(); this.recorder = undefined; }

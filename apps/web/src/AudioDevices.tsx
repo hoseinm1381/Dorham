@@ -31,26 +31,30 @@ export function useAudioRouting(transport: RefObject<MediaTransport | null>, act
 export function AudioDeviceSettings({ account, transport, error }: { account: string; transport: MediaTransport | null; error: (e: unknown) => void }) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]), [choices, setChoices] = useState(() => readAudioChoices(account));
   const [testing, setTesting] = useState(false), [level, setLevel] = useState(0), [notice, setNotice] = useState('');
-  const cleanup = useRef<() => void>(() => {}), generation = useRef(0);
-  useEffect(() => { const refresh = () => { void navigator.mediaDevices?.enumerateDevices().then(setDevices).catch(error); }; refresh(); navigator.mediaDevices?.addEventListener('devicechange', refresh); return () => { generation.current++; cleanup.current(); navigator.mediaDevices?.removeEventListener('devicechange', refresh); }; }, []);
+  const cleanup = useRef<() => void>(() => {}), speakerCleanup = useRef<() => void>(() => {}), generation = useRef(0);
+  useEffect(() => { const refresh = () => { void navigator.mediaDevices?.enumerateDevices().then(setDevices).catch(error); }; refresh(); navigator.mediaDevices?.addEventListener('devicechange', refresh); return () => { generation.current++; cleanup.current(); speakerCleanup.current(); navigator.mediaDevices?.removeEventListener('devicechange', refresh); }; }, []);
   function choose(kind: 'input' | 'output', value: string) { const next = { ...readAudioChoices(account), [kind]: value }; setChoices(next); try { localStorage.setItem(storageKey(account), JSON.stringify(next)); } catch { /* memory UI still reflects choice */ } window.dispatchEvent(new Event('dorham-audio-devices')); }
   async function microphoneTest() {
     if (testing) { generation.current++; cleanup.current(); setTesting(false); setLevel(0); return; }
-    const epoch = ++generation.current; setTesting(true); let stream: MediaStream | null = null, owned = false, context: AudioContext | undefined;
+    const epoch = ++generation.current; setTesting(true); let stream: MediaStream | null = null, owned = false, context: AudioContext | undefined, release: (() => Promise<void>) | undefined;
     try {
-      stream = transport?.getLocalAudioStream?.() || null;
-      if (!stream) { stream = await navigator.mediaDevices.getUserMedia({ audio: { ...readAudioProcessingPreferences(), ...(choices.input ? { deviceId: { exact: choices.input } } : {}) } }); owned = true; }
-      if (generation.current !== epoch) { if (owned) stream.getTracks().forEach(track => track.stop()); return; }
-      context = new AudioContext(); await context.resume(); if (generation.current !== epoch) { if (owned) stream.getTracks().forEach(track => track.stop()); void context.close(); return; } const analyser = context.createAnalyser(); analyser.fftSize = 256;
+      release = await transport?.beginAudioTest?.();
+      if (generation.current !== epoch) { await release?.(); return; }
+      cleanup.current = () => { void release?.().catch(error); };
+      { stream = await navigator.mediaDevices.getUserMedia({ audio: { ...readAudioProcessingPreferences(), ...(choices.input ? { deviceId: { exact: choices.input } } : {}) } }); owned = true; }
+      if (generation.current !== epoch) { if (owned) stream.getTracks().forEach(track => track.stop()); await release?.(); return; }
+      context = new AudioContext(); await context.resume(); if (generation.current !== epoch) { if (owned) stream.getTracks().forEach(track => track.stop()); void context.close(); await release?.(); return; } const analyser = context.createAnalyser(); analyser.fftSize = 256;
       const source = context.createMediaStreamSource(stream); source.connect(analyser); const buffer = new Float32Array(256);
       const timer = setInterval(() => { if (document.hidden) return; analyser.getFloatTimeDomainData(buffer); const rms = Math.sqrt(buffer.reduce((sum, x) => sum + x * x, 0) / buffer.length); setLevel(Math.min(1, rms * 8)); }, 100);
-      cleanup.current = () => { clearInterval(timer); source.disconnect(); analyser.disconnect(); if (owned) stream?.getTracks().forEach(track => track.stop()); void context?.close(); };
-    } catch (e) { if (owned) stream?.getTracks().forEach(track => track.stop()); void context?.close(); setTesting(false); error(e); }
+      cleanup.current = () => { void release?.().catch(error); clearInterval(timer); source.disconnect(); analyser.disconnect(); if (owned) stream?.getTracks().forEach(track => track.stop()); void context?.close(); };
+    } catch (e) { await release?.().catch(error); if (owned) stream?.getTracks().forEach(track => track.stop()); void context?.close(); setTesting(false); error(e); }
   }
   async function speakerTest() {
-    const context = new AudioContext();
-    try { if (choices.output && typeof (context as any).setSinkId === 'function') await (context as any).setSinkId(choices.output); await context.resume(); const oscillator = context.createOscillator(), gain = context.createGain(); oscillator.frequency.value = 520; gain.gain.value = 0.04; oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + 0.3); oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); void context.close(); }; setNotice('Test sound played.'); }
-    catch (e) { void context.close(); error(e); }
+    speakerCleanup.current(); const context = new AudioContext(); let cancelled = false, release: (() => Promise<void>) | undefined;
+    const finish = () => { cancelled = true; void release?.().catch(error); if (context.state !== 'closed') void context.close(); };
+    speakerCleanup.current = finish;
+    try { release = await transport?.beginAudioTest?.(); if (cancelled) { await release?.(); return; } if (choices.output && typeof (context as any).setSinkId === 'function') await (context as any).setSinkId(choices.output); if (cancelled) return; await context.resume(); if (cancelled) return; const oscillator = context.createOscillator(), gain = context.createGain(); oscillator.frequency.value = 520; gain.gain.value = 0.04; oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + 0.3); oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); finish(); }; setNotice('Test sound played.'); }
+    catch (e) { finish(); error(e); }
   }
   const outputSupported = transport?.getCapabilities().outputSelection ?? (typeof (AudioContext.prototype as any).setSinkId === 'function');
   return <section className="audio-device-settings"><h3>{t('Audio devices')}</h3>

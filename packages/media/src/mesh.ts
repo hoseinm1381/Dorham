@@ -39,7 +39,7 @@ export class MeshTransport implements MediaTransport {
   private onDisconnect = () => { this.options.emit('status', 'Reconnecting voice…'); };
   constructor(protected options: MediaOptions) {
     this.audioProcessing = { ...defaultAudioProcessing, ...options.audioProcessing };
-    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false);
+    this.gainValue = clampMicrophoneGain(options.microphoneGain ?? 1); this.inputGain.setGain(this.gainValue); this.inputGain.setClarity(this.options.voiceClarity !== false); this.inputGain.setNoiseFilter(this.options.boostNoise?.enabled !== false, this.options.boostNoise?.threshold);
     const s = options.socket; s.on('voice:move', this.onMoved); s.on('voice:room', this.onRoom); s.on('voice:signal', this.onSignal); s.on('voice:removed', this.onRemoved); s.on('connect', this.onConnect); s.on('disconnect', this.onDisconnect);
   }
   protected error(e: any) { if (!this.destroyed) this.options.emit('error', e.message || String(e)); }
@@ -206,6 +206,7 @@ export class MeshTransport implements MediaTransport {
   async setDevice(deviceId: string) { await this.replaceMicrophone(deviceId, this.captureProcessing); }
   async setOutputDevice(deviceId: string) { if (!this.context || typeof (this.context as any).setSinkId !== 'function') throw new Error('Speaker selection is not supported in this browser.'); await (this.context as any).setSinkId(deviceId); }
   getLocalAudioStream() { return this.outgoing; }
+  async setBoostNoise(value: { enabled: boolean; threshold: number }) { this.options.boostNoise = value; this.inputGain.setNoiseFilter(value.enabled, value.threshold); await this.inputGain.resume(); }
   async setVoiceClarity(enabled: boolean) { this.options.voiceClarity = enabled; this.inputGain.setClarity(enabled); await this.inputGain.resume(); }
   async setMicrophoneGain(value: number) {
     this.gainValue = clampMicrophoneGain(value); this.inputGain.setGain(this.gainValue); await this.inputGain.resume();

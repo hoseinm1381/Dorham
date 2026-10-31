@@ -1,8 +1,9 @@
 import { expect, it, vi } from 'vitest';
 import { MicrophoneGain, clampMicrophoneGain } from '../packages/media/src/microphone-gain';
 
-it('limits microphone gain to 50% through +30 dB and rejects nonfinite input', () => {
+it('limits microphone gain to 50% through +45 dB and rejects nonfinite input', () => {
   expect([-5, 0.5, 1, 2.5, 10, NaN, Infinity].map(clampMicrophoneGain)).toEqual([0.5, 0.5, 1, 2.5, 10, 1, 1]);
+  expect(clampMicrophoneGain(1000)).toBeCloseTo(10 ** (45 / 20));
 });
 it('gates outgoing audio while muted, rebuilds on capture restart and releases only graph-owned tracks', async () => {
   vi.stubGlobal('MediaStream', class {});
@@ -18,7 +19,7 @@ it('gates outgoing audio while muted, rebuilds on capture restart and releases o
     gain.setEnabled(true); expect(nodes[0].gain.value).toBe(0.5);
     gain.setGain(2.5); expect(nodes[0].gain.value).toBe(2.5);
     await gain.restart({ track: sourceTrack as any, audioContext: context as any });
-    expect(outputs[0].stop).toHaveBeenCalledOnce(); expect(nodes[1].gain.value).toBe(2.5);
+    expect(outputs[0].stop).toHaveBeenCalledOnce(); expect(nodes[2].gain.value).toBe(2.5);
     await gain.destroy(); expect(outputs[1].stop).toHaveBeenCalledOnce(); expect(sourceTrack.stop).not.toHaveBeenCalled(); expect(gain.processedTrack).toBeUndefined();
   } finally { vi.unstubAllGlobals(); }
 });

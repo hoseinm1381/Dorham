@@ -54,6 +54,9 @@ The automated destructive-reset CLI supports SQLite. PostgreSQL migrations and a
 
 ## Recovery and sessions
 
+- In 0.7.6, a signed-in registered user may set a new password without knowing the old password, using Profile settings, Privacy → Account recovery or the one-time reminder. The authenticated API keeps the current session and invalidates other sessions; browser CSRF checks remain required. Guests must register first. Existing recovery codes remain valid unless explicitly replaced. A revoked or signed-out session cannot use this route. Signed-out recovery still requires an unused code or an administrator-issued temporary password.
+
+
 - Web cookies are HttpOnly/SameSite and secure under HTTPS, with CSRF checks. Web renewal extends the 30-day session and cookie. Native refresh credentials rotate through the existing protected Electron/Android bridges; reused refresh credentials revoke their session. Device lists expose metadata, never access/refresh tokens.
 - Users can revoke a device or all devices. Revoked sockets are disconnected, and clients clear their visible private state when session invalidation is confirmed. Password recovery revokes every session and voice membership.
 - Eight high-entropy, one-use recovery codes are issued after password confirmation, displayed once, and stored only as hashes. Reissuing invalidates the old set. Keep the downloaded file private and outside the repository.

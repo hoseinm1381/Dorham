@@ -45,14 +45,16 @@ test('opt-in +30 dB boost reaches a separate listener, stays silent while muted 
     const server = await api(sender, '/servers', { name: 'Boost lab' }), invite = await api(sender, `/servers/${server.id}/invites`, {}); await api(receiver, '/invites/join', { code: invite.code });
     for (const page of [sender, receiver]) { await page.getByRole('button', { name: 'Open Boost lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
     await receiver.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect.poll(() => level(receiver)).toBeGreaterThan(0.0005); await receiver.waitForTimeout(1500); const baseline = await level(receiver);
-    await settings(sender); const boost = sender.getByLabel('Allow microphone boost up to +30 dB', { exact: true }), gain = sender.getByRole('slider', { name: 'My microphone gain', exact: true });
+    await settings(sender); const boost = sender.getByLabel('Allow microphone boost up to +45 dB', { exact: true }), gain = sender.getByRole('slider', { name: 'My microphone gain', exact: true });
     await boost.check(); await gain.fill('30'); let ratio = 0;
     await expect.poll(async () => ratio = (await level(receiver)) / baseline).toBeGreaterThan(28); expect(ratio).toBeLessThan(35);
+    await gain.fill('45'); let highestRatio = 0;
+    await expect.poll(async () => highestRatio = (await level(receiver)) / baseline).toBeGreaterThan(160); expect(highestRatio).toBeLessThan(195);
     await sender.getByRole('button', { name: 'Close dialog', exact: true }).click(); await sender.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
     await settings(sender); await boost.uncheck(); await expect(gain).toHaveValue('250'); await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
     await sender.getByRole('button', { name: 'Close dialog', exact: true }).click(); await sender.getByRole('button', { name: 'Unmute microphone', exact: true }).click();
     await expect.poll(async () => (await level(receiver)) / baseline).toBeGreaterThan(2.2); expect((await level(receiver)) / baseline).toBeLessThan(2.8);
-    await mkdir('artifacts/evidence', { recursive: true }); await writeFile(`artifacts/evidence/v075-boost-${process.env.MEDIA_TRANSPORT || 'mesh'}.json`, JSON.stringify({ baseline, ratio, muteSilence: true, normalRangeRestored: true }, null, 2));
+    await mkdir('artifacts/evidence', { recursive: true }); await writeFile(`artifacts/evidence/v076-boost-${process.env.MEDIA_TRANSPORT || 'mesh'}.json`, JSON.stringify({ baseline, ratio, highestRatio, muteSilence: true, normalRangeRestored: true }, null, 2));
   } finally { await a.close(); await b.close(); }
 });
 async function level(page: Page) {
@@ -79,6 +81,33 @@ async function settings(page: Page) {
   await page.getByRole('button', { name: 'Account settings', exact: true }).click();
   await page.getByRole('tab', { name: 'Audio', exact: true }).click();
 }
+
+test('voice tests mute and deafen the live call, restore prior state and release isolation when closed', async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ['microphone'] }), b = await browser.newContext({ permissions: ['microphone'] });
+  const sender = await a.newPage(), receiver = await b.newPage();
+  try {
+    for (const page of [sender, receiver]) await instrument(page);
+    const run = Date.now().toString().slice(-8); await register(sender, `TestA${run}`); await register(receiver, `TestB${run}`);
+    const server = await api(sender, '/servers', { name: 'Private test lab' }), invite = await api(sender, `/servers/${server.id}/invites`, {}); await api(receiver, '/invites/join', { code: invite.code });
+    for (const page of [sender, receiver]) { await page.getByRole('button', { name: 'Open Private test lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
+    for (const page of [sender, receiver]) await expect.poll(() => level(page)).toBeGreaterThan(0.01);
+    await settings(sender); await sender.getByRole('button', { name: 'Record voice test', exact: true }).click();
+    await expect(sender.getByRole('button', { name: 'Stop recording', exact: true })).toBeVisible();
+    await expect(sender.getByRole('button', { name: 'Unmute microphone', exact: true })).toBeDisabled(); await expect(sender.getByRole('button', { name: 'Undeafen', exact: true })).toBeDisabled();
+    for (const page of [sender, receiver]) await expect.poll(() => level(page)).toBeLessThan(0.000001);
+    await sender.getByRole('button', { name: 'Stop recording', exact: true }).click(); await expect(sender.getByRole('button', { name: 'Play voice test', exact: true })).toBeVisible();
+    for (const page of [sender, receiver]) await expect.poll(() => level(page)).toBeGreaterThan(0.01);
+    await sender.getByRole('button', { name: 'Play voice test', exact: true }).click(); await expect(sender.getByRole('button', { name: 'Stop playback', exact: true })).toBeVisible();
+    await expect.poll(() => level(receiver)).toBeLessThan(0.000001); await sender.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    for (const page of [sender, receiver]) await expect.poll(() => level(page)).toBeGreaterThan(0.01);
+    // A previously muted/deafened user must stay that way after another test.
+    await sender.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await sender.getByRole('button', { name: 'Deafen', exact: true }).click();
+    await settings(sender); await sender.getByRole('button', { name: 'Test microphone', exact: true }).click(); await expect(sender.getByRole('meter', { name: 'Microphone level', exact: true })).toBeVisible();
+    await sender.getByRole('button', { name: 'Stop microphone test', exact: true }).click(); await expect(sender.getByRole('button', { name: 'Unmute microphone', exact: true })).toBeEnabled(); await expect(sender.getByRole('button', { name: 'Undeafen', exact: true })).toBeEnabled();
+    for (const page of [sender, receiver]) await expect.poll(() => level(page)).toBeLessThan(0.000001);
+    await writeFile(`artifacts/evidence/v076-selftest-isolation-${process.env.MEDIA_TRANSPORT || 'mesh'}.json`, JSON.stringify({ recordingPrivate: true, playbackPrivate: true, closeRestores: true, priorMuteDeafenPreserved: true }, null, 2));
+  } finally { await a.close(); await b.close(); }
+});
 test('own microphone gain changes transmitted audio at 50–250%, respects mute and survives capture restart, rejoin and reload', async ({ browser }) => {
   test.setTimeout(180000);
   const senderContext = await browser.newContext({ permissions: ['microphone'] }), receiverContext = await browser.newContext({ permissions: ['microphone'] });

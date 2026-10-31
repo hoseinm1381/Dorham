@@ -1146,5 +1146,17 @@
   "Clear text and everyday screen sharing.": "متن خوانا و اشتراک روزمره صفحه.",
   "Smoother motion with more bandwidth.": "حرکت روان‌تر با پهنای باند بیشتر.",
   "Invited to {name}": "به {name} دعوت شده‌اید",
-  "Join voice": "پیوستن به گفت‌وگوی صوتی"
+  "Join voice": "پیوستن به گفت‌وگوی صوتی",
+  "Already chatted": "قبلاً گفت‌وگو کرده‌اید",
+  "Allow microphone boost up to +45 dB": "اجازه تقویت میکروفون تا ۴۵+ دسی‌بل",
+  "Warning: +45 dB amplifies the signal about 178 times. It can make noise very loud and cause severe distortion. Start low, use the private voice test and ask your listener before increasing it.": "هشدار: ۴۵+ دسی‌بل سیگنال را حدود ۱۷۸ برابر تقویت می‌کند. ممکن است نویز بسیار بلند و صدا به‌شدت خراب شود. از مقدار کم شروع کنید، تست خصوصی صدا را انجام دهید و پیش از افزایش از شنونده بپرسید.",
+  "Extra noise reduction above +20 dB": "کاهش نویز بیشتر بالاتر از ۲۰+ دسی‌بل",
+  "Reduces background noise between speech, on your device. It cannot remove noise mixed with your voice. Lower the threshold if quiet words are cut off; disable it for the lightest processing.": "نویز پس‌زمینه را در فاصله بین صحبت‌ها روی دستگاه شما کاهش می‌دهد. نویز هم‌زمان با صدای شما را حذف نمی‌کند. اگر کلمات آرام قطع می‌شوند آستانه را پایین بیاورید؛ برای پردازش سبک‌تر آن را خاموش کنید.",
+  "Noise threshold": "آستانه نویز",
+  "During recording and playback you are muted and deafened in voice chat. Your previous state is restored when the test stops.": "هنگام ضبط و پخش تست، میکروفون و صدای دریافتی شما در گفت‌وگوی صوتی قطع می‌شود. با پایان تست وضعیت قبلی شما برمی‌گردد.",
+  "Already signed in? Open Account settings, then Reset password while signed in. You only need to choose your new password.": "وارد حساب شده‌اید؟ در تنظیمات حساب، گزینه بازنشانی رمز در حالت ورود را باز کنید. فقط باید رمز جدید خود را انتخاب کنید.",
+  "Reset password while signed in": "بازنشانی رمز در حالت ورود",
+  "You are already signed in. Choose a new password without your old password or a recovery code. Other devices will be signed out.": "شما وارد حساب شده‌اید. بدون رمز قبلی یا کد بازیابی، رمز جدیدی انتخاب کنید. دستگاه‌های دیگر از حساب خارج می‌شوند.",
+  "Save new password": "ذخیره رمز جدید",
+  "Password updated. Use your new password for recovery setup and future sign-ins.": "رمز به‌روز شد. برای تنظیم بازیابی و ورودهای بعدی از رمز جدید استفاده کنید."
 }
