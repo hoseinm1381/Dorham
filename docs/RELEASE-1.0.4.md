@@ -1,5 +1,7 @@
 # Dorham 1.0.4 web and server update
 
+Follow-up: the matching Windows and Android 1.0.4 rebuilds are now published without new features. See [native release checks](RELEASE-1.0.4-NATIVE.md). The rollout details below describe the earlier web/server deployment.
+
 Adds all 64 supplied emojis to reaction selection, optional persistent multi-selection and large single-emoji messages. Also adds local Farsi/English text-to-speech for the sender's voice channel. Native binaries remain deferred and the stable native manifest stays 1.0.0.
 
 ## Reactions and messages
