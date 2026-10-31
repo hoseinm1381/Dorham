@@ -21,6 +21,7 @@ export class VoiceSpeech {
       const child = spawn(python, ['-u', path.resolve('deployment/tts-worker.py')], { stdio: 'pipe', windowsHide: true, env: { ...process.env, OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1' } }); this.process = child;
       child.stderr.resume();
       createInterface({ input: child.stdout }).on('line', line => {
+        if (this.process !== child) return;
         const p = this.pending; if (!p) return; this.pending = undefined; clearTimeout(p.timer);
         try { const data = JSON.parse(line); if (!data.audio) throw Error('synthesis'); const audio = Buffer.from(data.audio, 'base64'); if (audio.length > 3000000 || audio.toString('ascii', 0, 4) !== 'RIFF') throw Error('format'); p.resolve(audio); } catch { p.reject(Error('TTS is unavailable. Your message was sent normally.')); }
       });
