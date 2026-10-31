@@ -1,4 +1,6 @@
-**Current web update: 1.0.2** � selected-window sound requests, clearer Chrome audio-picker instructions and verified native window audio through the SFU. Windows/Android releases remain deferred. See [web verification](docs/RELEASE-1.0.2.md).
+**Current web update: 1.0.3** — 64 supplied Soft Bubble emojis, including nine Dorham exclusives, with a searchable message picker, Persian labels and offline artwork. See [web verification](docs/RELEASE-1.0.3.md).
+
+**Previous web update: 1.0.2** — selected-window sound requests, clearer Chrome audio-picker instructions and verified native window audio through the SFU. Windows/Android releases remain deferred. See [web verification](docs/RELEASE-1.0.2.md).
 
 **Previous web update: 1.0.1** — Chrome screen sound, fullscreen sound controls and visible Watch stream buttons. Applied without restarting voice services. Windows/Android stable downloads remain 1.0.0; native work is deferred. See [web verification](docs/RELEASE-1.0.1.md).
 

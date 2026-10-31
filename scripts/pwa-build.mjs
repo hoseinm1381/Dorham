@@ -6,6 +6,7 @@ const assets = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(match => match[
 // offline without an external font CDN or caching any private responses.
 assets.push(...(await readdir('apps/web/dist/assets')).filter(name => /\.(woff2|js|css)$/.test(name) && !/^(ChessRoom|GamesHub|GameRoom|PokerPanel|DominoPanel|LudoPanel|TelephonePanel|DrawingPanel|DrawingCanvas|WordsPanel|FourPanel|game-experience|microphone-check)-/.test(name)).map(name => `./assets/${name}`));
 assets.push(...(await readdir('apps/web/dist/profile-pictures')).map(name => `./profile-pictures/${name}`));
+assets.push(...JSON.parse(await readFile('apps/web/src/emoji-catalog.json', 'utf8')).map(emoji => emoji.src));
 assets.push('./audio/rnnoise-worklet.js', './audio/rnnoise.wasm');
 const shell = [...new Set(['./', './icon.svg', './icon-192.png', './icon-512.png', './manifest.webmanifest', ...assets])];
 const version = createHash('sha256').update(html).digest('hex').slice(0, 12);

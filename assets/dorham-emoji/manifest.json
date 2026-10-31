@@ -1,0 +1,935 @@
+{
+  "name": "Dorham Soft Bubble",
+  "source": "User-supplied dorham-icons, 2026-10-31",
+  "icons": [
+    {
+      "name": "emoji-happy",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-happy.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "smile",
+        "joy",
+        "glad"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-laughing",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-laughing.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "lol",
+        "haha",
+        "joy",
+        "tears"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-crying",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-crying.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "sob",
+        "tears",
+        "wail"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-angry",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-angry.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "mad",
+        "rage",
+        "furious"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-confused",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-confused.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "huh",
+        "puzzled",
+        "what"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-shocked",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-shocked.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "surprised",
+        "wow",
+        "omg",
+        "gasp"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-love",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-love.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "heart",
+        "eyes",
+        "adore",
+        "crush"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-sleepy",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-sleepy.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "sleep",
+        "tired",
+        "zzz"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-thinking",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-thinking.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "hmm",
+        "wonder",
+        "ponder"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-suspicious",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-suspicious.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "side",
+        "eye",
+        "doubt",
+        "sus"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-embarrassed",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-embarrassed.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "blush",
+        "shy",
+        "flustered"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-excited",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-excited.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "starstruck",
+        "hype",
+        "wow"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-nervous",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-nervous.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "anxious",
+        "grimace",
+        "eek"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-proud",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-proud.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "smug",
+        "pleased",
+        "confident"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-sad",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-sad.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "unhappy",
+        "down",
+        "blue"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-silly",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-silly.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "goofy",
+        "tongue",
+        "crazy"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-wink",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-wink.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "flirt",
+        "playful",
+        "joke"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-cool",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-cool.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "sunglasses",
+        "chill",
+        "swag"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-tired",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-tired.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "exhausted",
+        "weary",
+        "drained"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-disappointed",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-disappointed.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "let",
+        "down",
+        "meh",
+        "sigh"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-evil-grin",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-evil-grin.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "devil",
+        "mischief",
+        "villain"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-facepalm",
+      "family": "emoji",
+      "category": "expressions",
+      "file": "emojis/expressions/emoji-facepalm.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "ugh",
+        "smh",
+        "embarrassed"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-thumbs-up",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-thumbs-up.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "like",
+        "yes",
+        "approve",
+        "+1"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-thumbs-down",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-thumbs-down.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "dislike",
+        "no",
+        "-1"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-heart",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-heart.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "love",
+        "like",
+        "red"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-broken-heart",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-broken-heart.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "heartbreak",
+        "sad",
+        "breakup"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-fire",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-fire.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "lit",
+        "hot",
+        "flame"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-sparkles",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-sparkles.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "shiny",
+        "magic",
+        "new",
+        "clean"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-clap",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-clap.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "applause",
+        "bravo",
+        "congrats"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-party",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-party.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "celebrate",
+        "tada",
+        "popper"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-star",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-star.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "favorite",
+        "gold",
+        "rating"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-rocket",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-rocket.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "launch",
+        "fast",
+        "ship"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-crown",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-crown.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "king",
+        "queen",
+        "royal",
+        "best"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-trophy",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-trophy.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "win",
+        "champion",
+        "cup"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-gift",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-gift.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "present",
+        "surprise",
+        "reward"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-lightning",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-lightning.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "zap",
+        "power",
+        "energy",
+        "fast"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-checkmark",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-checkmark.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "done",
+        "yes",
+        "correct",
+        "ok"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-question",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-question.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "what",
+        "ask",
+        "unknown"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-exclamation",
+      "family": "emoji",
+      "category": "reactions",
+      "file": "emojis/reactions/emoji-exclamation.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "important",
+        "alert",
+        "wow"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-game-controller",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-game-controller.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "gamepad",
+        "play",
+        "games"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-dice",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-dice.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "roll",
+        "luck",
+        "random"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-sword",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-sword.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "attack",
+        "fight",
+        "blade"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-shield",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-shield.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "defend",
+        "protect",
+        "guard"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-treasure-chest",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-treasure-chest.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "loot",
+        "reward",
+        "box"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-gem",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-gem.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "diamond",
+        "jewel",
+        "rare"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-coin",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-coin.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "money",
+        "gold",
+        "currency",
+        "dal"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-level-up",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-level-up.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "upgrade",
+        "xp",
+        "rank",
+        "up"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-victory",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-victory.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "win",
+        "flag",
+        "gg",
+        "success"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-defeat",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-defeat.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "lose",
+        "skull",
+        "dead",
+        "rip"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-magic",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-magic.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "wand",
+        "spell",
+        "wizard"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-potion",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-potion.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "elixir",
+        "mana",
+        "brew"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-headset",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-headset.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "voice",
+        "gaming",
+        "audio",
+        "mic"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-joystick",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-joystick.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "arcade",
+        "retro",
+        "stick"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-robot",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-robot.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "bot",
+        "ai",
+        "machine"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "emoji-ghost",
+      "family": "emoji",
+      "category": "gaming",
+      "file": "emojis/gaming/emoji-ghost.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "boo",
+        "spooky",
+        "afk"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-hangout",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-hangout.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "together",
+        "chill",
+        "couch",
+        "dorham",
+        "hang",
+        "out"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-friend-joined",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-friend-joined.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "join",
+        "hype",
+        "welcome",
+        "arrived",
+        "+1"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-awkward-silence",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-awkward-silence.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "awkward",
+        "quiet",
+        "cringe",
+        "crickets",
+        "voice"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-dying-laughing",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-dying-laughing.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "rofl",
+        "dead",
+        "crying",
+        "laughing",
+        "can't",
+        "breathe"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-teasing",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-teasing.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "tease",
+        "poke",
+        "banter",
+        "jk"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-late-night",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-late-night.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "gaming",
+        "night",
+        "owl",
+        "3am",
+        "grind"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-group-celebration",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-group-celebration.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "party",
+        "squad",
+        "celebrate",
+        "win",
+        "together"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-group-hug",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-group-hug.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "hug",
+        "love",
+        "friends",
+        "support"
+      ],
+      "themable": false,
+      "variants": {}
+    },
+    {
+      "name": "dorham-tea-time",
+      "family": "emoji",
+      "category": "dorham-exclusive",
+      "file": "emojis/dorham-exclusive/dorham-tea-time.svg",
+      "viewBox": "0 0 64 64",
+      "tags": [
+        "chai",
+        "tea",
+        "cozy",
+        "estekan",
+        "break"
+      ],
+      "themable": false,
+      "variants": {}
+    }
+  ]
+}

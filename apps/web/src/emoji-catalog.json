@@ -1,0 +1,739 @@
+[
+  {
+    "id": "emoji-happy",
+    "label": "Happy",
+    "category": "expressions",
+    "tags": [
+      "smile",
+      "joy",
+      "glad"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-happy.svg"
+  },
+  {
+    "id": "emoji-laughing",
+    "label": "Laughing",
+    "category": "expressions",
+    "tags": [
+      "lol",
+      "haha",
+      "joy",
+      "tears"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-laughing.svg"
+  },
+  {
+    "id": "emoji-crying",
+    "label": "Crying",
+    "category": "expressions",
+    "tags": [
+      "sob",
+      "tears",
+      "wail"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-crying.svg"
+  },
+  {
+    "id": "emoji-angry",
+    "label": "Angry",
+    "category": "expressions",
+    "tags": [
+      "mad",
+      "rage",
+      "furious"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-angry.svg"
+  },
+  {
+    "id": "emoji-confused",
+    "label": "Confused",
+    "category": "expressions",
+    "tags": [
+      "huh",
+      "puzzled",
+      "what"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-confused.svg"
+  },
+  {
+    "id": "emoji-shocked",
+    "label": "Shocked",
+    "category": "expressions",
+    "tags": [
+      "surprised",
+      "wow",
+      "omg",
+      "gasp"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-shocked.svg"
+  },
+  {
+    "id": "emoji-love",
+    "label": "Love",
+    "category": "expressions",
+    "tags": [
+      "heart",
+      "eyes",
+      "adore",
+      "crush"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-love.svg"
+  },
+  {
+    "id": "emoji-sleepy",
+    "label": "Sleepy",
+    "category": "expressions",
+    "tags": [
+      "sleep",
+      "tired",
+      "zzz"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-sleepy.svg"
+  },
+  {
+    "id": "emoji-thinking",
+    "label": "Thinking",
+    "category": "expressions",
+    "tags": [
+      "hmm",
+      "wonder",
+      "ponder"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-thinking.svg"
+  },
+  {
+    "id": "emoji-suspicious",
+    "label": "Suspicious",
+    "category": "expressions",
+    "tags": [
+      "side",
+      "eye",
+      "doubt",
+      "sus"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-suspicious.svg"
+  },
+  {
+    "id": "emoji-embarrassed",
+    "label": "Embarrassed",
+    "category": "expressions",
+    "tags": [
+      "blush",
+      "shy",
+      "flustered"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-embarrassed.svg"
+  },
+  {
+    "id": "emoji-excited",
+    "label": "Excited",
+    "category": "expressions",
+    "tags": [
+      "starstruck",
+      "hype",
+      "wow"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-excited.svg"
+  },
+  {
+    "id": "emoji-nervous",
+    "label": "Nervous",
+    "category": "expressions",
+    "tags": [
+      "anxious",
+      "grimace",
+      "eek"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-nervous.svg"
+  },
+  {
+    "id": "emoji-proud",
+    "label": "Proud",
+    "category": "expressions",
+    "tags": [
+      "smug",
+      "pleased",
+      "confident"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-proud.svg"
+  },
+  {
+    "id": "emoji-sad",
+    "label": "Sad",
+    "category": "expressions",
+    "tags": [
+      "unhappy",
+      "down",
+      "blue"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-sad.svg"
+  },
+  {
+    "id": "emoji-silly",
+    "label": "Silly",
+    "category": "expressions",
+    "tags": [
+      "goofy",
+      "tongue",
+      "crazy"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-silly.svg"
+  },
+  {
+    "id": "emoji-wink",
+    "label": "Wink",
+    "category": "expressions",
+    "tags": [
+      "flirt",
+      "playful",
+      "joke"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-wink.svg"
+  },
+  {
+    "id": "emoji-cool",
+    "label": "Cool",
+    "category": "expressions",
+    "tags": [
+      "sunglasses",
+      "chill",
+      "swag"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-cool.svg"
+  },
+  {
+    "id": "emoji-tired",
+    "label": "Tired",
+    "category": "expressions",
+    "tags": [
+      "exhausted",
+      "weary",
+      "drained"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-tired.svg"
+  },
+  {
+    "id": "emoji-disappointed",
+    "label": "Disappointed",
+    "category": "expressions",
+    "tags": [
+      "let",
+      "down",
+      "meh",
+      "sigh"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-disappointed.svg"
+  },
+  {
+    "id": "emoji-evil-grin",
+    "label": "Evil Grin",
+    "category": "expressions",
+    "tags": [
+      "devil",
+      "mischief",
+      "villain"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-evil-grin.svg"
+  },
+  {
+    "id": "emoji-facepalm",
+    "label": "Facepalm",
+    "category": "expressions",
+    "tags": [
+      "ugh",
+      "smh",
+      "embarrassed"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-facepalm.svg"
+  },
+  {
+    "id": "emoji-thumbs-up",
+    "label": "Thumbs Up",
+    "category": "reactions",
+    "tags": [
+      "like",
+      "yes",
+      "approve",
+      "+1"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-thumbs-up.svg"
+  },
+  {
+    "id": "emoji-thumbs-down",
+    "label": "Thumbs Down",
+    "category": "reactions",
+    "tags": [
+      "dislike",
+      "no",
+      "-1"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-thumbs-down.svg"
+  },
+  {
+    "id": "emoji-heart",
+    "label": "Heart",
+    "category": "reactions",
+    "tags": [
+      "love",
+      "like",
+      "red"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-heart.svg"
+  },
+  {
+    "id": "emoji-broken-heart",
+    "label": "Broken Heart",
+    "category": "reactions",
+    "tags": [
+      "heartbreak",
+      "sad",
+      "breakup"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-broken-heart.svg"
+  },
+  {
+    "id": "emoji-fire",
+    "label": "Fire",
+    "category": "reactions",
+    "tags": [
+      "lit",
+      "hot",
+      "flame"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-fire.svg"
+  },
+  {
+    "id": "emoji-sparkles",
+    "label": "Sparkles",
+    "category": "reactions",
+    "tags": [
+      "shiny",
+      "magic",
+      "new",
+      "clean"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-sparkles.svg"
+  },
+  {
+    "id": "emoji-clap",
+    "label": "Clap",
+    "category": "reactions",
+    "tags": [
+      "applause",
+      "bravo",
+      "congrats"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-clap.svg"
+  },
+  {
+    "id": "emoji-party",
+    "label": "Party",
+    "category": "reactions",
+    "tags": [
+      "celebrate",
+      "tada",
+      "popper"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-party.svg"
+  },
+  {
+    "id": "emoji-star",
+    "label": "Star",
+    "category": "reactions",
+    "tags": [
+      "favorite",
+      "gold",
+      "rating"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-star.svg"
+  },
+  {
+    "id": "emoji-rocket",
+    "label": "Rocket",
+    "category": "reactions",
+    "tags": [
+      "launch",
+      "fast",
+      "ship"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-rocket.svg"
+  },
+  {
+    "id": "emoji-crown",
+    "label": "Crown",
+    "category": "reactions",
+    "tags": [
+      "king",
+      "queen",
+      "royal",
+      "best"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-crown.svg"
+  },
+  {
+    "id": "emoji-trophy",
+    "label": "Trophy",
+    "category": "reactions",
+    "tags": [
+      "win",
+      "champion",
+      "cup"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-trophy.svg"
+  },
+  {
+    "id": "emoji-gift",
+    "label": "Gift",
+    "category": "reactions",
+    "tags": [
+      "present",
+      "surprise",
+      "reward"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-gift.svg"
+  },
+  {
+    "id": "emoji-lightning",
+    "label": "Lightning",
+    "category": "reactions",
+    "tags": [
+      "zap",
+      "power",
+      "energy",
+      "fast"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-lightning.svg"
+  },
+  {
+    "id": "emoji-checkmark",
+    "label": "Checkmark",
+    "category": "reactions",
+    "tags": [
+      "done",
+      "yes",
+      "correct",
+      "ok"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-checkmark.svg"
+  },
+  {
+    "id": "emoji-question",
+    "label": "Question",
+    "category": "reactions",
+    "tags": [
+      "what",
+      "ask",
+      "unknown"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-question.svg"
+  },
+  {
+    "id": "emoji-exclamation",
+    "label": "Exclamation",
+    "category": "reactions",
+    "tags": [
+      "important",
+      "alert",
+      "wow"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-exclamation.svg"
+  },
+  {
+    "id": "emoji-game-controller",
+    "label": "Game Controller",
+    "category": "gaming",
+    "tags": [
+      "gamepad",
+      "play",
+      "games"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-game-controller.svg"
+  },
+  {
+    "id": "emoji-dice",
+    "label": "Dice",
+    "category": "gaming",
+    "tags": [
+      "roll",
+      "luck",
+      "random"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-dice.svg"
+  },
+  {
+    "id": "emoji-sword",
+    "label": "Sword",
+    "category": "gaming",
+    "tags": [
+      "attack",
+      "fight",
+      "blade"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-sword.svg"
+  },
+  {
+    "id": "emoji-shield",
+    "label": "Shield",
+    "category": "gaming",
+    "tags": [
+      "defend",
+      "protect",
+      "guard"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-shield.svg"
+  },
+  {
+    "id": "emoji-treasure-chest",
+    "label": "Treasure Chest",
+    "category": "gaming",
+    "tags": [
+      "loot",
+      "reward",
+      "box"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-treasure-chest.svg"
+  },
+  {
+    "id": "emoji-gem",
+    "label": "Gem",
+    "category": "gaming",
+    "tags": [
+      "diamond",
+      "jewel",
+      "rare"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-gem.svg"
+  },
+  {
+    "id": "emoji-coin",
+    "label": "Coin",
+    "category": "gaming",
+    "tags": [
+      "money",
+      "gold",
+      "currency",
+      "dal"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-coin.svg"
+  },
+  {
+    "id": "emoji-level-up",
+    "label": "Level Up",
+    "category": "gaming",
+    "tags": [
+      "upgrade",
+      "xp",
+      "rank",
+      "up"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-level-up.svg"
+  },
+  {
+    "id": "emoji-victory",
+    "label": "Victory",
+    "category": "gaming",
+    "tags": [
+      "win",
+      "flag",
+      "gg",
+      "success"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-victory.svg"
+  },
+  {
+    "id": "emoji-defeat",
+    "label": "Defeat",
+    "category": "gaming",
+    "tags": [
+      "lose",
+      "skull",
+      "dead",
+      "rip"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-defeat.svg"
+  },
+  {
+    "id": "emoji-magic",
+    "label": "Magic",
+    "category": "gaming",
+    "tags": [
+      "wand",
+      "spell",
+      "wizard"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-magic.svg"
+  },
+  {
+    "id": "emoji-potion",
+    "label": "Potion",
+    "category": "gaming",
+    "tags": [
+      "elixir",
+      "mana",
+      "brew"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-potion.svg"
+  },
+  {
+    "id": "emoji-headset",
+    "label": "Headset",
+    "category": "gaming",
+    "tags": [
+      "voice",
+      "gaming",
+      "audio",
+      "mic"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-headset.svg"
+  },
+  {
+    "id": "emoji-joystick",
+    "label": "Joystick",
+    "category": "gaming",
+    "tags": [
+      "arcade",
+      "retro",
+      "stick"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-joystick.svg"
+  },
+  {
+    "id": "emoji-robot",
+    "label": "Robot",
+    "category": "gaming",
+    "tags": [
+      "bot",
+      "ai",
+      "machine"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-robot.svg"
+  },
+  {
+    "id": "emoji-ghost",
+    "label": "Ghost",
+    "category": "gaming",
+    "tags": [
+      "boo",
+      "spooky",
+      "afk"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/emoji-ghost.svg"
+  },
+  {
+    "id": "dorham-hangout",
+    "label": "Hangout",
+    "category": "dorham-exclusive",
+    "tags": [
+      "together",
+      "chill",
+      "couch",
+      "dorham",
+      "hang",
+      "out"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-hangout.svg"
+  },
+  {
+    "id": "dorham-friend-joined",
+    "label": "Friend Joined",
+    "category": "dorham-exclusive",
+    "tags": [
+      "join",
+      "hype",
+      "welcome",
+      "arrived",
+      "+1"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-friend-joined.svg"
+  },
+  {
+    "id": "dorham-awkward-silence",
+    "label": "Awkward Silence",
+    "category": "dorham-exclusive",
+    "tags": [
+      "awkward",
+      "quiet",
+      "cringe",
+      "crickets",
+      "voice"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-awkward-silence.svg"
+  },
+  {
+    "id": "dorham-dying-laughing",
+    "label": "Dying Laughing",
+    "category": "dorham-exclusive",
+    "tags": [
+      "rofl",
+      "dead",
+      "crying",
+      "laughing",
+      "can't",
+      "breathe"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-dying-laughing.svg"
+  },
+  {
+    "id": "dorham-teasing",
+    "label": "Teasing",
+    "category": "dorham-exclusive",
+    "tags": [
+      "tease",
+      "poke",
+      "banter",
+      "jk"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-teasing.svg"
+  },
+  {
+    "id": "dorham-late-night",
+    "label": "Late Night",
+    "category": "dorham-exclusive",
+    "tags": [
+      "gaming",
+      "night",
+      "owl",
+      "3am",
+      "grind"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-late-night.svg"
+  },
+  {
+    "id": "dorham-group-celebration",
+    "label": "Group Celebration",
+    "category": "dorham-exclusive",
+    "tags": [
+      "party",
+      "squad",
+      "celebrate",
+      "win",
+      "together"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-group-celebration.svg"
+  },
+  {
+    "id": "dorham-group-hug",
+    "label": "Group Hug",
+    "category": "dorham-exclusive",
+    "tags": [
+      "hug",
+      "love",
+      "friends",
+      "support"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-group-hug.svg"
+  },
+  {
+    "id": "dorham-tea-time",
+    "label": "Tea Time",
+    "category": "dorham-exclusive",
+    "tags": [
+      "chai",
+      "tea",
+      "cozy",
+      "estekan",
+      "break"
+    ],
+    "src": "./emojis/soft-bubble-5173435f82af/dorham-tea-time.svg"
+  }
+]

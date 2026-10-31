@@ -1,6 +1,6 @@
 {
   "name": "dorham",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "overrides": {
     "xcode": {
@@ -16,11 +16,11 @@
     "node": ">=24.22.1 <25"
   },
   "scripts": {
-    "dev": "node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && concurrently -k -n api,web \"tsx watch apps/api/src/index.ts\" \"vite --config apps/web/vite.config.ts\"",
+    "dev": "node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && node scripts/emoji-assets.mjs && concurrently -k -n api,web \"tsx watch apps/api/src/index.ts\" \"vite --config apps/web/vite.config.ts\"",
     "start": "node --env-file-if-exists=.env deployment/start.mjs",
     "build": "npm run build:api && npm run build:web && npm run build:desktop",
     "build:api": "tsup --config tsup.config.ts",
-    "build:web": "node scripts/icons.mjs && node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && vite build --config apps/web/vite.config.ts && node scripts/pwa-build.mjs",
+    "build:web": "node scripts/icons.mjs && node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && node scripts/emoji-assets.mjs && vite build --config apps/web/vite.config.ts && node scripts/pwa-build.mjs",
     "build:desktop": "node scripts/desktop-build.mjs",
     "package:windows": "npm run build && node scripts/windows-package.mjs",
     "android:sync": "npm run build:web && npm exec --workspace @dorham/android -- cap sync android",

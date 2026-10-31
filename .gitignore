@@ -31,3 +31,5 @@ apps/web/public/audio/
 apps/desktop/release-contract.cjs
 *.pfx
 *.p12
+
+apps/web/public/emojis/
