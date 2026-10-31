@@ -1214,5 +1214,8 @@
   "The update could not be started. Try again later.": "شروع به‌روزرسانی ممکن نشد. بعداً دوباره تلاش کنید.",
   "Listening only": "فقط شنونده",
   "Microphone unavailable. Rejoin to try again.": "میکروفون در دسترس نیست. برای تلاش دوباره، خارج شوید و دوباره بپیوندید.",
-  "Listening only. Microphone unavailable or permission denied. Rejoin to try again.": "فقط شنونده هستید. میکروفون در دسترس نیست یا اجازهٔ استفاده ندارد. برای تلاش دوباره، خارج شوید و دوباره بپیوندید."
+  "Listening only. Microphone unavailable or permission denied. Rejoin to try again.": "فقط شنونده هستید. میکروفون در دسترس نیست یا اجازهٔ استفاده ندارد. برای تلاش دوباره، خارج شوید و دوباره بپیوندید.",
+  "Exit fullscreen stream": "خروج از نمایش تمام‌صفحه",
+  "In Chrome, also enable audio in the screen picker. For game sound, choose Entire Screen and turn on Share system audio, or share a browser tab with tab audio.": "در پنجرهٔ انتخاب صفحهٔ کروم هم صدا را فعال کنید. برای صدای بازی، Entire Screen و Share system audio را انتخاب کنید؛ یا یک زبانهٔ مرورگر را همراه صدایش به اشتراک بگذارید.",
+  "No sound is being shared. Ask the sharer to restart with Share sound and enable audio in the screen picker.": "صدایی به اشتراک گذاشته نمی‌شود. از فرستنده بخواهید اشتراک را با گزینهٔ اشتراک صدا دوباره آغاز کند و صدا را در پنجرهٔ انتخاب صفحه فعال کند."
 }

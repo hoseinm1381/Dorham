@@ -52,6 +52,29 @@ it('a positive volume gesture resumes playback and reapplies the latest amplific
     expect(participant.setVolume).toHaveBeenCalledWith(2, 'microphone');
   } finally { await f.transport.destroy(); }
 });
+it('requests Chrome system audio only when the user opts in, retaining own-audio exclusion', async () => {
+  const f = fixture();
+  try {
+    const media = (f.transport as any).media, participant = media.localParticipant;
+    participant.permissions = { canPublish: true, canPublishSources: [] };
+    participant.getTrackPublication = () => undefined;
+    (f.socket as any).timeout = () => ({ emit: (_name: string, body: any, reply: any) => reply(null, { ok: true, data: { lease: { id: 'screen', policyRevision: 1, includeAudio: Boolean(body.includeAudio), maxFrameRate: 30 } } }) });
+    await f.transport.startShare('720p15', { includeAudio: true });
+    expect(participant.setScreenShareEnabled).toHaveBeenCalledWith(true, expect.objectContaining({ systemAudio: 'include', audio: expect.objectContaining({ restrictOwnAudio: true }), selfBrowserSurface: 'exclude' }), expect.anything());
+    await f.transport.stopShare(); await f.transport.startShare('720p15', { includeAudio: false });
+    expect(participant.setScreenShareEnabled).toHaveBeenLastCalledWith(true, expect.objectContaining({ systemAudio: 'exclude', audio: false }), expect.anything());
+  } finally { await f.transport.destroy(); }
+});
+it('a stream sound gesture resumes suspended playback while mute never wakes it', async () => {
+  const f = fixture();
+  try {
+    const joining = f.transport.join('room'); f.release(); await joining;
+    const media = (f.transport as any).media;
+    media.startAudio = vi.fn(async () => {});
+    f.transport.setStreamVolume('share', 0); expect(media.startAudio).not.toHaveBeenCalled();
+    f.transport.setStreamVolume('share', 1); expect(media.startAudio).toHaveBeenCalledOnce();
+  } finally { await f.transport.destroy(); }
+});
 it('coalesces overlapping microphone state acknowledgements without losing the final mute', async () => {
   const f = fixture();
   try {
