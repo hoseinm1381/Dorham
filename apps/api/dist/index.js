@@ -23,11 +23,145 @@ import {
   shareUpdateSchema,
   signalSchema,
   token
-} from "./chunk-2GUYZ3ZR.js";
+} from "./chunk-XCW5YO2D.js";
 import {
   config,
   openDatabase
 } from "./chunk-GUKVT4SI.js";
+
+// apps/api/src/tts.ts
+import { spawn } from "child_process";
+import { createInterface } from "readline";
+import { existsSync } from "fs";
+import path from "path";
+var VoiceSpeech = class {
+  constructor(service, deliver, notice, engine) {
+    this.service = service;
+    this.deliver = deliver;
+    this.notice = notice;
+    this.engine = engine;
+  }
+  service;
+  deliver;
+  notice;
+  engine;
+  process;
+  pending;
+  queue = Promise.resolve();
+  queued = 0;
+  started = Date.now();
+  closed = false;
+  seen = /* @__PURE__ */ new Map();
+  cooldown = /* @__PURE__ */ new Map();
+  audio = /* @__PURE__ */ new Map();
+  synthesize(text2) {
+    if (this.engine) return this.engine(text2);
+    const python = process.env.DORHAM_TTS_PYTHON || "/opt/dorham-tts/venv/bin/python";
+    if (!existsSync(python)) return Promise.reject(Error("TTS is unavailable. Your message was sent normally."));
+    if (!this.process) {
+      const child = spawn(python, ["-u", path.resolve("deployment/tts-worker.py")], { stdio: "pipe", windowsHide: true, env: { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" } });
+      this.process = child;
+      child.stderr.resume();
+      createInterface({ input: child.stdout }).on("line", (line) => {
+        if (this.process !== child) return;
+        const p = this.pending;
+        if (!p) return;
+        this.pending = void 0;
+        clearTimeout(p.timer);
+        try {
+          const data = JSON.parse(line);
+          if (!data.audio) throw Error("synthesis");
+          const audio = Buffer.from(data.audio, "base64");
+          if (audio.length > 3e6 || audio.toString("ascii", 0, 4) !== "RIFF") throw Error("format");
+          p.resolve(audio);
+        } catch {
+          p.reject(Error("TTS is unavailable. Your message was sent normally."));
+        }
+      });
+      const ended = () => {
+        if (this.process !== child) return;
+        this.process = void 0;
+        const p = this.pending;
+        this.pending = void 0;
+        if (p) {
+          clearTimeout(p.timer);
+          p.reject(Error("TTS is unavailable. Your message was sent normally."));
+        }
+      };
+      child.on("error", ended);
+      child.on("exit", ended);
+    }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending = void 0;
+        this.process?.kill();
+        this.process = void 0;
+        reject(Error("TTS timed out. Your message was sent normally."));
+      }, 6e4);
+      this.pending = { resolve, reject, timer };
+      this.process.stdin.write(JSON.stringify({ text: text2 }) + "\n");
+    });
+  }
+  async enqueue(userId, message) {
+    const now = Date.now();
+    for (const [key, expiry] of this.seen) if (expiry < now) this.seen.delete(key);
+    for (const [key, value] of this.audio) if (value.expires < now) this.audio.delete(key);
+    for (const [key, at] of this.cooldown) if (at < now - 6e4) this.cooldown.delete(key);
+    if (this.closed || this.seen.has(message.id) || message.createdAt < this.started - 1e3 || now - message.createdAt > 3e4) return;
+    this.seen.set(message.id, now + 6e4);
+    const sender = await this.service.db.one("SELECT * FROM voice_members WHERE user_id=? AND heartbeat>?", [userId, now - 3e4]);
+    if (!sender) return;
+    try {
+      if (sender.server_muted) throw Error("You cannot use TTS while server-muted.");
+      await this.service.db.transaction((tx) => this.service.channel(tx, userId, sender.channel_id, "speak"));
+    } catch {
+      this.notice(userId, "You cannot use TTS in this voice channel. Your message was sent normally.");
+      return;
+    }
+    if (message.content.length > 400 || this.queued >= 4 || now - (this.cooldown.get(userId) || 0) < 4e3) {
+      this.notice(userId, "TTS is limited to 400 characters and one request every 4 seconds. Your message was sent normally.");
+      return;
+    }
+    const initial = await this.service.db.all("SELECT user_id,epoch FROM voice_members WHERE channel_id=? AND heartbeat>?", [sender.channel_id, now - 3e4]);
+    if (this.queued >= 4) {
+      this.notice(userId, "TTS is busy. Your message was sent normally.");
+      return;
+    }
+    this.cooldown.set(userId, now);
+    this.queued++;
+    this.queue = this.queue.then(async () => {
+      try {
+        if (this.closed) return;
+        const data = await this.synthesize(message.content);
+        const current = await this.service.db.one("SELECT * FROM voice_members WHERE user_id=? AND channel_id=? AND epoch=? AND heartbeat>?", [userId, sender.channel_id, sender.epoch, Date.now() - 3e4]);
+        const stored = await this.service.db.one("SELECT content,deleted FROM messages WHERE id=?", [message.id]);
+        if (!current || current.server_muted || !stored || stored.deleted || stored.content !== message.content) return;
+        await this.service.db.transaction((tx) => this.service.channel(tx, userId, sender.channel_id, "speak"));
+        const members = await this.service.db.all("SELECT user_id,epoch,socket_id FROM voice_members WHERE channel_id=? AND deafened=0 AND server_deafened=0 AND heartbeat>?", [sender.channel_id, Date.now() - 3e4]);
+        const recipients = new Map(members.filter((m) => initial.some((i) => i.user_id === m.user_id && i.epoch === m.epoch)).map((m) => [m.user_id, m.epoch]));
+        while (this.audio.size >= 8) this.audio.delete(this.audio.keys().next().value);
+        const expires = Date.now() + 12e4;
+        this.audio.set(message.id, { data, recipients, channelId: sender.channel_id, expires });
+        for (const member of members) if (recipients.has(member.user_id)) this.deliver(member.socket_id, { id: message.id, channelId: sender.channel_id, userId, expiresAt: expires });
+      } catch {
+        if (!this.closed) this.notice(userId, "TTS is unavailable. Your message was sent normally.");
+      } finally {
+        this.queued--;
+      }
+    });
+  }
+  async read(userId, id2) {
+    const item = this.audio.get(id2);
+    if (!item || item.expires < Date.now() || !item.recipients.has(userId)) return null;
+    const member = await this.service.db.one("SELECT epoch FROM voice_members WHERE user_id=? AND channel_id=? AND deafened=0 AND server_deafened=0 AND heartbeat>?", [userId, item.channelId, Date.now() - 3e4]);
+    return member?.epoch === item.recipients.get(userId) ? item.data : null;
+  }
+  close() {
+    this.closed = true;
+    this.process?.kill();
+    this.audio.clear();
+  }
+};
 
 // apps/api/src/app.ts
 import Fastify from "fastify";
@@ -38,12 +172,94 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import { Server as SocketServer } from "socket.io";
-import { z as z7, ZodError } from "zod";
+import { z as z8, ZodError } from "zod";
+
+// packages/contracts/src/emoji-reactions.ts
+import { z } from "zod";
+
+// packages/contracts/src/emoji-ids.json
+var emoji_ids_default = [
+  "emoji-happy",
+  "emoji-laughing",
+  "emoji-crying",
+  "emoji-angry",
+  "emoji-confused",
+  "emoji-shocked",
+  "emoji-love",
+  "emoji-sleepy",
+  "emoji-thinking",
+  "emoji-suspicious",
+  "emoji-embarrassed",
+  "emoji-excited",
+  "emoji-nervous",
+  "emoji-proud",
+  "emoji-sad",
+  "emoji-silly",
+  "emoji-wink",
+  "emoji-cool",
+  "emoji-tired",
+  "emoji-disappointed",
+  "emoji-evil-grin",
+  "emoji-facepalm",
+  "emoji-thumbs-up",
+  "emoji-thumbs-down",
+  "emoji-heart",
+  "emoji-broken-heart",
+  "emoji-fire",
+  "emoji-sparkles",
+  "emoji-clap",
+  "emoji-party",
+  "emoji-star",
+  "emoji-rocket",
+  "emoji-crown",
+  "emoji-trophy",
+  "emoji-gift",
+  "emoji-lightning",
+  "emoji-checkmark",
+  "emoji-question",
+  "emoji-exclamation",
+  "emoji-game-controller",
+  "emoji-dice",
+  "emoji-sword",
+  "emoji-shield",
+  "emoji-treasure-chest",
+  "emoji-gem",
+  "emoji-coin",
+  "emoji-level-up",
+  "emoji-victory",
+  "emoji-defeat",
+  "emoji-magic",
+  "emoji-potion",
+  "emoji-headset",
+  "emoji-joystick",
+  "emoji-robot",
+  "emoji-ghost",
+  "dorham-hangout",
+  "dorham-friend-joined",
+  "dorham-awkward-silence",
+  "dorham-dying-laughing",
+  "dorham-teasing",
+  "dorham-late-night",
+  "dorham-group-celebration",
+  "dorham-group-hug",
+  "dorham-tea-time"
+];
+
+// packages/contracts/src/emoji-reactions.ts
+var legacy = { "emoji-thumbs-up": "\u{1F44D}", "emoji-heart": "\u2764\uFE0F", "emoji-laughing": "\u{1F602}", "emoji-party": "\u{1F389}", "emoji-checkmark": "\u2705" };
+function reactionValue(id2) {
+  return legacy[id2] || `:${id2}:`;
+}
+var reactionValues = ["\u{1F440}", ...emoji_ids_default.map(reactionValue)];
+var reactionEmojiSchema = z.enum(reactionValues);
+var reverse = new Map(emoji_ids_default.map((id2) => [reactionValue(id2), id2]));
+
+// apps/api/src/app.ts
 import { randomUUID as randomUUID5 } from "crypto";
 import { monitorEventLoopDelay } from "perf_hooks";
-import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from "fs";
+import { existsSync as existsSync2, openSync, writeSync, closeSync, readFileSync, unlinkSync } from "fs";
 import { mkdir as mkdir2, writeFile as writeFile2, unlink as unlink3, readdir as readdir2, stat as stat4 } from "fs/promises";
-import path4 from "path";
+import path5 from "path";
 import sharp2 from "sharp";
 
 // apps/api/src/sfu.ts
@@ -180,12 +396,12 @@ var Sfu = class {
 };
 
 // packages/contracts/src/connection.ts
-import { z } from "zod";
-var connectionProbeSchema = z.object({ version: z.literal(1) }).strict();
-var connectionLatenciesSchema = z.array(z.object({
-  userId: z.string().min(1).max(80),
-  milliseconds: z.number().int().min(0).max(5e3).nullable(),
-  measuredAt: z.number().int().nonnegative().nullable()
+import { z as z2 } from "zod";
+var connectionProbeSchema = z2.object({ version: z2.literal(1) }).strict();
+var connectionLatenciesSchema = z2.array(z2.object({
+  userId: z2.string().min(1).max(80),
+  milliseconds: z2.number().int().min(0).max(5e3).nullable(),
+  measuredAt: z2.number().int().nonnegative().nullable()
 }).strict()).max(1e3);
 
 // apps/api/src/connection-latency.ts
@@ -236,11 +452,11 @@ var ConnectionLatencyMonitor = class {
 import { randomBytes, createHash } from "crypto";
 import { createReadStream } from "fs";
 import { stat } from "fs/promises";
-import path from "path";
-import { z as z2 } from "zod";
-var uuid = z2.string().uuid();
+import path2 from "path";
+import { z as z3 } from "zod";
+var uuid = z3.string().uuid();
 function mediaMime(name, prefix) {
-  const ext = path.extname(name).toLowerCase(), hex = prefix.toString("hex");
+  const ext = path2.extname(name).toLowerCase(), hex = prefix.toString("hex");
   if (ext === ".png" && hex.startsWith("89504e470d0a1a0a")) return "image/png";
   if ([".jpg", ".jpeg"].includes(ext) && hex.startsWith("ffd8ff")) return "image/jpeg";
   if (ext === ".gif" && /^GIF8[79]a/.test(prefix.toString("ascii"))) return "image/gif";
@@ -284,7 +500,7 @@ var AttachmentMedia = class {
   }
   register(api) {
     api.post("/attachments/:id/preview", async (req) => {
-      z2.object({ requestId }).strict().parse(req.body);
+      z3.object({ requestId }).strict().parse(req.body);
       const fileId = uuid.parse(req.params.id);
       await this.available(req.account.id, fileId);
       for (const [key, ticket2] of this.tickets) if (ticket2.expiresAt <= Date.now()) this.tickets.delete(key);
@@ -352,12 +568,12 @@ import { createReadStream as createReadStream2, createWriteStream } from "fs";
 import { mkdir, rename, unlink, stat as stat2, statfs, opendir } from "fs/promises";
 import { Transform } from "stream";
 import { pipeline } from "stream/promises";
-import path2 from "path";
-import { z as z3 } from "zod";
+import path3 from "path";
+import { z as z4 } from "zod";
 var MiB = 1048576;
 var retentionMs = (bytes) => bytes <= 10 * MiB ? 7 * 864e5 : 864e5;
 var extensions = /* @__PURE__ */ new Set([".pdf", ".txt", ".md", ".csv", ".json", ".zip", ".7z", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp3", ".ogg", ".wav", ".mp4", ".webm"]);
-var uuid2 = z3.string().uuid();
+var uuid2 = z4.string().uuid();
 var Attachments = class {
   constructor(service) {
     this.service = service;
@@ -370,7 +586,7 @@ var Attachments = class {
   scan = null;
   media;
   file(id2, partial = false) {
-    return path2.join(this.service.c.attachmentDir, `${uuid2.parse(id2)}.${partial ? "part" : "bin"}`);
+    return path3.join(this.service.c.attachmentDir, `${uuid2.parse(id2)}.${partial ? "part" : "bin"}`);
   }
   async initialize() {
     await mkdir(this.service.c.attachmentDir, { recursive: true, mode: 448 });
@@ -391,8 +607,8 @@ var Attachments = class {
     api.addContentTypeParser("application/octet-stream", (_req, stream, done) => done(null, stream));
     api.post("/attachments", async (req) => {
       if (req.account.guest) fail(403, "GUEST_UPLOAD", "Guests cannot upload files.");
-      const b = z3.object({ conversationId: id, name: z3.string().trim().min(1).max(180).refine((s) => ![...s].some((c2) => c2.charCodeAt(0) < 32 || c2.charCodeAt(0) === 127 || c2 === "/" || c2 === String.fromCharCode(92)), "Invalid filename"), size: z3.number().int().min(1).max(100 * MiB), requestId }).parse(req.body);
-      if (!extensions.has(path2.extname(b.name).toLowerCase())) fail(400, "FILE_TYPE", "This file type is not supported.");
+      const b = z4.object({ conversationId: id, name: z4.string().trim().min(1).max(180).refine((s) => ![...s].some((c2) => c2.charCodeAt(0) < 32 || c2.charCodeAt(0) === 127 || c2 === "/" || c2 === String.fromCharCode(92)), "Invalid filename"), size: z4.number().int().min(1).max(100 * MiB), requestId }).parse(req.body);
+      if (!extensions.has(path3.extname(b.name).toLowerCase())) fail(400, "FILE_TYPE", "This file type is not supported.");
       await this.cleanup(b.size);
       const storage = await this.status();
       return db.transaction(async (tx) => {
@@ -443,7 +659,7 @@ var Attachments = class {
         } });
         await pipeline(req.body, measure, createWriteStream(this.file(uploadId, true), { flags: "wx", mode: 384 }));
         if (received !== Number(upload.size)) fail(400, "UPLOAD_SIZE", "Upload was incomplete.");
-        const ext = path2.extname(upload.name).toLowerCase(), hex = prefix.toString("hex");
+        const ext = path3.extname(upload.name).toLowerCase(), hex = prefix.toString("hex");
         const signatures = { ".pdf": prefix.subarray(0, 5).toString() === "%PDF-", ".png": hex.startsWith("89504e470d0a1a0a"), ".jpg": hex.startsWith("ffd8ff"), ".jpeg": hex.startsWith("ffd8ff"), ".gif": prefix.toString().startsWith("GIF8"), ".zip": hex.startsWith("504b"), ".webp": prefix.subarray(8, 12).toString() === "WEBP", ".7z": hex.startsWith("377abcaf271c") };
         if (signatures[ext] === false || hex.startsWith("4d5a") || hex.startsWith("7f454c46")) fail(400, "FILE_TYPE", "File contents do not match the supported file type.");
         await rename(this.file(uploadId, true), this.file(uploadId));
@@ -497,7 +713,7 @@ var Attachments = class {
           await db.run("UPDATE attachments SET state='unavailable' WHERE id=?", [uploadId]);
           fail(410, "FILE_UNAVAILABLE", "This attachment is missing or corrupted.");
         }
-        reply.header("Content-Type", "application/octet-stream").header("Content-Length", String(info.size)).header("Content-Disposition", `attachment; filename="download${path2.extname(file.name)}"; filename*=UTF-8''${encodeURIComponent(file.name).replace(/['()]/g, (c2) => `%${c2.charCodeAt(0).toString(16)}`)}`).header("X-Content-Type-Options", "nosniff").header("Cache-Control", "no-store").header("Content-Security-Policy", "sandbox; default-src 'none'");
+        reply.header("Content-Type", "application/octet-stream").header("Content-Length", String(info.size)).header("Content-Disposition", `attachment; filename="download${path3.extname(file.name)}"; filename*=UTF-8''${encodeURIComponent(file.name).replace(/['()]/g, (c2) => `%${c2.charCodeAt(0).toString(16)}`)}`).header("X-Content-Type-Options", "nosniff").header("Cache-Control", "no-store").header("Content-Security-Policy", "sandbox; default-src 'none'");
         return reply.send(createReadStream2(this.file(uploadId)));
       } catch (e) {
         release();
@@ -550,7 +766,7 @@ var Attachments = class {
         if (!entry.isFile() || !/^[0-9a-f-]{36}\.(bin|part)$/i.test(name)) continue;
         const uid = name.slice(0, 36);
         if (this.writers.has(uid) || this.readers.has(uid)) continue;
-        if (!await db.one("SELECT id FROM attachments WHERE id=?", [uid])) await unlink(path2.join(c.attachmentDir, name)).catch(() => {
+        if (!await db.one("SELECT id FROM attachments WHERE id=?", [uid])) await unlink(path3.join(c.attachmentDir, name)).catch(() => {
         });
       }
       await db.run("DELETE FROM attachment_usage WHERE id IN (SELECT id FROM attachment_usage WHERE created_at<? LIMIT 1000)", [Date.now() - 864e5]);
@@ -604,7 +820,7 @@ function mediaAdmission(app2, service, sessionForSocket) {
 
 // apps/api/src/chess.ts
 import { randomUUID as randomUUID3 } from "crypto";
-import { z as z5 } from "zod";
+import { z as z6 } from "zod";
 
 // packages/contracts/src/chess.ts
 var costs = { p: 1, n: 3, b: 3, r: 5, q: 9 };
@@ -777,7 +993,7 @@ function outcome(s) {
 
 // apps/api/src/games/service.ts
 import { randomUUID as randomUUID2 } from "crypto";
-import { z as z4 } from "zod";
+import { z as z5 } from "zod";
 
 // packages/contracts/src/games.ts
 var gameCatalog = [
@@ -1544,10 +1760,10 @@ function depart(kind, s, seat, settings, now) {
 
 // apps/api/src/games/service.ts
 var kinds = ["poker", "domino", "telephone", "drawing", "words", "ludo", "four"];
-var settingsSchema = z4.object({ maxPlayers: z4.number().int().min(2).max(8), seconds: z4.union([z4.literal(45), z4.literal(60), z4.literal(90)]).default(60), rounds: z4.number().int().min(1).max(3).default(1), language: z4.enum(["en", "fa"]).default("en"), domino: z4.enum(["draw", "block"]).default("draw"), chips: z4.union([z4.literal(1e3), z4.literal(2e3)]).default(1e3), blind: z4.union([z4.literal(10), z4.literal(20), z4.literal(50)]).default(20) }).strict();
-var gameCreate = z4.object({ requestId: z4.string().uuid(), channelId: z4.string().min(1).max(100), kind: z4.enum(kinds), settings: settingsSchema }).strict().refine((b) => b.settings.maxPlayers >= definition(b.kind).min && b.settings.maxPlayers <= definition(b.kind).max, "Choose a valid player limit.");
-var action = z4.object({ type: z4.enum(["drop", "tile", "draw", "pass", "next", "roll", "token", "fold", "check", "call", "raise", "stroke", "clear", "undo", "guess", "submit", "clue", "word"]), token: z4.string().max(40).optional(), piece: z4.number().int().min(0).max(3).optional(), column: z4.number().int().min(0).max(6).optional(), tile: z4.number().int().min(0).max(27).optional(), end: z4.enum(["left", "right"]).optional(), to: z4.number().int().min(0).max(1e6).optional(), index: z4.number().int().min(0).max(24).optional(), count: z4.number().int().min(1).max(9).optional(), text: z4.string().max(180).optional(), stroke: z4.object({ color: z4.string().max(7), width: z4.number().int(), points: z4.array(z4.tuple([z4.number().int().min(0).max(1e3), z4.number().int().min(0).max(1e3)])).min(1).max(100) }).strict().optional() }).strict();
-var gameCommand = z4.object({ requestId: z4.string().uuid(), revision: z4.number().int().positive(), kind: z4.enum(["join", "start", "leave", "close", "action"]), action: action.optional() }).strict();
+var settingsSchema = z5.object({ maxPlayers: z5.number().int().min(2).max(8), seconds: z5.union([z5.literal(45), z5.literal(60), z5.literal(90)]).default(60), rounds: z5.number().int().min(1).max(3).default(1), language: z5.enum(["en", "fa"]).default("en"), domino: z5.enum(["draw", "block"]).default("draw"), chips: z5.union([z5.literal(1e3), z5.literal(2e3)]).default(1e3), blind: z5.union([z5.literal(10), z5.literal(20), z5.literal(50)]).default(20) }).strict();
+var gameCreate = z5.object({ requestId: z5.string().uuid(), channelId: z5.string().min(1).max(100), kind: z5.enum(kinds), settings: settingsSchema }).strict().refine((b) => b.settings.maxPlayers >= definition(b.kind).min && b.settings.maxPlayers <= definition(b.kind).max, "Choose a valid player limit.");
+var action = z5.object({ type: z5.enum(["drop", "tile", "draw", "pass", "next", "roll", "token", "fold", "check", "call", "raise", "stroke", "clear", "undo", "guess", "submit", "clue", "word"]), token: z5.string().max(40).optional(), piece: z5.number().int().min(0).max(3).optional(), column: z5.number().int().min(0).max(6).optional(), tile: z5.number().int().min(0).max(27).optional(), end: z5.enum(["left", "right"]).optional(), to: z5.number().int().min(0).max(1e6).optional(), index: z5.number().int().min(0).max(24).optional(), count: z5.number().int().min(1).max(9).optional(), text: z5.string().max(180).optional(), stroke: z5.object({ color: z5.string().max(7), width: z5.number().int(), points: z5.array(z5.tuple([z5.number().int().min(0).max(1e3), z5.number().int().min(0).max(1e3)])).min(1).max(100) }).strict().optional() }).strict();
+var gameCommand = z5.object({ requestId: z5.string().uuid(), revision: z5.number().int().positive(), kind: z5.enum(["join", "start", "leave", "close", "action"]), action: action.optional() }).strict();
 var activeSeats = (g) => g.seats.filter((s) => !s.left);
 async function arcadeBusy(tx, uid, except = "") {
   return Boolean(await tx.one("SELECT p.user_id FROM game_players p JOIN game_sessions g ON g.id=p.game_id WHERE p.user_id=? AND g.status<>'finished' AND g.id<>?", [uid, except]));
@@ -1861,8 +2077,8 @@ var GameService = class {
 };
 
 // apps/api/src/chess.ts
-var chessCreate = z5.object({ requestId: z5.string().uuid(), serverId: z5.string().min(1).max(100), channelId: z5.string().min(1).max(100).optional(), openSeat: z5.literal(true).optional(), opponentId: z5.string().min(1).max(100).optional(), difficulty: z5.enum(["Easy", "Medium", "Hard"]).optional(), mode: z5.enum(["standard", "elixer"]), minutes: z5.union([z5.literal(3), z5.literal(5), z5.literal(10), z5.literal(15)]), increment: z5.union([z5.literal(0), z5.literal(2), z5.literal(5), z5.literal(10)]) }).strict().refine((b) => [b.opponentId, b.difficulty, b.openSeat].filter(Boolean).length === 1 && (!b.openSeat || Boolean(b.channelId)) && (!b.channelId || !b.opponentId), "Choose an open voice seat or AI");
-var chessCommand = z5.object({ requestId: z5.string().uuid(), revision: z5.number().int().positive(), kind: z5.enum(["join", "accept", "decline", "cancel", "action", "resign", "offerDraw", "acceptDraw", "declineDraw", "claimDraw"]), action: z5.object({ from: z5.number().int().min(0).max(63).optional(), to: z5.number().int().min(0).max(63), buy: z5.enum(["p", "n", "b", "r", "q"]).optional(), promotion: z5.enum(["q", "r", "b", "n"]).optional() }).strict().optional() }).strict();
+var chessCreate = z6.object({ requestId: z6.string().uuid(), serverId: z6.string().min(1).max(100), channelId: z6.string().min(1).max(100).optional(), openSeat: z6.literal(true).optional(), opponentId: z6.string().min(1).max(100).optional(), difficulty: z6.enum(["Easy", "Medium", "Hard"]).optional(), mode: z6.enum(["standard", "elixer"]), minutes: z6.union([z6.literal(3), z6.literal(5), z6.literal(10), z6.literal(15)]), increment: z6.union([z6.literal(0), z6.literal(2), z6.literal(5), z6.literal(10)]) }).strict().refine((b) => [b.opponentId, b.difficulty, b.openSeat].filter(Boolean).length === 1 && (!b.openSeat || Boolean(b.channelId)) && (!b.channelId || !b.opponentId), "Choose an open voice seat or AI");
+var chessCommand = z6.object({ requestId: z6.string().uuid(), revision: z6.number().int().positive(), kind: z6.enum(["join", "accept", "decline", "cancel", "action", "resign", "offerDraw", "acceptDraw", "declineDraw", "claimDraw"]), action: z6.object({ from: z6.number().int().min(0).max(63).optional(), to: z6.number().int().min(0).max(63), buy: z6.enum(["p", "n", "b", "r", "q"]).optional(), promotion: z6.enum(["q", "r", "b", "n"]).optional() }).strict().optional() }).strict();
 var winner = (color, reason) => `${color === 0 ? "White" : "Black"} wins by ${reason}`;
 function chargeClock(g, now) {
   if (g.status !== "playing" || g.pausedUntil) return;
@@ -2225,9 +2441,9 @@ var ChessService = class {
 // apps/api/src/server-icons.ts
 import { randomUUID as randomUUID4 } from "crypto";
 import { readdir, stat as stat3, writeFile, unlink as unlink2 } from "fs/promises";
-import path3 from "path";
+import path4 from "path";
 import sharp from "sharp";
-import { z as z6 } from "zod";
+import { z as z7 } from "zod";
 function serverIcons(api, service, directory) {
   api.post("/servers/:id/icon", async (req) => {
     const serverId = id.parse(req.params.id), rid = requestId.parse(req.headers["x-request-id"]);
@@ -2247,28 +2463,28 @@ function serverIcons(api, service, directory) {
       const result = await service.mutate(req.account.id, rid, "server.icon", { serverId, digest: hash(bytes.toString("base64")) }, async (tx) => {
         await service.member(tx, req.account.id, serverId, "manageChannels");
         let size = 0;
-        for (const name2 of await readdir(directory)) size += (await stat3(path3.join(directory, name2))).size;
+        for (const name2 of await readdir(directory)) size += (await stat3(path4.join(directory, name2))).size;
         if (size + image.length > service.c.maxAvatarsMiB * 1024 * 1024) fail(507, "AVATAR_QUOTA", "Avatar storage is full.");
         const name = `${randomUUID4()}.webp`;
-        await writeFile(path3.join(directory, name), image, { flag: "wx" });
+        await writeFile(path4.join(directory, name), image, { flag: "wx" });
         written = name;
         retired = (await tx.one("SELECT icon FROM servers WHERE id=?", [serverId]))?.icon || null;
         await tx.run("UPDATE servers SET icon=? WHERE id=?", [`/avatars/${name}`, serverId]);
         return { icon: `/avatars/${name}` };
       });
       written = "";
-      if (retired) await unlink2(path3.join(directory, path3.basename(retired))).catch(() => {
+      if (retired) await unlink2(path4.join(directory, path4.basename(retired))).catch(() => {
       });
       await service.notify("state:changed", {});
       return result;
     } catch (error) {
-      if (written) await unlink2(path3.join(directory, written)).catch(() => {
+      if (written) await unlink2(path4.join(directory, written)).catch(() => {
       });
       throw error;
     }
   });
   api.delete("/servers/:id/icon", async (req) => {
-    const serverId = id.parse(req.params.id), b = z6.object({ requestId }).parse(req.body);
+    const serverId = id.parse(req.params.id), b = z7.object({ requestId }).parse(req.body);
     let retired = null;
     const result = await service.mutate(req.account.id, b.requestId, "server.icon.remove", { serverId }, async (tx) => {
       await service.member(tx, req.account.id, serverId, "manageChannels");
@@ -2276,7 +2492,7 @@ function serverIcons(api, service, directory) {
       await tx.run("UPDATE servers SET icon=NULL WHERE id=?", [serverId]);
       return { success: true };
     });
-    if (retired) await unlink2(path3.join(directory, path3.basename(retired))).catch(() => {
+    if (retired) await unlink2(path4.join(directory, path4.basename(retired))).catch(() => {
     });
     await service.notify("state:changed", {});
     return result;
@@ -2288,8 +2504,8 @@ async function createApp(c = config(), options = {}) {
   const logging = options.logger ?? !process.env.VITEST;
   const app2 = Fastify({ logger: logging ? { serializers: { req: (req) => ({ method: req.method, url: String(req.url).split("?")[0], hostname: req.hostname, remoteAddress: req.ip }) } } : false, bodyLimit: 128 * 1024, trustProxy: c.trustedProxies.length ? c.trustedProxies : false, requestTimeout: 9e5, connectionTimeout: 3e4 });
   await mkdir2(c.dataDir, { recursive: true });
-  const lockPath = path4.join(c.dataDir, "instance.lock");
-  if (existsSync(lockPath)) {
+  const lockPath = path5.join(c.dataDir, "instance.lock");
+  if (existsSync2(lockPath)) {
     const pid = Number(readFileSync(lockPath, "utf8"));
     if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("Invalid instance.lock. Verify no server is running before removing it.");
     try {
@@ -2321,12 +2537,12 @@ async function createApp(c = config(), options = {}) {
     await tx.run("DELETE FROM voice_members");
     await tx.run("UPDATE coordinators SET user_id=NULL,epoch=epoch+1,expires_at=0");
   });
-  const avatarDir = path4.join(c.dataDir, "avatars");
+  const avatarDir = path5.join(c.dataDir, "avatars");
   await mkdir2(avatarDir, { recursive: true });
   async function storageStatus() {
     const databaseBytes = c.databaseUrl ? null : Number((await db.one("PRAGMA page_count")).page_count) * Number((await db.one("PRAGMA page_size")).page_size);
     let avatarBytes = 0;
-    for (const name of await readdir2(avatarDir)) avatarBytes += (await stat4(path4.join(avatarDir, name))).size;
+    for (const name of await readdir2(avatarDir)) avatarBytes += (await stat4(path5.join(avatarDir, name))).size;
     const databaseBudgetBytes = c.maxDatabaseMiB * 1048576, avatarBudgetBytes = c.maxAvatarsMiB * 1048576;
     const warnings = [];
     if (databaseBytes !== null && databaseBytes >= databaseBudgetBytes * 0.8) warnings.push("Database is at least 80% of its page budget. Prune data or migrate storage.");
@@ -2449,7 +2665,7 @@ async function createApp(c = config(), options = {}) {
     return sessionFor(user.id, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Unknown device"));
   });
   app2.post("/api/v1/auth/refresh", { config: authRate }, async (req) => {
-    const body = z7.object({ refreshToken: z7.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
+    const body = z8.object({ refreshToken: z8.string().min(20).max(512), requestId }).parse(req.body), fingerprint = hash(body.refreshToken);
     const outcome2 = await db.transaction(async (tx) => {
       const reused = await tx.one("SELECT session_id FROM used_refresh WHERE hash=?", [fingerprint]);
       if (reused) {
@@ -2488,7 +2704,7 @@ async function createApp(c = config(), options = {}) {
     attachments.register(api);
     serverIcons(api, service, avatarDir);
     api.post("/auth/renew", async (req, reply) => {
-      z7.object({ requestId }).parse(req.body);
+      z8.object({ requestId }).parse(req.body);
       if (req.session.native) fail(400, "NATIVE_REFRESH", "Use native credential renewal.");
       const access = token(), now = Date.now();
       await db.run("UPDATE sessions SET access_hash=?,access_expires=?,expires_at=?,last_seen=? WHERE id=?", [hash(access), now + 30 * 864e5, now + 30 * 864e5, now, req.session.id]);
@@ -2497,14 +2713,14 @@ async function createApp(c = config(), options = {}) {
     });
     api.get("/auth/me", async (req) => ({ user: publicUser(req.account), csrf: req.session.csrf }));
     api.post("/auth/logout", async (req, reply) => {
-      z7.object({ requestId }).parse(req.body);
+      z8.object({ requestId }).parse(req.body);
       await db.run("DELETE FROM sessions WHERE id=?", [req.session.id]);
       for (const s of io.sockets.sockets.values()) if (s.data.sessionId === req.session.id) s.disconnect(true);
       reply.clearCookie("dorham_session", { path: "/" });
       return { success: true };
     });
     api.post("/auth/password", async (req) => {
-      const b = z7.object({ password: passwordSchema, requestId }).parse(req.body);
+      const b = z8.object({ password: passwordSchema, requestId }).parse(req.body);
       if (req.account.guest) fail(403, "GUEST_ACCOUNT", "Register this guest account before setting a password.");
       const encoded = await passwordHash(b.password);
       const result = await service.mutate(req.account.id, b.requestId, "password.change", { fingerprint: hash(b.password) }, async (tx) => {
@@ -2518,7 +2734,7 @@ async function createApp(c = config(), options = {}) {
       return result;
     });
     api.post("/admin/claim", async (req) => {
-      const b = z7.object({ secret: z7.string().max(256), requestId }).parse(req.body);
+      const b = z8.object({ secret: z8.string().max(256), requestId }).parse(req.body);
       if (!c.bootstrapSecret || !equal(c.bootstrapSecret, b.secret)) fail(403, "FORBIDDEN", "Bootstrap secret is invalid.");
       return service.mutate(req.account.id, b.requestId, "admin.claim", {}, async (tx) => {
         if (await tx.one("SELECT value FROM meta WHERE key='admin_claimed'")) fail(409, "ALREADY_CLAIMED", "Instance administration has already been claimed.");
@@ -2556,16 +2772,16 @@ async function createApp(c = config(), options = {}) {
       let retiredAvatar = null;
       const result = await service.mutate(req.account.id, rid, "avatar.change", { hash: hash(bytes.toString("base64")) }, async (tx) => {
         let size = 0;
-        for (const f of await readdir2(avatarDir)) size += (await stat4(path4.join(avatarDir, f))).size;
+        for (const f of await readdir2(avatarDir)) size += (await stat4(path5.join(avatarDir, f))).size;
         if (size + image.length > c.maxAvatarsMiB * 1024 * 1024) fail(507, "AVATAR_QUOTA", "Avatar storage is full.");
         const name = `${randomUUID5()}.webp`;
-        await writeFile2(path4.join(avatarDir, name), image, { flag: "wx" });
+        await writeFile2(path5.join(avatarDir, name), image, { flag: "wx" });
         const old = await tx.one("SELECT avatar FROM users WHERE id=?", [req.account.id]);
         await tx.run("UPDATE users SET avatar=? WHERE id=?", [`/avatars/${name}`, req.account.id]);
         retiredAvatar = old?.avatar || null;
         return { avatar: `/avatars/${name}` };
       });
-      if (retiredAvatar) await unlink3(path4.join(avatarDir, path4.basename(retiredAvatar))).catch(() => {
+      if (retiredAvatar) await unlink3(path5.join(avatarDir, path5.basename(retiredAvatar))).catch(() => {
       });
       await service.notify("state:changed", {});
       await service.notify("voice:changed", {});
@@ -2574,11 +2790,11 @@ async function createApp(c = config(), options = {}) {
     api.get("/channels/:id", async (req) => service.channel(db, req.account.id, id.parse(req.params.id)));
     api.get("/channels/:id/overrides", async (req) => service.channelOverrides(req.account.id, id.parse(req.params.id), schemas.role.parse(req.query.role)));
     api.post("/servers", async (req) => {
-      const b = z7.object({ name: schemas.name, requestId }).parse(req.body);
+      const b = z8.object({ name: schemas.name, requestId }).parse(req.body);
       return service.createServer(req.account.id, b.requestId, b.name);
     });
     api.patch("/servers/:id", async (req) => {
-      const b = z7.object({ name: schemas.name.optional(), delete: z7.boolean().optional(), allowGuests: z7.boolean().optional(), allowMemberInvites: z7.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
+      const b = z8.object({ name: schemas.name.optional(), delete: z8.boolean().optional(), allowGuests: z8.boolean().optional(), allowMemberInvites: z8.boolean().optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.allowGuests !== void 0 || b2.allowMemberInvites !== void 0).parse(req.body);
       return service.changeServer(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/channels", async (req) => {
@@ -2586,95 +2802,107 @@ async function createApp(c = config(), options = {}) {
       return service.createChannel(req.account.id, b.requestId, id.parse(req.params.id), b.name, b.kind);
     });
     api.patch("/channels/:id", async (req) => {
-      const b = z7.object({ name: schemas.name.optional(), delete: z7.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z7.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
+      const b = z8.object({ name: schemas.name.optional(), delete: z8.boolean().optional(), role: schemas.role.optional(), permissions: schemas.permissions.optional(), expectedRevision: z8.number().int().min(0).optional(), requestId }).refine((b2) => b2.name || b2.delete || b2.role && b2.permissions).parse(req.body);
       return service.changeChannel(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/servers/:id/invites", async (req) => {
-      const b = z7.object({ hours: z7.number().int().min(1).max(168).default(24), uses: z7.number().int().min(1).max(100).default(10), channelId: id.optional(), requestId }).parse(req.body);
+      const b = z8.object({ hours: z8.number().int().min(1).max(168).default(24), uses: z8.number().int().min(1).max(100).default(10), channelId: id.optional(), requestId }).parse(req.body);
       return service.invite(req.account.id, b.requestId, id.parse(req.params.id), token(), b.hours, b.uses, b.channelId);
     });
     api.get("/servers/:id/invites", async (req) => service.invitations(req.account.id, id.parse(req.params.id)));
     api.delete("/servers/:id/invites/:code", async (req) => {
-      const b = z7.object({ requestId }).parse(req.body), p = req.params;
-      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z7.string().min(10).max(100).parse(p.code));
+      const b = z8.object({ requestId }).parse(req.body), p = req.params;
+      return service.revokeInvitation(req.account.id, b.requestId, id.parse(p.id), z8.string().min(10).max(100).parse(p.code));
     });
     api.get("/servers/:id/roles", async (req) => service.customRoles(req.account.id, id.parse(req.params.id)));
     api.post("/servers/:id/roles", async (req) => {
-      const b = z7.object({ roleId: z7.string().uuid().optional(), name: z7.string().trim().min(1).max(32).optional(), color: z7.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z7.boolean().optional(), userId: id.optional(), assigned: z7.boolean().optional(), requestId }).strict().parse(req.body);
+      const b = z8.object({ roleId: z8.string().uuid().optional(), name: z8.string().trim().min(1).max(32).optional(), color: z8.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z8.boolean().optional(), userId: id.optional(), assigned: z8.boolean().optional(), requestId }).strict().parse(req.body);
       return service.changeCustomRole(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/invites/join", async (req) => {
-      const b = z7.object({ code: z7.string().min(10).max(100), requestId }).parse(req.body);
+      const b = z8.object({ code: z8.string().min(10).max(100), requestId }).parse(req.body);
       return service.joinInvite(req.account.id, b.requestId, b.code);
     });
     api.get("/servers/:id/members", async (req) => service.members(req.account.id, id.parse(req.params.id)));
     api.patch("/servers/:serverId/members/:userId", async (req) => {
-      const b = z7.object({ role: schemas.role.optional(), remove: z7.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
+      const b = z8.object({ role: schemas.role.optional(), remove: z8.boolean().optional(), requestId }).refine((b2) => b2.role || b2.remove).parse(req.body), p = req.params;
       return service.changeMember(req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b);
     });
     api.post("/servers/:id/leave", async (req) => {
-      const b = z7.object({ requestId }).parse(req.body);
+      const b = z8.object({ requestId }).parse(req.body);
       return service.leaveServer(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/dms/:id/close", async (req) => {
-      const b = z7.object({ requestId }).parse(req.body);
+      const b = z8.object({ requestId }).parse(req.body);
       return service.closeDirectMessage(req.account.id, b.requestId, id.parse(req.params.id));
     });
     api.post("/users/:id/block", async (req) => {
-      const b = z7.object({ blocked: z7.boolean(), requestId }).parse(req.body);
+      const b = z8.object({ blocked: z8.boolean(), requestId }).parse(req.body);
       return service.blockUser(req.account.id, b.requestId, id.parse(req.params.id), b.blocked);
     });
     api.post("/dms", async (req) => {
-      const b = z7.object({ userId: id, requestId }).parse(req.body);
+      const b = z8.object({ userId: id, requestId }).parse(req.body);
       const result = await service.dm(req.account.id, b.requestId, b.userId);
       await service.notify("state:changed", {});
       return result;
     });
     api.get("/conversations/:id/messages", async (req) => {
-      const b = z7.object({ before: z7.coerce.number().int().min(1).optional(), after: z7.coerce.number().int().min(0).optional() }).parse(req.query);
+      const b = z8.object({ before: z8.coerce.number().int().min(1).optional(), after: z8.coerce.number().int().min(0).optional() }).parse(req.query);
       return service.history(req.account.id, id.parse(req.params.id), b.before, b.after);
     });
     api.post("/messages", async (req) => {
       const b = messageSchema.parse(req.body);
-      return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds);
+      return service.send(req.account.id, b.requestId, b.conversationId, b.content, b.replyTo, b.attachmentIds, b.tts);
+    });
+    api.get("/voice/tts/:id/audio", async (req, reply) => {
+      const audio = await voiceSpeech.read(req.account.id, id.parse(req.params.id));
+      if (!audio) fail(404, "NOT_FOUND", "Speech audio is unavailable.");
+      return reply.header("Cache-Control", "private, no-store").type("audio/wav").send(audio);
     });
     api.patch("/messages/:id", async (req) => {
-      const b = z7.object({ content: z7.string().trim().min(1).max(4e3).optional(), delete: z7.boolean().optional(), emoji: z7.enum(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F440}", "\u2705"]).optional(), removeReaction: z7.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
+      const b = z8.object({ content: z8.string().trim().min(1).max(4e3).optional(), delete: z8.boolean().optional(), emoji: reactionEmojiSchema.optional(), removeReaction: z8.boolean().optional(), requestId }).refine((b2) => b2.content || b2.delete || b2.emoji).parse(req.body);
       return service.changeMessage(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/conversations/:id/read", async (req) => {
-      const b = z7.object({ sequence: z7.number().int().min(0), requestId }).parse(req.body);
+      const b = z8.object({ sequence: z8.number().int().min(0), requestId }).parse(req.body);
       return service.read(req.account.id, b.requestId, id.parse(req.params.id), b.sequence);
     });
     api.get("/voice/:id", async (req) => service.room(req.account.id, id.parse(req.params.id)));
     api.post("/voice/:id/moderate", async (req) => {
-      const b = z7.object({ userId: id, action: z7.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
+      const b = z8.object({ userId: id, action: z8.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
       return service.moderate(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.action);
     });
     api.patch("/voice/:id/policy", async (req) => {
-      const b = z7.object({ locked: z7.boolean(), userLimit: z7.number().int().min(1).max(c.maxVoice), tagMode: z7.enum(["ANY", "ALL"]), requiredTags: z7.array(z7.string().uuid()).max(32), requestId }).parse(req.body);
+      const b = z8.object({ locked: z8.boolean(), userLimit: z8.number().int().min(1).max(c.maxVoice), tagMode: z8.enum(["ANY", "ALL"]), requiredTags: z8.array(z8.string().uuid()).max(32), requestId }).parse(req.body);
       return service.voicePolicy(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.post("/voice/:id/move", async (req) => {
-      const b = z7.object({ userId: id, channelId: id, requestId }).parse(req.body);
+      const b = z8.object({ userId: id, channelId: id, requestId }).parse(req.body);
       return service.moveVoice(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.channelId);
     });
     api.get("/servers/:id/tags", async (req) => ({ tags: await service.tags(req.account.id, id.parse(req.params.id)) }));
     api.post("/servers/:id/tags", async (req) => {
-      const b = z7.object({ tagId: z7.string().uuid().optional(), name: z7.string().trim().min(1).max(32).optional(), color: z7.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z7.boolean().optional(), userId: id.optional(), assigned: z7.boolean().optional(), requestId }).parse(req.body);
+      const b = z8.object({ tagId: z8.string().uuid().optional(), name: z8.string().trim().min(1).max(32).optional(), color: z8.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), delete: z8.boolean().optional(), userId: id.optional(), assigned: z8.boolean().optional(), requestId }).parse(req.body);
       return service.changeTag(req.account.id, b.requestId, id.parse(req.params.id), b);
     });
     api.get("/admin/metrics", async (req) => {
       if (!req.account.instance_admin) fail(403, "FORBIDDEN", "Instance administrator required.");
       let disk = 0;
       for (const f of await readdir2(c.dataDir)) {
-        const s = await stat4(path4.join(c.dataDir, f));
+        const s = await stat4(path5.join(c.dataDir, f));
         if (s.isFile()) disk += s.size;
       }
       return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, realtime, sfuControl: sfu.metrics, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map((s) => s.data.userId)).size, accounts: (await db.one("SELECT COUNT(*) AS count FROM users")).count, messages: (await db.one("SELECT COUNT(*) AS count FROM messages")).count, shares: (await db.one("SELECT COUNT(*) AS count FROM share_leases")).count };
     });
   }, { prefix: "/api/v1" });
   const io = new SocketServer(app2.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 12e4, skipMiddlewares: false }, pingInterval: 2e4, pingTimeout: 1e4, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
+  const voiceSpeech = new VoiceSpeech(service, (socketId, event) => io.sockets.sockets.get(socketId)?.emit("voice:tts", event), (userId, text2) => {
+    for (const socket of io.sockets.sockets.values()) if (socket.data.userId === userId) socket.emit("voice:tts-notice", { text: text2 });
+  }, options.ttsSynthesize);
+  service.onTts = (userId, message) => {
+    void voiceSpeech.enqueue(userId, message).catch(() => {
+    });
+  };
   mediaAdmission(app2, service, (socketId) => io.sockets.sockets.get(socketId)?.data.sessionId);
   games.online = (uid) => [...io.sockets.sockets.values()].some((s) => s.data.userId === uid);
   games.notify = async (g, directoryChanged, canvas) => {
@@ -2831,7 +3059,7 @@ async function createApp(c = config(), options = {}) {
     });
     handle("message:send", async (b) => {
       const m = messageSchema.parse(b);
-      return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds);
+      return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds, m.tts);
     });
     handle("game:watch", async (b) => {
       const gameId = id.parse(b.id);
@@ -2844,31 +3072,31 @@ async function createApp(c = config(), options = {}) {
       return {};
     });
     handle("typing", async (b) => {
-      const v = z7.object({ conversationId: id, active: z7.boolean() }).parse(b);
+      const v = z8.object({ conversationId: id, active: z8.boolean() }).parse(b);
       const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter((s) => s.id !== socket.id).map((s) => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId);
       for (const id2 of audience) io.sockets.sockets.get(id2)?.emit("typing", { ...v, userId: socket.data.userId });
       return {};
     });
     handle("voice:join", async (b) => {
-      const v = z7.object({ channelId: id, eligible: z7.boolean() }).parse(b);
+      const v = z8.object({ channelId: id, eligible: z8.boolean() }).parse(b);
       const result = await service.joinVoice(socket.data.userId, socket.id, v.channelId, v.eligible);
       socket.data.voiceChannel = v.channelId;
       return result;
     });
     handle("voice:leave", async (b) => {
-      z7.object({ requestId }).parse(b);
+      z8.object({ requestId }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "leave");
       socket.data.voiceChannel = null;
       return result;
     });
     handle("voice:heartbeat", async (b) => {
-      const v = z7.object({ eligible: z7.boolean().optional() }).parse(b);
+      const v = z8.object({ eligible: z8.boolean().optional() }).parse(b);
       const result = await service.voiceAction(socket.data.userId, socket.id, "heartbeat", v);
       if ("room" in result) socket.emit("voice:room", result.room);
       return result;
     });
     handle("voice:state", async (b) => {
-      const v = z7.object({ muted: z7.boolean(), deafened: z7.boolean(), requestId }).parse(b);
+      const v = z8.object({ muted: z8.boolean(), deafened: z8.boolean(), requestId }).parse(b);
       return service.voiceAction(socket.data.userId, socket.id, "state", v);
     });
     handle("share:start", async (b) => {
@@ -2881,11 +3109,11 @@ async function createApp(c = config(), options = {}) {
       return service.updateShare(socket.data.userId, socket.id, v.requestId, v);
     });
     handle("share:stop", async (b) => {
-      const v = z7.object({ requestId }).parse(b);
+      const v = z8.object({ requestId }).parse(b);
       return service.share(socket.data.userId, socket.id, v.requestId, true);
     });
     handle("voice:sfu", async (b) => {
-      const v = z7.object({ channelId: id }).parse(b);
+      const v = z8.object({ channelId: id }).parse(b);
       return sfu.credentials(socket.data.userId, socket.id, v.channelId);
     });
     handle("voice:signal", async (b) => {
@@ -2917,8 +3145,8 @@ async function createApp(c = config(), options = {}) {
   });
   app2.get("/api/v1/presence", { preHandler: authenticate }, async () => ({ online: [...new Set([...io.sockets.sockets.values()].map((s) => s.data.userId))], latencies: connectionLatency.snapshot(io.sockets.sockets.values()) }));
   await app2.register(staticPlugin, { root: avatarDir, prefix: "/avatars/", decorateReply: false, maxAge: 36e5, immutable: true });
-  const webRoot = path4.resolve("apps/web/dist");
-  if (existsSync(webRoot)) {
+  const webRoot = path5.resolve("apps/web/dist");
+  if (existsSync2(webRoot)) {
     await app2.register(staticPlugin, { root: webRoot, prefix: "/" });
     app2.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith("/api/") || req.url.startsWith("/avatars/")) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Not found." } });
@@ -2961,19 +3189,20 @@ async function createApp(c = config(), options = {}) {
   });
   app2.addHook("onClose", async () => {
     await new Promise((resolve) => io.close(() => resolve()));
+    voiceSpeech.close();
     await attachments.close();
     await db.close();
-    if (existsSync(lockPath) && readFileSync(lockPath, "utf8") === String(process.pid)) unlinkSync(lockPath);
+    if (existsSync2(lockPath) && readFileSync(lockPath, "utf8") === String(process.pid)) unlinkSync(lockPath);
   });
   return { app: app2, db, service, io, chess, games, attachments, config: c };
 }
 
 // apps/api/src/index.ts
 import { writeFile as writeFile3 } from "fs/promises";
-import path5 from "path";
+import path6 from "path";
 var { app, config: config2 } = await createApp();
 await app.listen({ port: config2.port, host: config2.host });
-await writeFile3(path5.join(config2.dataDir, "runtime-status.json"), JSON.stringify({
+await writeFile3(path6.join(config2.dataDir, "runtime-status.json"), JSON.stringify({
   startedAt: (/* @__PURE__ */ new Date()).toISOString(),
   node: process.version,
   platform: process.platform,

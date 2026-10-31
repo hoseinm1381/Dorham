@@ -3,7 +3,7 @@ import {
   fail,
   passwordHash,
   registerSchema
-} from "./chunk-2GUYZ3ZR.js";
+} from "./chunk-XCW5YO2D.js";
 import {
   config,
   openDatabase

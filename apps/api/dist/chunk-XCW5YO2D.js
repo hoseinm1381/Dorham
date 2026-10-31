@@ -8,7 +8,7 @@ var shareUpdateSchema = z.object({ requestId, leaseId: id, expectedRevision: z.n
 var passwordSchema = z.string().min(8).max(128);
 var credentialsSchema = z.object({ username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/), password: passwordSchema });
 var registerSchema = credentialsSchema.extend({ displayName: z.string().trim().min(1).max(48), language: z.enum(["en-US", "fa-IR"]).optional(), requestId });
-var messageSchema = z.object({ conversationId: id, content: z.string().trim().max(4e3), replyTo: id.nullable().optional(), attachmentIds: z.array(z.string().uuid()).max(4).default([]), requestId }).refine((v) => v.content.length > 0 || v.attachmentIds.length > 0, { message: "Write a message or attach a file." });
+var messageSchema = z.object({ conversationId: id, content: z.string().trim().max(4e3), tts: z.boolean().optional(), replyTo: id.nullable().optional(), attachmentIds: z.array(z.string().uuid()).max(4).default([]), requestId }).refine((v) => v.content.length > 0 || v.attachmentIds.length > 0, { message: "Write a message or attach a file." });
 var signalSchema = z.object({ channelId: id, to: id, epoch: id, description: z.object({ type: z.enum(["offer", "answer", "pranswer", "rollback"]), sdp: z.string().max(1e5).optional() }).optional(), candidate: z.object({ candidate: z.string().max(4096).optional(), sdpMid: z.string().nullable().optional(), sdpMLineIndex: z.number().int().nullable().optional(), usernameFragment: z.string().nullable().optional() }).nullable().optional(), streams: z.array(z.object({ streamId: id, kind: z.enum(["audio", "screen"]), leaseId: id.optional() })).max(3).optional(), subscription: z.object({ leaseId: id, enabled: z.boolean() }).optional() });
 var rank = { member: 0, moderator: 1, administrator: 2, owner: 3 };
 function basePermissions(role) {
@@ -65,6 +65,12 @@ async function limited(fn) {
 // apps/api/src/accounts.ts
 import { randomUUID as randomUUID2 } from "crypto";
 import { z as z4 } from "zod";
+
+// packages/contracts/src/tts.ts
+function ttsMessage(content) {
+  const requested = /^\/tts(?:\s|$)/i.test(content.trim());
+  return { requested, text: requested ? content.trim().replace(/^\/tts\s*/i, "").trim() : content };
+}
 
 // apps/api/src/service.ts
 import { randomUUID, createHmac } from "crypto";
@@ -194,6 +200,7 @@ var Service = class {
   c;
   notify = async () => {
   };
+  onTts;
   cloudflareTurn;
   async mutate(userId, requestId2, operation, payload, fn) {
     requestId.parse(requestId2);
@@ -618,9 +625,11 @@ var Service = class {
     await tx.run("INSERT INTO events(id,conversation_id,sequence,kind,payload,created_at) VALUES(?,?,?,?,?,?)", [randomUUID(), conversationId, event.sequence, kind, JSON.stringify(payload), Date.now()]);
     return event;
   }
-  async send(userId, requestId2, conversationId, content, replyTo, attachmentIds = []) {
+  async send(userId, requestId2, conversationId, content, replyTo, attachmentIds = [], asTts = false) {
     let reopened = false;
-    const event = await this.mutate(userId, requestId2, "message.send", { conversationId, content, replyTo, attachmentIds }, async (tx) => {
+    const spoken = ttsMessage(content);
+    if (!spoken.text && !attachmentIds.length) fail(400, "VALIDATION", "Type a message after /tts.");
+    const event = await this.mutate(userId, requestId2, "message.send", { conversationId, content, replyTo, attachmentIds, ...asTts ? { tts: true } : {} }, async (tx) => {
       const cv = await this.conversation(tx, userId, conversationId, true);
       const account = await tx.one("SELECT guest FROM users WHERE id=?", [userId]);
       if (account.guest && (await tx.one("SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND created_at>?", [userId, Date.now() - 6e4])).count >= 20) fail(429, "GUEST_RATE", "Guests may send at most 20 messages per minute.");
@@ -631,7 +640,7 @@ var Service = class {
         await tx.run("DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY created_at LIMIT 200)");
       }
       const messageId = randomUUID();
-      await tx.run("INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)", [messageId, conversationId, Number(cv.sequence) + 1, userId, content, replyTo || null, Date.now()]);
+      await tx.run("INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)", [messageId, conversationId, Number(cv.sequence) + 1, userId, spoken.text, replyTo || null, Date.now()]);
       for (const a of attachmentIds) await tx.run("UPDATE attachments SET message_id=? WHERE id=?", [messageId, a]);
       if (cv.kind === "dm") {
         reopened = Boolean(await tx.one("SELECT user_id FROM dm_members WHERE conversation_id=? AND hidden=1", [conversationId]));
@@ -641,6 +650,7 @@ var Service = class {
     });
     if (reopened) await this.notify("state:changed", {});
     await this.notify("conversation:event", event);
+    if ((spoken.requested || asTts) && spoken.text) this.onTts?.(userId, event.payload);
     return event;
   }
   async changeMessage(userId, requestId2, messageId, body) {
@@ -1194,4 +1204,4 @@ export {
   Service,
   schemas
 };
-//# sourceMappingURL=chunk-2GUYZ3ZR.js.map
+//# sourceMappingURL=chunk-XCW5YO2D.js.map
