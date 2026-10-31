@@ -1,0 +1,1 @@
+function e(e){return[`NotAllowedError`,`PermissionDeniedError`,`NotFoundError`,`DevicesNotFoundError`,`NotReadableError`,`TrackStartError`,`SecurityError`].includes(e?.name||``)}var t=`Listening only. Microphone unavailable or permission denied. Rejoin to try again.`;export{e as n,t};
