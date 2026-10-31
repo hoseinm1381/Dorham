@@ -1,4 +1,4 @@
-**Current web/server update: 1.0.4, live at https://dorhamapp.ir/** — all 64 emoji reactions, keep-open selection, larger single emojis and local Farsi/English voice-channel TTS. Native builds remain deferred. See [release details](docs/RELEASE-1.0.4.md).
+**Current web/server update: 1.0.4, live at https://dorhamapp.ir/** — all 64 emoji reactions, keep-open selection, larger single emojis and local Farsi/English voice-channel TTS. Windows and signed Android 1.0.4 installers are published with the existing update identities. See [release details](docs/RELEASE-1.0.4.md) and [native release checks](docs/RELEASE-1.0.4-NATIVE.md).
 
 **Previous web update: 1.0.3** — 64 supplied Soft Bubble emojis, including nine Dorham exclusives, with a searchable message picker, Persian labels and offline artwork. See [web verification](docs/RELEASE-1.0.3.md).
 
@@ -6,7 +6,7 @@
 
 **Previous web update: 1.0.1** — Chrome screen sound, fullscreen sound controls and visible Watch stream buttons. Applied without restarting voice services. Windows/Android stable downloads remain 1.0.0; native work is deferred. See [web verification](docs/RELEASE-1.0.1.md).
 
-**Native release: 1.0.0** — deployed at **https://dorhamapp.ir/** with public Windows/Android downloads, a small Get apps menu and native update notices. See [release and update verification](docs/RELEASE-1.0.0.md).
+**Previous native release: 1.0.0** — deployed at **https://dorhamapp.ir/** with public Windows/Android downloads, a small Get apps menu and native update notices. See [release and update verification](docs/RELEASE-1.0.0.md).
 
 **Previous release: 0.7.7** — simpler audio settings, local Strong noise removal, 16 built-in profile pictures and matching DM avatar colours. Deployed at **https://dorhamapp.ir/** after isolated SFU and verified rollback-backup checks. See [release verification](docs/RELEASE-0.7.7.md).
 
