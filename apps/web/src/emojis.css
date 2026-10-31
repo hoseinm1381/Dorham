@@ -14,3 +14,5 @@
 .message-text.single-emoji{display:inline-block;font-size:56px;line-height:1.2}.single-emoji .custom-emoji{width:64px;height:64px;vertical-align:middle;margin:4px 0}
 
 .tts-controls{display:flex;align-items:center;gap:10px;font-size:11px;color:#a8adc2;padding:4px 2px}.tts-controls label{display:flex;align-items:center;gap:5px}.tts-controls input{width:14px;height:14px;margin:0}.tts-controls button{margin-inline-start:auto;color:#b9a6ff;font-size:11px}.tts-controls small{font-size:10px}
+
+.emoji-picker .emoji-keep-open,.tts-controls label{flex-direction:row;justify-content:flex-start;margin-bottom:0}
