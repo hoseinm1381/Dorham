@@ -17,7 +17,7 @@ test('20 browsers, 16 real mesh participants and six actual screen publishers wi
     await call(0, `/servers/${server.id}/channels`, { name: 'Studio', kind: 'voice' }); await call(0, `/servers/${server.id}/channels`, { name: 'Workshop', kind: 'voice' });
     for (const context of contexts) { const p = await context.newPage(); pages.push(p); await p.goto(base); await p.getByRole('button', { name: 'Open Capacity room', exact: true }).click(); }
     for (let i = 0; i < 20; i++) await pages[i].getByRole('button', { name: i < 16 ? 'Lounge' : i < 18 ? 'Studio' : 'Workshop', exact: true }).click();
-    await expect(pages[0].locator('.voice-card')).toHaveCount(16);
+    await expect(pages[0].locator('.voice-mini-members button')).toHaveCount(16);
     await expect.poll(async () => { const results = await Promise.all(pages.slice(0, 16).map(report)); return results.every(rows => rows.filter(r => r.kind === 'audio' && r.totalSamplesReceived > 0 && r.totalAudioEnergy > 0).length === 15); }, { timeout: 90000, intervals: [1000, 3000] }).toBe(true);
     for (const i of [0, 1, 2, 16, 17, 18]) await pages[i].getByRole('button', { name: 'Share screen', exact: true }).click();
     await expect.poll(async () => { const results = await Promise.all([report(pages[3]), report(pages[16]), report(pages[19])]); return results[0].filter(r => r.kind === 'video' && r.framesDecoded > 0).length === 3 && results[1].some(r => r.kind === 'video' && r.framesDecoded > 0) && results[2].some(r => r.kind === 'video' && r.framesDecoded > 0); }, { timeout: 60000, intervals: [1000, 3000] }).toBe(true);

@@ -65,7 +65,7 @@ test('real output gain changes at 0/50/100/200 percent and deafen restores the c
     await api(second, '/invites/join', { code: invite.code });
     for (const page of [first, second]) { await page.getByRole('button', { name: 'Open Audio output lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
     await expect.poll(() => level(second), { timeout: 40000 }).toBeGreaterThan(0.045);
-    await second.getByRole('button', { name: 'Voice controls', exact: true }).click();
+    await second.locator('.voice-mini-members button').filter({ hasText: `GainA${suffix}` }).click({ button: 'right' });
     const slider = second.getByRole('slider'); const full = await level(second); expect(full).toBeGreaterThan(0.045);
     await slider.fill('50'); await expect.poll(async () => (await level(second)) / full).toBeCloseTo(0.5, 1); const half = await level(second); expect(half / full).toBeLessThan(0.56);
     await slider.fill('0'); await expect.poll(() => level(second)).toBeLessThan(0.000001);

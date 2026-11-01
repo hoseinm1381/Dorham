@@ -1,4 +1,3 @@
-.voice-card.speaking .avatar,
 .voice-mini-members .speaking .avatar {
   outline: 3px solid #83daba;
   outline-offset: 3px;
@@ -10,11 +9,6 @@
 .screen-layout-toggle { color: #bdb4ef; font-size: 11px; padding: 7px 9px; border: 1px solid #bdb4ef33; border-radius: 6px; }
 .screen-focused .voice-stage { flex: 1 1 0; min-height: 250px; max-height: none; display: flex; flex-direction: column; overflow: hidden; }
 .screen-focused .voice-stage-heading, .screen-focused .share-list { flex-shrink: 0; }
-.screen-focused .voice-cards { flex-shrink: 0; padding: 10px 3px; }
-.screen-focused .voice-card { min-width: 110px; padding: 7px 9px; }
-.screen-focused .voice-card > button { flex-direction: row; gap: 8px; }
-.screen-focused .voice-card .avatar { width: 24px; height: 24px; }
-.screen-focused .voice-card > span { margin: 6px 0; }
 .screen-focused .screens { flex: 1 1 0; min-height: 100px; grid-auto-rows: minmax(160px, 1fr); overflow: auto; }
 .screen-focused .screen { display: flex; flex-direction: column; min-height: 0; }
 .screen-focused .screen video { flex: 1 1 0; min-height: 0; height: 100%; max-height: none; object-fit: contain; }
@@ -24,16 +18,14 @@
 .screen-focused .conversation-start > span, .screen-focused .conversation-start > div { display: none; }
 @media (max-width: 600px) {
   .screen-focused .voice-stage { min-height: 260px; padding: 10px 12px; }
-  .screen-focused .voice-card .volume-slider, .screen-focused .voice-card > span { display: none; }
   .screen-focused .screens { grid-template-columns: 1fr; grid-auto-rows: minmax(160px, 1fr); }
   .screen-focused .message-scroll { flex-basis: 80px; min-height: 45px; }
   .screen-focused .composer-wrap { padding-top: 6px; padding-bottom: 8px; }
   .screen-layout-toggle { font-size: 10px; }
   .voice-stage-tools .transport-tag { display: none; }
 }
-/* Shared screens get the height; controls remain available by explicit expansion. */
-.voice-stage.voice-collapsed.has-shares { max-height:none; overflow:hidden; }
-.voice-collapsed .voice-cards { display:none !important; }
+/* Shared screens get the height; participants remain in the sidebar. */
+.voice-stage.has-shares { max-height:none; overflow:hidden; }
 .screen-focused .voice-stage { padding:6px 12px; min-height:0; flex:1 1 0; }
 .screen-focused .voice-stage-heading { min-height:28px; margin-bottom:4px; gap:8px; }
 .screen-focused .voice-stage-heading > span { gap:7px; }
@@ -53,8 +45,6 @@
 .screen-focused .file-composer { margin:3px 0; gap:4px; }
 .screen-focused .file-composer > small { display:none; }
 .screen-focused .file-composer > label { font-size:10px; padding:5px 8px; }
-.screen-focused .voice-cards { padding:3px; max-height:90px; overflow:auto; }
-.screen-focused .voice-card { padding:4px 8px; }
 .own-preview-toggle { display:flex !important; flex-direction:row !important; align-items:center; gap:5px; font-size:10px; white-space:nowrap; }
 .own-preview-toggle input { width:13px; height:13px; }
 .members-restore { display:none; }
@@ -73,7 +63,7 @@
   .screen-focused .composer-wrap { padding:3px 8px 5px; }
 }
 
-.screen-focused .voice-stage.voice-collapsed.has-shares { flex:1 1 0; max-height:none; min-height:0; overflow:hidden; }
+.screen-focused .voice-stage.has-shares { flex:1 1 0; max-height:none; min-height:0; overflow:hidden; }
 .voice-input-settings { padding:12px 0; border-bottom:1px solid #ffffff18; }
 .voice-input-settings h3 { margin:0 0 14px; }
 .voice-input-settings p { color:#a4a8be; line-height:1.5; font-size:12px; }

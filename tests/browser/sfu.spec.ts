@@ -36,8 +36,8 @@ async function media(page: Page) {
     return result;
   });
 }
-async function api(page: Page, route: string, body: object) {
-  return page.evaluate(async ({ route, body }) => { const auth = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch('/api/v1' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': auth.csrf }, body: JSON.stringify({ requestId: crypto.randomUUID(), ...body }) }); if (!r.ok) throw new Error(`API ${r.status}`); return r.json(); }, { route, body });
+async function api(page: Page, route: string, body?: object) {
+  return page.evaluate(async ({ route, body }) => { const auth = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch('/api/v1' + route, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': auth.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(`API ${r.status}`); return r.json(); }, { route, body });
 }
 test('hosted SFU decodes audio and two screens, applies the traffic policy and speaking outline', async ({ browser }) => {
   test.setTimeout(150000);
@@ -64,7 +64,7 @@ test('hosted SFU decodes audio and two screens, applies the traffic policy and s
     for (const page of [first, second]) { await page.reload(); await page.getByRole('button', { name: 'Open Iran SFU pilot', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
     await expect.poll(async () => (await media(second)).some(p => p.inbound.some((r: any) => r.kind === 'audio' && r.totalAudioEnergy > 0)), { timeout: 45000 }).toBe(true);
     await expect.poll(async () => (await media(first)).some(p => p.inbound.some((r: any) => r.kind === 'audio' && r.totalAudioEnergy > 0))).toBe(true);
-    const speaker = second.locator('.voice-card').filter({ hasText: names[0] }); await expect(speaker).toHaveClass(/speaking/); await expect(speaker.locator('.avatar')).toHaveCSS('outline-color', 'rgb(131, 218, 186)');
+    const speaker = second.locator('.voice-mini-members button').filter({ hasText: names[0] }); await expect(speaker).toHaveClass(/speaking/); await expect(speaker.locator('.avatar')).toHaveCSS('outline-color', 'rgb(131, 218, 186)');
     await first.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect(speaker).not.toHaveClass(/speaking/); await first.getByRole('button', { name: 'Unmute microphone', exact: true }).click(); await expect(speaker).toHaveClass(/speaking/);
     for (const page of [first, second]) { await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page); }
     for (const page of [first, second]) {
@@ -77,13 +77,14 @@ test('hosted SFU decodes audio and two screens, applies the traffic policy and s
     await writeFile(`artifacts/evidence/ninecraft-sfu-${mode}.json`, JSON.stringify({ measuredAt: new Date().toISOString(), clients: desktop ? 'Chrome and installed Windows application' : 'Two Chrome contexts', results, limitations: 'Synthetic sources on one workstation; no physical microphone, 16-person capacity or domestic-outage certification.' }, null, 2)); await second.screenshot({ path: `artifacts/evidence/ninecraft-sfu-${mode}.png` });
     if (process.env.DORHAM_SFU_TLS_ONLY === '1') for (const peers of results) expect(peers.some(p => p.icePolicy === 'relay' && p.localType === 'relay' && p.localCandidateUrl?.startsWith('turns:') && p.iceUrls?.every((url: string) => url.startsWith('turns:')))).toBe(true);
     if (process.env.DORHAM_SFU_MODERATION === '1') {
-      const target = first.locator('.voice-card').filter({ hasText: names[1] });
-      await target.getByRole('button', { name: 'Mute', exact: true }).click(); await expect(second.locator('.voice-card').filter({ hasText: names[1] })).toContainText('Muted by moderator');
-      await target.getByRole('button', { name: 'Unmute', exact: true }).click(); await expect(second.locator('.voice-card').filter({ hasText: names[1] })).not.toContainText('Muted by moderator');
+      const fixtureRoom = (await api(first, '/bootstrap')).channels.find((c: any) => c.serverId === server.id && c.kind === 'voice').id;
+      const target = first.locator('.voice-mini-members button').filter({ hasText: names[1] });
+      await target.click({ button: 'right' }); await first.getByRole('menuitem', { name: 'Server mute', exact: true }).click(); await expect.poll(async () => (await api(first, '/voice/' + fixtureRoom)).members.find((m: any) => m.user.displayName === names[1]).serverMuted).toBe(true);
+      await target.click({ button: 'right' }); await first.getByRole('menuitem', { name: 'Allow microphone', exact: true }).click(); await expect.poll(async () => (await api(first, '/voice/' + fixtureRoom)).members.find((m: any) => m.user.displayName === names[1]).serverMuted).toBe(false);
       await second.getByRole('button', { name: 'Stop watching stream', exact: true }).click(); await expect(second.locator('.screen video')).toHaveCount(0);
       await second.getByRole('button', { name: 'Watch stream', exact: true }).click(); await expect(second.locator('.screen video')).toBeVisible(); await expect(second.locator('.screen-status')).toHaveCount(0);
-      await first.getByRole('button', { name: 'Stop share', exact: true }).click(); await expect(second.getByRole('button', { name: 'Share screen', exact: true })).toBeVisible(); await expect(first.locator('.screen video')).toHaveCount(0);
-      await target.getByRole('button', { name: 'Disconnect', exact: true }).click(); await expect(second.locator('.voice-stage')).toHaveCount(0); await expect(first.locator('.voice-card')).toHaveCount(1);
+      await target.click({ button: 'right' }); await first.getByRole('menuitem', { name: 'Stop screen share', exact: true }).click(); await expect(second.getByRole('button', { name: 'Share screen', exact: true })).toBeVisible(); await expect(first.locator('.screen video')).toHaveCount(0);
+      await target.click({ button: 'right' }); await first.getByRole('menuitem', { name: 'Disconnect from voice', exact: true }).click(); await expect(second.locator('.voice-stage')).toHaveCount(0); await expect(first.locator('.voice-mini-members button')).toHaveCount(1);
       await writeFile('artifacts/evidence/ninecraft-sfu-controls.json', JSON.stringify({ measuredAt: new Date().toISOString(), moderatorMuteUnmute: true, unsubscribeResubscribe: true, moderatorStopsShare: true, voiceKick: true, limitations: 'Cooperative product clients; not an adversarial-client audit.' }, null, 2));
     }
   } finally { await desktop?.close(); await a.close(); await b.close(); }

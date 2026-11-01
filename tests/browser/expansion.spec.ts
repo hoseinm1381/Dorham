@@ -175,23 +175,23 @@ test('social update notifies direct messages with sound, persistent markers and 
   } finally { await a.close(); await b.close(); }
 });
 
-test('social update minimizes voice, preserves same-channel calls and chimes on membership changes', async ({ browser }) => {
+test('compact voice preserves same-channel calls and chimes on membership changes', async ({ browser }) => {
   const a = await browser.newContext({ permissions: ['microphone'], locale: 'en-US' }), b = await browser.newContext({ permissions: ['microphone'], locale: 'en-US' }), page = await a.newPage(), other = await b.newPage(), suffix = Date.now().toString().slice(-7);
   for (const p of [page, other]) await p.addInitScript(() => { (window as any).__cues = []; window.addEventListener('dorham-sound-played', e => (window as any).__cues.push((e as CustomEvent).detail)); });
   try {
     await register(page, `ChimeA${suffix}`); await register(other, `ChimeB${suffix}`);
     const server = await api(page, '/servers', { name: 'Compact voice lab' }), invite = await api(page, `/servers/${server.id}/invites`, {}); await api(other, '/invites/join', { code: invite.code });
     for (const p of [page, other]) await p.getByRole('button', { name: 'Open Compact voice lab', exact: true }).click();
-    await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await expect(page.locator('.voice-stage')).toHaveClass(/voice-collapsed/); expect((await page.locator('.voice-stage').boundingBox())!.height).toBeLessThanOrEqual(64);
+    await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await expect(page.locator('.voice-card')).toHaveCount(0); expect((await page.locator('.voice-stage').boundingBox())!.height).toBeLessThanOrEqual(64);
     const voice = (await api(page, '/bootstrap')).channels.find((c: any) => c.serverId === server.id && c.kind === 'voice'), memberId = (await api(page, '/auth/me')).user.id;
     const initial = (await api(page, `/voice/${voice.id}`)).members.find((m: any) => m.user.id === memberId);
     for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Lounge', exact: true }).click();
     expect((await api(page, `/voice/${voice.id}`)).members.find((m: any) => m.user.id === memberId).epoch).toBe(initial.epoch);
     const joined = await page.evaluate(() => (window as any).__cues.filter((s: string) => s === 'join').length); expect(joined).toBe(1);
     await other.getByRole('button', { name: 'Lounge', exact: true }).click(); await expect.poll(() => page.evaluate(() => (window as any).__cues.filter((s: string) => s === 'join').length)).toBe(2);
-    await page.getByRole('button', { name: 'Voice controls', exact: true }).click(); await expect(page.locator('.voice-stage')).not.toHaveClass(/voice-collapsed/); await expect(page.getByRole('slider')).toBeVisible();
+    await expect(page.locator('.voice-mini-members button')).toHaveCount(2); await expect(page.locator('.voice-card')).toHaveCount(0);
     await other.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect.poll(() => page.evaluate(() => (window as any).__cues.filter((s: string) => s === 'leave').length)).toBe(1);
-    await page.getByRole('button', { name: 'Minimize voice', exact: true }).click(); await expect(page.locator('.voice-stage')).toHaveClass(/voice-collapsed/);
+    await expect(page.getByRole('button', { name: 'Voice controls', exact: true })).toHaveCount(0);
     await page.screenshot({ path: 'artifacts/evidence/social-compact-voice.png' });
   } finally { await a.close(); await b.close(); }
 });

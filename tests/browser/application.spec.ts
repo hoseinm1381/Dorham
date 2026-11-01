@@ -103,16 +103,15 @@ test('actual WebRTC decodes audio/video, applies volume and mute, unsubscribes a
   await other.reload(); await other.getByRole('button', { name: 'Open Voice lab', exact: true }).click();
   await expect(other.getByLabel('Participants in Lounge')).toContainText(`VoiceA${suffix}`);
   await other.getByRole('button', { name: 'Lounge', exact: true }).click();
-  for (const p of [page, other]) await p.getByRole('button', { name: 'Voice controls', exact: true }).click();
-  await expect(page.locator('.voice-card')).toHaveCount(2); await expect(other.locator('.voice-card')).toHaveCount(2);
+  await expect(page.locator('.voice-mini-members button')).toHaveCount(2); await expect(other.locator('.voice-mini-members button')).toHaveCount(2);
   await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'audio' && r.totalSamplesReceived > 0), { timeout: 30000 }).toBe(true).catch(async e => {
     const pcs = await other.evaluate(() => ({ ice: (window as any).__iceEvents, peers: (window as any).__pcs.map((p: RTCPeerConnection) => ({ state: p.connectionState, policy: p.getConfiguration().iceTransportPolicy, servers: p.getConfiguration().iceServers?.map(s => s.urls), signaling: p.signalingState, local: p.localDescription?.type, remote: p.remoteDescription?.type })) }));
     await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); console.log('RTC diagnosis', await other.locator('.diagnostics pre').innerText(), JSON.stringify(pcs)); throw e;
   });
-  await other.getByRole('slider').fill('50'); await expect(other.locator('.volume-slider small')).toContainText('50%');
+  await other.locator('.voice-mini-members button').filter({ hasText: `VoiceA${suffix}` }).click({ button: 'right' }); await other.getByRole('slider').fill('50'); await expect(other.locator('.member-local-audio output')).toContainText('50%');
   expect(await other.evaluate(() => { (window as any).__voiceGains = (window as any).__gains.filter((g: GainNode) => g.gain.value === 0.5); return (window as any).__voiceGains.length > 0; })).toBe(true);
   await other.getByRole('button', { name: 'Deafen', exact: true }).click(); expect(await other.evaluate(() => (window as any).__voiceGains.every((g: GainNode) => g.gain.value === 0))).toBe(true); await other.getByRole('button', { name: 'Undeafen', exact: true }).click();
-  await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect(other.locator('.voice-card').first()).toContainText('Microphone muted'); await page.getByRole('button', { name: 'Unmute microphone', exact: true }).click();
+  await page.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect(other.locator('.voice-mini-members button').filter({ hasText: `VoiceA${suffix}` }).locator('svg')).toHaveCount(1); await page.getByRole('button', { name: 'Unmute microphone', exact: true }).click();
   await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page);
   await other.getByRole('button', { name: 'Watch stream', exact: true }).click();
   await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'video' && r.framesDecoded > 0), { timeout: 30000 }).toBe(true); await expect(other.locator('.screen video')).toBeVisible();
@@ -121,7 +120,7 @@ test('actual WebRTC decodes audio/video, applies volume and mute, unsubscribes a
   await other.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(other); await expect(page.locator('.share-list>div')).toHaveCount(2); await page.getByRole('button', { name: 'Watch stream', exact: true }).click(); await expect(page.locator('.screen video')).toBeVisible();
   const decodedMedia = { sender: await stats(page), receiver: await stats(other) };
   await page.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); const before = await page.locator('.diagnostics').innerText(); await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(other.locator('.voice-card')).toHaveCount(1); await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); await expect(other.locator('.diagnostics')).toContainText(`VoiceB${suffix}`);
+  await page.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(other.locator('.voice-mini-members button')).toHaveCount(1); await other.getByRole('button', { name: 'Connection diagnostics', exact: true }).click(); await expect(other.locator('.diagnostics')).toContainText(`VoiceB${suffix}`);
   await mkdir('artifacts/evidence', { recursive: true }); await other.screenshot({ path: 'artifacts/evidence/voice-migration.png', fullPage: true });
   const { writeFile } = await import('node:fs/promises'); await writeFile('artifacts/evidence/webrtc.json', JSON.stringify({ scenario: 'two Chrome contexts, actual WebRTC, fake microphone and deterministic canvas capture', beforeCoordinatorLeave: before, decodedMedia }, null, 2));
   await a.close(); await b.close();
@@ -148,8 +147,8 @@ test('quiet decoded audio lights the avatar independently of volume and shared s
     const server = await api(page, '/servers', { name: 'Speaking and screens' }), invite = await api(page, `/servers/${server.id}/invites`, {});
     await api(other, '/invites/join', { code: invite.code });
     for (const p of [page, other]) { await p.getByRole('button', { name: 'Open Speaking and screens', exact: true }).click(); await p.getByRole('button', { name: 'Lounge', exact: true }).click(); }
-    await other.getByRole('button', { name: 'Voice controls', exact: true }).click();
-    const speaker = other.locator('.voice-card').filter({ hasText: `QuietA${suffix}` });
+    await other.locator('.voice-mini-members button').filter({ hasText: `QuietA${suffix}` }).click({ button: 'right' });
+    const speaker = other.locator('.voice-mini-members button').filter({ hasText: `QuietA${suffix}` });
     await expect.poll(async () => (await stats(other)).some(r => r.type === 'inbound-rtp' && r.kind === 'audio' && r.totalSamplesReceived > 0), { timeout: 30000 }).toBe(true);
     await expect(speaker).toHaveClass(/speaking/);
     await expect(speaker.locator('.avatar')).toHaveCSS('outline-color', 'rgb(131, 218, 186)');
@@ -178,7 +177,7 @@ test('blocked ICE reports missing media and waiting video instead of a successfu
   const server = await api(page, '/servers', { name: 'Blocked media lab' }); const invite = await api(page, `/servers/${server.id}/invites`, {}); await api(other, '/invites/join', { code: invite.code });
   await page.getByRole('button', { name: 'Open Blocked media lab', exact: true }).click(); await other.getByRole('button', { name: 'Open Blocked media lab', exact: true }).click();
   await page.getByRole('button', { name: 'Lounge', exact: true }).click(); await other.getByRole('button', { name: 'Lounge', exact: true }).click();
-  await other.getByRole('button', { name: 'Voice controls', exact: true }).click(); await expect(other.locator('.voice-card')).toHaveCount(2);
+  await expect(other.locator('.voice-mini-members button')).toHaveCount(2); await expect(other.locator('.voice-card')).toHaveCount(0);
   await expect(other.locator('.voice-signal')).not.toContainText('Voice connected');
   await page.getByRole('button', { name: 'Share screen', exact: true }).click(); await chooseScreen(page);
   await other.getByRole('button', { name: 'Watch stream', exact: true }).click(); await expect(other.locator('.screen-status')).toContainText('Connecting to screen');
@@ -205,7 +204,7 @@ test('microphone processing defaults on, changes live, persists and never unmute
     await instrument(page); await register(page, 'Processing' + Date.now().toString().slice(-7));
     await page.getByRole('button', { name: 'Create a server', exact: true }).click(); await page.getByLabel('Server name', { exact: true }).fill('Microphone lab'); await page.getByRole('button', { name: 'Create space', exact: true }).click();
     await page.getByRole('button', { name: 'Open Microphone lab', exact: true }).click(); await join();
-    await page.getByRole('button', { name: 'Voice controls', exact: true }).click(); await expect(page.locator('.voice-card')).toHaveCount(1); await open();
+    await expect(page.locator('.voice-mini-members button')).toHaveCount(1); await open();
     fixtureRoom = (await api(page, '/bootstrap')).channels.find((c: any) => c.kind === 'voice').id;
     const initial = await settings(); expect(initial[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true });
     await expect(page.getByRole('combobox', { name: 'Noise removal', exact: true })).toHaveValue('standard'); await page.getByRole('combobox', { name: 'Noise removal', exact: true }).selectOption('off'); await page.getByRole('checkbox', { name: 'Echo cancellation', exact: true }).uncheck();

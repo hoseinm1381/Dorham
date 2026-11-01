@@ -67,8 +67,8 @@ test('person volume changes decoded audio from silence to real 200% amplificatio
     await api(receiver, '/invites/join', { code: invite.code });
     for (const page of [sender, receiver]) { await page.getByRole('button', { name: 'Open Volume lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
     await receiver.getByRole('button', { name: 'Mute microphone', exact: true }).click();
-    await receiver.getByRole('button', { name: 'Voice controls', exact: true }).click();
-    await expect(receiver.locator('.voice-card input[type=range]')).toHaveCount(0);
+    await expect(receiver.getByRole('button', { name: 'Voice controls', exact: true })).toHaveCount(0);
+    await expect(receiver.locator('.voice-card')).toHaveCount(0);
     await receiver.locator('.voice-mini-members button').filter({ hasText: sourceName }).click({ button: 'right' });
     await expect(receiver.getByRole('menu', { name: 'Member actions', exact: true }).getByRole('menuitem', { name: 'Server mute', exact: true })).toHaveCount(0);
     const slider = () => receiver.getByRole('slider', { name: `Voice volume for ${sourceName}`, exact: true });
