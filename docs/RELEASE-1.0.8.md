@@ -1,6 +1,6 @@
 # 1.0.8 — web chat and personal voice controls
 
-Web-only patch. Backend and Windows remain 1.0.7; Android remains 1.0.6. No native application is rebuilt, synced or repackaged, and native download/update manifests stay unchanged. Publication is prepared after the checks below.
+Web-only patch. Backend and Windows remain 1.0.7; Android remains 1.0.6. No native application is rebuilt, synced or repackaged, and native download/update manifests stay unchanged. Released to https://dorhamapp.ir/ after the checks below.
 
 ## One composer when switching chats
 
@@ -21,3 +21,9 @@ The real two-client WebRTC regression uses generated microphone audio and measur
 - Deploy only the web payload after a verified web rollback backup. Retain existing hashed assets for already-open clients. Do not restart Dorham, LiveKit or proxies; preserve the 1024 MiB service limits, backend files, database, accounts, uploads and native manifests.
 
 The previously released Windows 1.0.7 contains the earlier composer code; the operator explicitly deferred native builds for this patch. Refresh the browser tab after web publication to load 1.0.8.
+
+## Published release evidence
+
+The source change is `0551fc5f5b37698d5fc1eedc7a018ea7b3505457`. The source and compiled branches were pushed with explicit operator approval. A separate web rollback backup was downloaded and independently verified before promotion (SHA-256 `4a2cb5842e5c99b2f6d3634c38902f9e4ef53ed6f9f1636f04bb8f0722b7688c`). It contains web files and public release metadata, with no database, uploads or private configuration contents.
+
+The promoted web ZIP SHA-256 is `b2caa68903775c09a234e493775447154dfe18027589264868a0f27f5541e211`. Localhost and independent public HTTPS checks match all 135 web files. Twenty web files changed; previous content-hashed assets remain available for open clients. Dorham, LiveKit, Caddy and HAProxy retained their exact service identities. Backend/configuration hashes, both memory limits and all four native manifests are unchanged; database integrity and foreign-key checks pass. Evidence: `v108-rollout.json`, `v108-backup-verification.json` and `v108-public-verification.json`.
