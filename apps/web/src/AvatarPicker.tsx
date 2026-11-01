@@ -7,6 +7,8 @@ export const defaultAvatars = [
   ['frog', 'Frog'], ['bear', 'Bear'], ['rabbit', 'Rabbit'], ['penguin', 'Penguin'],
   ['robot', 'Robot'], ['bot', 'Little bot'], ['cyborg', 'Cyborg'], ['retro', 'Retro robot'],
   ['astronaut', 'Astronaut'], ['alien', 'Alien'], ['planet', 'Ringed planet'], ['comet', 'Comet'],
+  ['duck', 'Duck'], ['tiger', 'Tiger'], ['koala', 'Koala'], ['otter', 'Otter'],
+  ['red-panda', 'Red panda'], ['axolotl', 'Axolotl'], ['dragon', 'Dragon'], ['jellyfish', 'Jellyfish'],
 ] as const;
 export function AvatarPicker({ saved, error }: { saved: () => Promise<void>; error: (e: unknown) => void }) {
   const [busy, setBusy] = useState(false), [selected, setSelected] = useState(''), [notice, setNotice] = useState('');

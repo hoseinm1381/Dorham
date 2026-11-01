@@ -12,7 +12,7 @@ const h = await createApp(config({ dataDir, databaseUrl: '', publicUrl: 'http://
   roomShares: 0, globalShares: 0, bootstrapSecret: 'browser-fixture-bootstrap-not-for-deployment',
   // Ordinary browser scenarios remain independent of external accounts and relays.
   ...(!relay ? { turnUrls: [], turnUsername: '', turnPassword: '', turnSecret: '', cloudflareTurnKeyId: '', cloudflareTurnApiToken: '' } : {})
-}), { logger: false, rateLimit: false, ...(process.env.DORHAM_TTS_FIXTURE === '1' && process.env.DORHAM_FIXTURE_NONCE ? { ttsSynthesize: async () => fixtureSpeech() } : {}) });
+}), { logger: false, rateLimit: false, ...(process.env.DORHAM_TTS_FIXTURE === '1' && process.env.DORHAM_FIXTURE_NONCE ? { ttsSynthesize: async (_text, loading) => { if (process.env.DORHAM_TTS_LOADING_FIXTURE === '1') await loading?.(); return fixtureSpeech(); } } : {}) });
 if (process.env.DORHAM_SFU_ISOLATED_TEST === '1' && h.config.mediaTransport === 'livekit') h.app.addHook('preClose', async () => {
   const client = new RoomServiceClient(h.config.livekitApiUrl, h.config.livekitKey, h.config.livekitSecret);
   // Only UUID rooms from this local fixture database; never enumerate/delete live rooms.

@@ -2,21 +2,19 @@ import { randomUUID } from 'node:crypto';
 import { readdir, stat, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import sharp from 'sharp';
+import type { ProfileImages } from './profile-images';
 import { id, requestId } from '@dorham/contracts';
 import { z } from 'zod';
 import type { Service } from './service';
 import { fail, hash } from './security';
 
-export function serverIcons(api: FastifyInstance, service: Service, directory: string) {
+export function serverIcons(api: FastifyInstance, service: Service, directory: string, images: ProfileImages) {
   api.post('/servers/:id/icon', async req => {
     const serverId = id.parse((req.params as { id: string }).id), rid = requestId.parse(req.headers['x-request-id']);
     await service.member(service.db, req.account.id, serverId, 'manageChannels');
     const file = await req.file();
     if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.mimetype)) fail(400, 'INVALID_IMAGE', 'Choose a PNG, JPG or WebP image.');
-    const bytes = await file!.toBuffer(); let image: Buffer;
-    try { image = await sharp(bytes, { limitInputPixels: 16000000 }).rotate().resize(128, 128, { fit: 'cover' }).webp({ quality: 80 }).toBuffer(); }
-    catch { fail(400, 'INVALID_IMAGE', 'Image could not be decoded.'); }
+    const { bytes, image } = await images.resize(() => file!.toBuffer());
     if (image!.length > 96 * 1024) fail(400, 'IMAGE_TOO_LARGE', 'Compressed image is too large.');
     let written = '', retired: string | null = null;
     try {

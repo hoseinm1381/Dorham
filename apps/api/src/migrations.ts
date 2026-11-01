@@ -99,4 +99,16 @@ export async function migrateExpansion(db: Database) {
     await tx.run('CREATE INDEX messages_activity ON messages(conversation_id,created_at)');
     await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(9,?)', [Date.now()]);
   });
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=10')) return;
+    await tx.run("CREATE TABLE server_timeouts (server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, expires_at BIGINT NOT NULL, reason TEXT NOT NULL DEFAULT '', PRIMARY KEY(server_id,user_id))");
+    await tx.run('CREATE INDEX server_timeouts_expiry ON server_timeouts(expires_at)');
+    await tx.run("CREATE TABLE server_bans (server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, target_role TEXT NOT NULL DEFAULT 'member', reason TEXT NOT NULL DEFAULT '', created_at BIGINT NOT NULL, PRIMARY KEY(server_id,user_id))");
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(10,?)', [Date.now()]);
+  });
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=11')) return;
+    await tx.run('CREATE TABLE message_mentions (message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, username TEXT NOT NULL, PRIMARY KEY(message_id,user_id))');
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(11,?)', [Date.now()]);
+  });
 }

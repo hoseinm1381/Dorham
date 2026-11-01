@@ -1,4 +1,5 @@
 import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 const root = 'node_modules/@sapphi-red/web-noise-suppressor';
 const meta = JSON.parse(await readFile(`${root}/package.json`, 'utf8'));
 if (meta.version !== '0.4.1') throw Error('Review the RNNoise worklet patch before upgrading.');
@@ -14,4 +15,10 @@ worklet = '// Modified by Dorham: startup/error handshake and start the destroy-
 await mkdir('apps/web/public/audio', { recursive: true });
 await writeFile('apps/web/public/audio/rnnoise-worklet.js', worklet);
 await copyFile(`${root}/dist/rnnoise.wasm`, 'apps/web/public/audio/rnnoise.wasm');
+const announcements = JSON.parse(await readFile('assets/tts-loading/manifest.json', 'utf8'));
+for (const clip of announcements.clips) {
+  const source = `assets/tts-loading/${clip.file}`, data = await readFile(source);
+  if (createHash('sha256').update(data).digest('hex') !== clip.sha256 || data.length !== clip.bytes) throw Error('Loading announcement differs from its reviewed recording.');
+}
+await copyFile('assets/tts-loading/README.md', 'apps/web/public/audio/tts-loading-CREDITS.txt');
 await writeFile('apps/web/public/audio/LICENSE.txt', 'RNNoise worklet notices. Dorham modifications: startup/error handshake and message-port startup.\n\n' + (await Promise.all(['web-noise-suppressor-MIT.txt', 'rnnoise-wasm-APACHE-2.0.txt', 'rnnoise-BSD-3-Clause.txt'].map(name => readFile(`docs/licenses/${name}`, 'utf8')))).join('\n\n'));

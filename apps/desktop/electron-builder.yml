@@ -5,6 +5,7 @@ directories:
   output: artifacts/windows
 files:
   - main.cjs
+  - capture-origin.cjs
   - preload.cjs
   - voice-overlay.cjs
   - overlay-preload.cjs

@@ -24,6 +24,32 @@ async function register(page: Page, name: string) {
 }
 async function screenshot(page: Page, name: string) { await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: `artifacts/evidence/v076-${name}.png`, fullPage: true }); }
 
+test('24 built-in avatars include a saved duck, Persian labels, and custom uploads', async ({ page }) => {
+  await register(page, `Avatars${suffix()}`);
+  await page.getByRole('button', { name: 'Account settings', exact: true }).click();
+  await page.locator('.avatar-options > summary').click();
+  const picker = page.locator('.avatar-picker'); await expect(picker.locator('.avatar-grid button')).toHaveCount(24);
+  const pictures = await picker.locator('img').evaluateAll(async images => Promise.all(images.map(async element => { const image = element as HTMLImageElement; await image.decode(); return { src: image.getAttribute('src'), width: image.naturalWidth, height: image.naturalHeight }; })));
+  expect(pictures.every(image => image.width === 160 && image.height === 160)).toBe(true);
+  const duck = picker.getByRole('button', { name: 'Duck', exact: true }); await duck.click();
+  await expect(duck).toHaveAttribute('aria-pressed', 'true'); await expect(picker.getByRole('status')).toHaveText('Profile picture saved.');
+  const saved = (await api(page, '/auth/me')).user.avatar; expect(saved).toMatch(/^\/avatars\//);
+  const response = await page.request.get(saved); expect(response.status()).toBe(200);
+  expect(await sharp(await response.body()).metadata()).toMatchObject({ width: 128, height: 128, format: 'webp' });
+  await page.getByLabel('Language', { exact: true }).selectOption('fa-IR');
+  await expect(picker.getByRole('button', { name: 'اردک', exact: true })).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'عروس دریایی', exact: true })).toBeVisible();
+  await page.screenshot({ path: 'artifacts/evidence/v107-avatar-picker-persian.png', fullPage: true });
+  await page.getByLabel('زبان', { exact: true }).selectOption('en-US');
+  const custom = await sharp({ create: { width: 32, height: 32, channels: 3, background: '#397abb' } }).png().toBuffer();
+  await picker.getByLabel('Change avatar', { exact: true }).setInputFiles({ name: 'custom.png', mimeType: 'image/png', buffer: custom });
+  await expect(picker.getByRole('status')).toHaveText('Profile picture saved.');
+  await expect.poll(async () => (await api(page, '/auth/me')).user.avatar).not.toBe(saved);
+  const customSaved = (await api(page, '/auth/me')).user.avatar;
+  await page.reload(); await expect.poll(async () => (await api(page, '/auth/me')).user.avatar).toBe(customSaved);
+  await writeFile('artifacts/evidence/v107-avatar-picker.json', JSON.stringify({ presets: 24, allImagesDecoded: true, duckSavedThroughRealUpload: true, output: '128x128 WebP', persianLabels: true, customUploadRetained: true, savedAvatarSurvivesReload: true, oneChrome: true }, null, 2));
+});
+
 test('DM discovery is explicit, empty chats stay hidden and live received messages reorder both lists', async ({ browser }) => {
   const a = await browser.newContext(), b = await browser.newContext(), page = await a.newPage(), other = await b.newPage(), run = suffix();
   try {

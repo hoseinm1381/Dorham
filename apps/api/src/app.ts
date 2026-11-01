@@ -1,4 +1,5 @@
-import { VoiceSpeech } from './tts';
+import { moderationInfo, moderateMember, serverBans } from './member-moderation';
+import { VoiceSpeech, type Synthesize } from './tts';
 import Fastify, { type FastifyRequest, type FastifyReply, type FastifyContextConfig } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -14,7 +15,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { existsSync, openSync, writeSync, closeSync, readFileSync, unlinkSync } from 'node:fs';
 import { mkdir, writeFile, unlink, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import { ProfileImages } from './profile-images';
 import { registerSchema, credentialsSchema, messageSchema, passwordSchema, requestId, id, signalSchema, shareStartSchema, shareUpdateSchema } from '@dorham/contracts';
 import { config, type Config } from './config';
 import { openDatabase, type Row } from './db';
@@ -31,7 +32,7 @@ import { serverIcons } from './server-icons';
 import { GameService, gameCreate, gameCommand } from './games/service';
 
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
-export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean; ttsSynthesize?: (text: string) => Promise<Buffer> } = {}) {
+export async function createApp(c: Config = config(), options: { logger?: boolean; rateLimit?: boolean; ttsSynthesize?: Synthesize } = {}) {
   const logging = options.logger ?? !process.env.VITEST;
   const app = Fastify({ logger: logging ? { serializers: { req: req => ({ method: req.method, url: String(req.url).split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) } } : false, bodyLimit: 128 * 1024, trustProxy: c.trustedProxies.length ? c.trustedProxies : false, requestTimeout: 900000, connectionTimeout: 30000 });
   await mkdir(c.dataDir, { recursive: true });
@@ -42,7 +43,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     try { process.kill(pid, 0); throw new Error('Another server already owns this data directory.'); } catch (e: any) { if (e.code !== 'ESRCH') throw e; unlinkSync(lockPath); }
   }
   const lock = openSync(lockPath, 'wx'); writeSync(lock, String(process.pid)); closeSync(lock);
-  const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service);
+  const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service), images = new ProfileImages();
   const chess = new ChessService(service); chess.onError = e => app.log.error({ err: e }, 'Chess task failed'); await chess.initialize();
   const games = new GameService(service); games.onError = e => app.log.error({ err: e }, 'Game task failed'); await games.initialize();
   const eventLoop = monitorEventLoopDelay({ resolution: 20 }); eventLoop.enable();
@@ -186,7 +187,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.get('/chess/:id', async req => chess.get(req.account.id, id.parse((req.params as any).id)));
     api.post('/chess/:id', async req => chess.command(req.account.id, id.parse((req.params as any).id), chessCommand.parse(req.body)));
     attachments.register(api);
-    serverIcons(api, service, avatarDir);
+    serverIcons(api, service, avatarDir, images);
     api.post('/auth/renew', async (req, reply) => {
       z.object({ requestId }).parse(req.body);
       if (req.session.native) fail(400, 'NATIVE_REFRESH', 'Use native credential renewal.');
@@ -227,8 +228,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       if (req.account.guest) fail(403, 'GUEST_UPLOAD', 'Guests cannot upload files.');
       const rid = requestId.parse(req.headers['x-request-id']); const file = await req.file();
       if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.mimetype)) fail(400, 'IMAGE_REQUIRED', 'Upload a PNG, JPEG, or WebP image.');
-      const bytes = await file!.toBuffer();
-      let image: Buffer; try { image = await sharp(bytes, { limitInputPixels: 16000000 }).rotate().resize(128, 128, { fit: 'cover' }).webp({ quality: 80 }).toBuffer(); } catch { fail(400, 'INVALID_IMAGE', 'Image could not be decoded.'); }
+      const { bytes, image } = await images.resize(() => file!.toBuffer());
       if (image!.length > 96 * 1024) fail(400, 'IMAGE_TOO_LARGE', 'Compressed avatar is too large.');
       let retiredAvatar: string | null = null;
       const result = await service.mutate(req.account.id, rid, 'avatar.change', { hash: hash(bytes.toString('base64')) }, async tx => {
@@ -264,6 +264,9 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.patch('/messages/:id', async req => { const b = z.object({ content: z.string().trim().min(1).max(4000).optional(), delete: z.boolean().optional(), emoji: reactionEmojiSchema.optional(), removeReaction: z.boolean().optional(), requestId }).refine(b => b.content || b.delete || b.emoji).parse(req.body); return service.changeMessage(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/conversations/:id/read', async req => { const b = z.object({ sequence: z.number().int().min(0), requestId }).parse(req.body); return service.read(req.account.id, b.requestId, id.parse((req.params as any).id), b.sequence); });
     api.get('/voice/:id', async req => service.room(req.account.id, id.parse((req.params as any).id)));
+    api.get('/servers/:serverId/members/:userId/moderation', async req => { const p = req.params as any; return moderationInfo(service, req.account.id, id.parse(p.serverId), id.parse(p.userId)); });
+    api.post('/servers/:serverId/members/:userId/moderate', async req => { const p = req.params as any; const b = z.object({ requestId, action: z.enum(['kick', 'ban', 'unban', 'timeout', 'untimeout']), seconds: z.union([z.literal(60), z.literal(600), z.literal(3600), z.literal(86400), z.literal(604800)]).optional(), reason: z.string().trim().max(320).optional() }).strict().parse(req.body); return moderateMember(service, req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b); });
+    api.get('/servers/:serverId/bans', async req => serverBans(service, req.account.id, id.parse((req.params as any).serverId)));
     api.post('/voice/:id/moderate', async req => { const b = z.object({ userId: id, action: z.enum(['mute', 'unmute', 'deafen', 'undeafen', 'denyShare', 'allowShare', 'kick', 'stopShare']), requestId }).parse(req.body); return service.moderate(req.account.id, b.requestId, id.parse((req.params as any).id), b.userId, b.action); });
     api.patch('/voice/:id/policy', async req => { const b = z.object({ locked: z.boolean(), userLimit: z.number().int().min(1).max(c.maxVoice), tagMode: z.enum(['ANY', 'ALL']), requiredTags: z.array(z.string().uuid()).max(32), requestId }).parse(req.body); return service.voicePolicy(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/voice/:id/move', async req => { const b = z.object({ userId: id, channelId: id, requestId }).parse(req.body); return service.moveVoice(req.account.id, b.requestId, id.parse((req.params as any).id), b.userId, b.channelId); });
@@ -272,11 +275,11 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.get('/admin/metrics', async req => {
       if (!req.account.instance_admin) fail(403, 'FORBIDDEN', 'Instance administrator required.');
       let disk = 0; for (const f of await readdir(c.dataDir)) { const s = await stat(path.join(c.dataDir, f)); if (s.isFile()) disk += s.size; }
-      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, realtime, sfuControl: sfu.metrics, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map(s => s.data.userId)).size, accounts: (await db.one('SELECT COUNT(*) AS count FROM users'))!.count, messages: (await db.one('SELECT COUNT(*) AS count FROM messages'))!.count, shares: (await db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count };
+      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), tts: voiceSpeech.metrics(), images: images.metrics(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, realtime, sfuControl: sfu.metrics, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map(s => s.data.userId)).size, accounts: (await db.one('SELECT COUNT(*) AS count FROM users'))!.count, messages: (await db.one('SELECT COUNT(*) AS count FROM messages'))!.count, shares: (await db.one('SELECT COUNT(*) AS count FROM share_leases'))!.count };
     });
   }, { prefix: '/api/v1' });
   const io = new SocketServer(app.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 120000, skipMiddlewares: false }, pingInterval: 20000, pingTimeout: 10000, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
-  const voiceSpeech = new VoiceSpeech(service, (socketId, event) => io.sockets.sockets.get(socketId)?.emit('voice:tts', event), (userId, text) => { for (const socket of io.sockets.sockets.values()) if (socket.data.userId === userId) socket.emit('voice:tts-notice', { text }); }, options.ttsSynthesize);
+  const voiceSpeech = new VoiceSpeech(service, (socketId, event) => io.sockets.sockets.get(socketId)?.emit('voice:tts', event), (userId, text) => { for (const socket of io.sockets.sockets.values()) if (socket.data.userId === userId) socket.emit('voice:tts-notice', { text }); }, options.ttsSynthesize, (socketId, event) => io.sockets.sockets.get(socketId)?.emit('voice:tts-loading', event));
   service.onTts = (userId, message) => { void voiceSpeech.enqueue(userId, message).catch(() => {}); };
   mediaAdmission(app, service, socketId => io.sockets.sockets.get(socketId)?.data.sessionId);
   games.online = uid => [...io.sockets.sockets.values()].some(s => s.data.userId === uid);
@@ -423,6 +426,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     const started = performance.now(); realtime.maintenance.maxTimerDelayMs = Math.max(realtime.maintenance.maxTimerDelayMs, started - nextMaintenance); nextMaintenance = started + 5000;
     if (maintenanceRunning) return; maintenanceRunning = true;
     try {
+      voiceSpeech.cleanup();
       await service.cleanup(); await disconnectInvalidSessions(); await service.notify('voice:changed', {});
       if (Date.now() >= nextStorageCheck) {
         nextStorageCheck = Date.now() + 60000; await attachments.cleanup(); const storage = await storageStatus();
@@ -433,7 +437,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   }, 5000); maintenance.unref();
   // Upgraded sockets must close before Fastify starts draining the HTTP server.
   // Waiting until onClose deadlocks a restart while any chat client stays online.
-  app.addHook('preClose', async () => { chess.close(); games.close(); clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
-  app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); voiceSpeech.close(); await attachments.close(); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
-  return { app, db, service, io, chess, games, attachments, config: c };
+  app.addHook('preClose', async () => { images.close(); chess.close(); games.close(); clearInterval(maintenance); clearInterval(latencyTimer); io.engine.close(); });
+  app.addHook('onClose', async () => { await new Promise<void>(resolve => io.close(() => resolve())); await voiceSpeech.close(); await attachments.close(); await db.close(); if (existsSync(lockPath) && readFileSync(lockPath, 'utf8') === String(process.pid)) unlinkSync(lockPath); });
+  return { app, db, service, io, chess, games, attachments, images, config: c };
 }

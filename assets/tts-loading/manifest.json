@@ -1,0 +1,22 @@
+{
+  "piper": "1.8.0",
+  "modelsManifest": "deployment/tts-models.json",
+  "clips": [
+    {
+      "language": "en",
+      "text": "Text to speech is loading.",
+      "seconds": 1.606,
+      "file": "tts-loading-en.wav",
+      "sha256": "052780a9b97768438cd0c3d47a583c473317e96ac36cd00f56b756e5dd88f09f",
+      "bytes": 70856
+    },
+    {
+      "language": "fa",
+      "text": "سامانهٔ گفتار در حال آماده‌سازی است.",
+      "seconds": 2.511,
+      "file": "tts-loading-fa.wav",
+      "sha256": "9ce14befd0f30b9cb34364aecf88728bc8812d447e49384cc747ce9c82f278c5",
+      "bytes": 110792
+    }
+  ]
+}

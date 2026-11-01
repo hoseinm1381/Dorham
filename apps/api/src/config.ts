@@ -14,6 +14,7 @@ export function config(overrides: Partial<{
   guestsEnabled: boolean; maxGuests: number; attachmentDir: string; attachmentBudgetMiB: number; uploadReserveMiB: number; uploadConcurrency: number;
   uploadSoftMiB: number; uploadHardMiB: number; uploadSmallMiB: number;
   mediaAdmissionSecret: string;
+  ttsIdleSeconds: number; ttsAudioCacheMiB: number;
 }> = {}) {
   const num = (key: string, fallback: number, allowZero = false) => { const n = Number(process.env[key] || fallback); if (!Number.isSafeInteger(n) || n < (allowZero ? 0 : 1)) throw new Error(`Invalid ${key}`); return n; };
   const list = (key: string, fallback = '') => (process.env[key] ?? fallback).split(',').map(s => s.trim()).filter(Boolean);
@@ -42,6 +43,7 @@ export function config(overrides: Partial<{
     livekitUrl: process.env.LIVEKIT_URL || '', livekitKey: process.env.LIVEKIT_API_KEY || '', livekitSecret: process.env.LIVEKIT_API_SECRET || '',
     livekitApiUrl: process.env.LIVEKIT_API_URL || '',
     mediaAdmissionSecret: process.env.MEDIA_ADMISSION_SECRET || '',
+    ttsIdleSeconds: num('TTS_IDLE_SECONDS', 180), ttsAudioCacheMiB: num('TTS_AUDIO_CACHE_MIB', 8),
     ...overrides
   };
   if (Boolean(c.cloudflareTurnKeyId) !== Boolean(c.cloudflareTurnApiToken)) throw new Error('Both Cloudflare TURN key ID and API token are required');
@@ -52,6 +54,7 @@ export function config(overrides: Partial<{
   if (c.attachmentDir === c.dataDir || c.attachmentDir === path.parse(c.attachmentDir).root) throw new Error('ATTACHMENT_DIR must be a dedicated attachment directory.');
   if (c.uploadHardMiB < c.uploadSoftMiB || c.uploadSmallMiB > 100) throw new Error('Invalid shared upload policy.');
   if (c.mediaAdmissionSecret && c.mediaAdmissionSecret.length < 32) throw new Error('MEDIA_ADMISSION_SECRET must contain at least 32 characters.');
+  if (c.ttsIdleSeconds > 3600 || c.ttsAudioCacheMiB > 64) throw new Error('TTS idle time must be at most 3600 seconds and its audio cache at most 64 MiB.');
   if (c.production && !c.publicUrl.startsWith('https://')) throw new Error('Production PUBLIC_URL must use HTTPS');
   return c;
 }

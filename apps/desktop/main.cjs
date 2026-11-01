@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, safeStorage, protocol, net, session, desktopCapturer, dialog, Tray, Menu, nativeImage, shell, powerMonitor } = require('electron');
 const { createUpdater } = require('./updater.cjs');
 const { createVoiceOverlay } = require('./voice-overlay.cjs');
+const { trustedCaptureRequest } = require('./capture-origin.cjs');
 const { VoiceHotkeys } = require('./voice-hotkeys.cjs');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -46,7 +47,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(contents.getURL().startsWith('dorham://app/') && permissions.has(permission)));
   session.defaultSession.setPermissionCheckHandler((contents, permission) => Boolean(contents?.getURL().startsWith('dorham://app/')) && permissions.has(permission));
   session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
-    if (request.securityOrigin !== 'dorham://app') return callback({});
+    if (!trustedCaptureRequest(request, win?.webContents)) return callback(null);
     try {
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } });
       const fa = interfaceLanguage === 'fa-IR'; let page = 0;
@@ -58,9 +59,9 @@ app.whenReady().then(() => {
         const result = await dialog.showMessageBox(win, { type: 'question', title: fa ? 'اشتراک‌گذاری صفحه' : 'Share your screen', message: fa ? 'صفحه یا پنجره موردنظر را انتخاب کنید' : 'Choose the screen or window to share', detail: request.audioRequested && systemAudioSafe ? (fa ? 'تصویر انتخاب‌شده و صدای سیستم به‌جز صدای دورهم ارسال می‌شود.' : 'The selected picture and system sound, excluding Dorham, will be shared.') : (fa ? 'تمام محتوای قابل‌مشاهده در منبع انتخاب‌شده با اعضای این کانال صوتی به اشتراک گذاشته می‌شود.' : 'Everything visible in the selected source will be shared with this voice channel.'), buttons, cancelId: cancel, noLink: true });
         if (result.response === next && next >= 0) { page++; continue; }
         if (result.response === previous && previous >= 0) { page--; continue; }
-        callback(result.response < choices.length ? { video: choices[result.response], ...(request.audioRequested && systemAudioSafe ? { audio: 'loopback' } : {}) } : {}); break;
+        callback(trustedCaptureRequest(request, win?.webContents) && result.response >= 0 && result.response < choices.length ? { video: choices[result.response], ...(request.audioRequested && systemAudioSafe ? { audio: 'loopback' } : {}) } : null); break;
       }
-    } catch { callback({}); }
+    } catch { callback(null); }
   });
   ipcMain.handle('server:get', event => { trusted(event); return readSettings().server || ''; });
   ipcMain.handle('ui:language', (event, value) => { trusted(event); if (value === 'fa-IR' || value === 'en-US') interfaceLanguage = value; });

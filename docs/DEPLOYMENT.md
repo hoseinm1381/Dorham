@@ -46,6 +46,12 @@ For LiveKit, set `MEDIA_TRANSPORT=livekit`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, an
 
 ## VPS
 
+### Preserve the current memory allocation
+
+On 2026-11-01 the operator reported raising the application service's soft memory limit from **384 MB to 1024 MB** on the **2 GB RAM VPS**. A subsequent authorized read-only SSH audit confirmed **both `MemoryHigh` and `MemoryMax` are 1073741824 bytes (1024 MiB)**. Preserve both in the next authorized deployment; do not restore the older 384 MB value. No live setting was changed. See [memory audit and local cleanup](MEMORY-1.0.7.md).
+
+Before that deployment, inspect the active service unit and overrides and retain the corresponding soft-limit configuration. A systemd soft limit (`MemoryHigh`), hard limit (`MemoryMax`), and Node heap limit are separate settings; do not substitute or change the latter two by assumption. Preserve the existing override when replacing application files. All 1.0.7 changes remain local until the operator authorizes publication.
+
 Use the same deployment directory, Node 24, a persistent data directory owned by the service user, and one application process under systemd or a container. Terminate HTTPS at Caddy/Nginx and forward HTTP **and WebSocket upgrades** to port 3001. Keep that backend port private. The supplied Dockerfile uses the deployment bundle as its build context:
 
 ```sh
@@ -71,3 +77,5 @@ Stop the old instance, export an online database snapshot plus avatars, restore 
 | Native module load fails | Node version/platform and clean Linux `npm ci`; never copy Windows modules |
 | `instance.lock` blocks startup | Verify the recorded process; do not remove a live instance's lock |
 | Storage full | Export backup, inspect metrics, reduce retention safely, preserve editable/deployment sources elsewhere |
+
+Local 1.0.7 TTS retention now defaults to `TTS_IDLE_SECONDS=180`. At the next authorized deployment, check for an explicit older override and set it to 180 if present. This is independent of the verified 1024 MiB service soft/hard limits, which must remain unchanged. Deploy the matching web payload for the bundled English/Farsi startup announcements; existing Android 1.0.6 clients remain compatible and ignore the new startup event.

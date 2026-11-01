@@ -123,8 +123,12 @@ export class MeshTransport implements MediaTransport {
     };
     pc.onicecandidate = e => { if (e.candidate) void this.signal(userId, { candidate: e.candidate.toJSON() }).catch(err => this.error(err)); };
     pc.ontrack = e => {
-      const stream = e.streams[0] || new MediaStream([e.track]); p.received.set(stream.id, stream); this.attachTracks(userId, p);
-      e.track.onended = () => { if (e.track.kind === 'video') { const meta = p.streams.find(s => s.streamId === stream.id); if (meta?.leaseId) this.options.emit('screenRemoved', meta.leaseId); } };
+      const announced = e.streams[0], streamId = announced?.id || e.track.id;
+      // Renegotiation can empty the browser's old stream container while reusing
+      // its video receiver. Keep playback attached to the live track itself.
+      const stream = e.track.kind === 'video' ? new MediaStream([e.track]) : announced || new MediaStream([e.track]);
+      p.received.set(streamId, stream); this.attachTracks(userId, p);
+      e.track.onended = () => { if (e.track.kind === 'video') { const meta = p.streams.find(s => s.streamId === streamId); if (meta?.leaseId) this.options.emit('screenRemoved', meta.leaseId); } };
     };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'connected') { p.restarts = 0; p.timedOut = false; clearTimeout(p.connectionTimer); }

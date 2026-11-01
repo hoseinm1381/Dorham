@@ -1,10 +1,12 @@
+import { canMoveMember } from '../../../packages/contracts/src/moderation';
 import { ttsMessage } from '../../../packages/contracts/src/tts';
+import { mentionTokens } from '../../../packages/contracts/src/mentions';
 import { randomUUID, createHmac } from 'node:crypto';
 import { z } from 'zod';
 import { resolveCustomPermissions, canManage, requestId as requestIdSchema, type Role, type Permission, type PublicUser, type Message, type VoiceRoom, type VoicePresence, type CustomRole } from '@dorham/contracts';
 import type { Connection, Database, Row } from './db';
 import type { Config } from './config';
-import { fail, hash } from './security';
+import { AppError, fail, hash } from './security';
 import { CloudflareTurn, cloudflareTurnTtl } from './turn';
 import { audit } from './accounts';
 import { readSnapshot } from './read-snapshot';
@@ -34,10 +36,11 @@ export class Service {
   async member(tx: Connection, userId: string, serverId: string, permission?: Permission): Promise<Row> {
     const account = await tx.one('SELECT * FROM users WHERE id=? AND banned=0', [userId]);
     if (!account) fail(403, 'FORBIDDEN', 'Account access is unavailable.');
+    if (await tx.one('SELECT user_id FROM server_bans WHERE server_id=? AND user_id=?', [serverId, userId])) fail(403, 'SERVER_BANNED', 'You are banned from this server.');
     if (account!.instance_admin) { if (!await tx.one('SELECT id FROM servers WHERE id=?', [serverId])) fail(404, 'NOT_FOUND', 'Server not found.'); return { server_id: serverId, user_id: userId, role: 'owner', globalAdmin: true }; }
     if (account!.guest && permission && ['manageChannels', 'manageMembers', 'moderate'].includes(permission)) fail(403, 'GUEST_ACCOUNT', 'Register before using administration controls.');
     if (account!.guest && !(await tx.one('SELECT allow_guests FROM servers WHERE id=?', [serverId]))?.allow_guests) fail(403, 'GUESTS_DISABLED', 'This server does not allow guests.');
-    const m = await tx.one('SELECT * FROM members WHERE server_id=? AND user_id=?', [serverId, userId]);
+    const m = await tx.one('SELECT m.*,(SELECT expires_at FROM server_timeouts t WHERE t.server_id=m.server_id AND t.user_id=m.user_id) AS timeout_until FROM members m WHERE m.server_id=? AND m.user_id=?', [serverId, userId]);
     if (!m || (permission && !(await this.memberPermissions(tx, m.role, userId, serverId))[permission])) fail(403, 'FORBIDDEN', 'You do not have permission.');
     return m!;
   }
@@ -48,11 +51,12 @@ export class Service {
     const permissions = resolveCustomPermissions(role, (await this.assignedRoles(tx, userId, serverId)).map(r => r.permissions));
     if (role !== 'owner' && !(await tx.one('SELECT allow_member_invites FROM servers WHERE id=?', [serverId]))?.allow_member_invites) permissions.createInvites = false;
     if ((await tx.one('SELECT guest FROM users WHERE id=?', [userId]))?.guest) { permissions.manageChannels = false; permissions.manageMembers = false; permissions.moderate = false; }
+    if (role !== 'owner' && Number((await tx.one('SELECT expires_at AS timeout_until FROM server_timeouts WHERE server_id=? AND user_id=?', [serverId, userId]))?.timeout_until || 0) > Date.now()) for (const p of Object.keys(permissions)) if (p !== 'view') permissions[p as Permission] = false;
     return permissions;
   }
   async authority(tx: Connection, member: Row): Promise<Role> {
     if (member.role !== 'member') return member.role;
-    const p = await this.memberPermissions(tx, member.role, member.user_id, member.server_id);
+    const p = resolveCustomPermissions(member.role, (await this.assignedRoles(tx, member.user_id, member.server_id)).map(r => r.permissions));
     return p.moderate || p.manageMembers ? 'moderator' : 'member';
   }
   async channel(tx: Connection, userId: string, channelId: string, permission: Permission = 'view'): Promise<Row & { role: Role; permissions: Record<Permission, boolean> }> {
@@ -69,8 +73,10 @@ export class Service {
       const required = await tx.all('SELECT tag_id FROM channel_tags WHERE channel_id=?', [channelId]);
       if (required.length) { const assigned = new Set((await tx.all('SELECT tag_id FROM user_tags WHERE user_id=?', [userId])).map(t => t.tag_id)); const allowed = ch!.tag_mode === 'ALL' ? required.every(t => assigned.has(t.tag_id)) : required.some(t => assigned.has(t.tag_id)); if (!allowed) fail(403, 'TAG_REQUIRED', 'This voice channel requires an assigned tag.'); }
     }
+    if (Number(m.timeout_until || 0) > Date.now() && permission !== 'view') fail(403, 'TIMED_OUT', 'You are timed out in this server.');
+    if (Number(m.timeout_until || 0) > Date.now()) for (const p of Object.keys(permissions)) if (p !== 'view') permissions[p as Permission] = false;
     if (!permissions.view || !permissions[permission]) fail(403, 'FORBIDDEN', 'Channel permission denied.');
-    return { ...ch!, role: m.role as Role, permissions };
+    return { ...ch!, role: m.role as Role, permissions, timeoutUntil: Number(m.timeout_until || 0) };
   }
   async conversation(tx: Connection, userId: string, conversationId: string, write = false) {
     const cv = await tx.one('SELECT * FROM conversations WHERE id=?', [conversationId]);
@@ -114,7 +120,7 @@ export class Service {
       const allChannels = await tx.all('SELECT c.* FROM channels c LEFT JOIN members m ON c.server_id=m.server_id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY c.created_at', [userId, me!.instance_admin]);
       const channels = [];
       for (const ch of allChannels) {
-        try { const access = await this.channel(tx, userId, ch.id); channels.push({ id: ch.id, serverId: ch.server_id, name: ch.name, kind: ch.kind, conversationId: ch.conversation_id, permissions: access.permissions, locked: Boolean(ch.locked), userLimit: Math.min(ch.user_limit, this.c.maxVoice), tagMode: ch.tag_mode, requiredTags: (await tx.all('SELECT tag_id FROM channel_tags WHERE channel_id=?', [ch.id])).map(t => t.tag_id) }); } catch { /* Hidden channel */ }
+        try { const access = await this.channel(tx, userId, ch.id); channels.push({ id: ch.id, serverId: ch.server_id, name: ch.name, kind: ch.kind, conversationId: ch.conversation_id, permissions: access.permissions, locked: Boolean(ch.locked), userLimit: Math.min(ch.user_limit, this.c.maxVoice), tagMode: ch.tag_mode, timeoutUntil: access.timeoutUntil, requiredTags: (await tx.all('SELECT tag_id FROM channel_tags WHERE channel_id=?', [ch.id])).map(t => t.tag_id) }); } catch { /* Hidden channel */ }
       }
       const dms = await tx.all('SELECT d.conversation_id,u.id,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,(SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id=d.conversation_id) AS last_message_at FROM dm_members d JOIN dm_members other ON other.conversation_id=d.conversation_id AND other.user_id<>d.user_id JOIN users u ON u.id=other.user_id WHERE d.user_id=? AND d.hidden=0 ORDER BY last_message_at DESC,d.conversation_id', [userId]);
       const blockedUsers = (await tx.all('SELECT u.* FROM users u JOIN user_blocks b ON b.blocked_id=u.id WHERE b.user_id=?', [userId])).map(publicUser);
@@ -257,6 +263,7 @@ export class Service {
       const inv = await tx.one('SELECT * FROM invites WHERE hash=?', [hash(code)]);
       if (!inv || inv.expires_at < Date.now() || inv.remaining < 1) fail(404, 'INVITE_EXPIRED', 'Invite is invalid, expired, or exhausted.');
       const account = await tx.one('SELECT guest FROM users WHERE id=?', [userId]);
+      if (await tx.one('SELECT user_id FROM server_bans WHERE server_id=? AND user_id=?', [inv!.server_id, userId])) fail(403, 'SERVER_BANNED', 'You are banned from this server.');
       if (account!.guest && !(await tx.one('SELECT allow_guests FROM servers WHERE id=?', [inv!.server_id]))?.allow_guests) fail(403, 'GUESTS_DISABLED', 'This server does not allow guests.');
       if (await tx.one('SELECT role FROM members WHERE user_id=? AND server_id=?', [userId, inv!.server_id])) return { id: inv!.server_id, channelId: inv!.channel_id };
       if ((await tx.one('SELECT COUNT(*) AS count FROM members WHERE user_id=?', [userId]))!.count >= 20) fail(409, 'LIMIT', 'Server membership limit reached.');
@@ -266,8 +273,8 @@ export class Service {
   }
   async members(userId: string, serverId: string) {
     await this.member(this.db, userId, serverId);
-    const rows = await this.db.all('SELECT u.*,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.server_id=? ORDER BY m.joined_at', [serverId]);
-    return Promise.all(rows.map(async u => ({ user: { ...publicUser(u), tags: (await this.db.all('SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?', [u.id, serverId])).map(t => ({ id: t.id, serverId: t.server_id, name: t.name, color: t.color })) }, role: u.role, customRoles: await this.assignedRoles(this.db, u.id, serverId) })));
+    const rows = await this.db.all('SELECT u.*,m.role,COALESCE(t.expires_at,0) AS timeout_until FROM members m JOIN users u ON u.id=m.user_id LEFT JOIN server_timeouts t ON t.server_id=m.server_id AND t.user_id=m.user_id WHERE m.server_id=? ORDER BY m.joined_at', [serverId]);
+    return Promise.all(rows.map(async u => ({ user: { ...publicUser(u), tags: (await this.db.all('SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?', [u.id, serverId])).map(t => ({ id: t.id, serverId: t.server_id, name: t.name, color: t.color })) }, role: u.role, timeoutUntil: Number(u.timeout_until || 0), authority: u.instance_admin ? 'owner' : await this.authority(this.db, { role: u.role, user_id: u.id, server_id: serverId }), customRoles: await this.assignedRoles(this.db, u.id, serverId) })));
   }
   async changeMember(actorId: string, requestId: string, serverId: string, targetId: string, body: { role?: Role; remove?: boolean }) {
     const result = await this.mutate(actorId, requestId, 'member.change', { serverId, targetId, ...body }, async tx => {
@@ -338,12 +345,26 @@ export class Service {
       await tx.run('INSERT INTO dm_pairs(pair_key,conversation_id) VALUES(?,?)', [pair, cv]); return { id: cv };
     });
   }
+  async replaceMentions(tx: Connection, messageId: string, conversationId: string, authorId: string, content: string) {
+    await tx.run('DELETE FROM message_mentions WHERE message_id=?', [messageId]);
+    const names = [...new Set(mentionTokens(content).map(t => t.username.toLowerCase()))];
+    if (!names.length) return;
+    const channel = await tx.one('SELECT id,server_id FROM channels WHERE conversation_id=?', [conversationId]);
+    if (!channel) return; // Direct messages already have their own notifications.
+    const candidates = await tx.all(`SELECT u.id,u.username FROM users u JOIN members m ON m.user_id=u.id WHERE m.server_id=? AND u.banned=0 AND u.must_change_password=0 AND LOWER(u.username) IN (${names.map(() => '?').join(',')}) AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.user_id=u.id AND b.blocked_id=?) OR (b.user_id=? AND b.blocked_id=u.id))`, [channel.server_id, ...names, authorId, authorId]);
+    for (const user of candidates) {
+      try { await this.channel(tx, user.id, channel.id); }
+      catch (e) { if (e instanceof AppError && [403, 404].includes(e.status)) continue; throw e; }
+      await tx.run('INSERT INTO message_mentions(message_id,user_id,username) VALUES(?,?,?)', [messageId, user.id, user.username]);
+    }
+  }
   async messageView(tx: Connection, messageId: string): Promise<Message> {
     const m = await tx.one('SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id=?', [messageId]);
     if (!m) fail(404, 'NOT_FOUND', 'Message not found.');
     const reactions: Record<string, string[]> = {};
     for (const r of await tx.all('SELECT emoji,user_id FROM reactions WHERE message_id=?', [messageId])) (reactions[r.emoji] ||= []).push(r.user_id);
-    return { id: m!.id, conversationId: m!.conversation_id, sequence: Number(m!.sequence), author: publicUser({ ...m!, id: m!.user_id }), content: m!.deleted ? '' : m!.content, replyTo: m!.reply_to, createdAt: Number(m!.created_at), editedAt: m!.edited_at ? Number(m!.edited_at) : null, deleted: Boolean(m!.deleted), reactions: Object.entries(reactions).map(([emoji, userIds]) => ({ emoji, userIds })), attachments: m!.deleted ? [] : (await tx.all('SELECT * FROM attachments WHERE message_id=?', [messageId])).map(a => ({ id: a.id, name: a.name, size: Number(a.size), expiresAt: Number(a.expires_at), available: a.state === 'ready' && Number(a.expires_at) > Date.now() })) };
+    const mentions = m!.deleted ? [] : (await tx.all('SELECT mm.user_id,mm.username,u.display_name FROM message_mentions mm JOIN users u ON u.id=mm.user_id WHERE mm.message_id=?', [messageId])).map(u => ({ userId: u.user_id, username: u.username, displayName: u.display_name }));
+    return { id: m!.id, conversationId: m!.conversation_id, sequence: Number(m!.sequence), author: publicUser({ ...m!, id: m!.user_id }), content: m!.deleted ? '' : m!.content, replyTo: m!.reply_to, createdAt: Number(m!.created_at), editedAt: m!.edited_at ? Number(m!.edited_at) : null, deleted: Boolean(m!.deleted), reactions: Object.entries(reactions).map(([emoji, userIds]) => ({ emoji, userIds })), mentions, attachments: m!.deleted ? [] : (await tx.all('SELECT * FROM attachments WHERE message_id=?', [messageId])).map(a => ({ id: a.id, name: a.name, size: Number(a.size), expiresAt: Number(a.expires_at), available: a.state === 'ready' && Number(a.expires_at) > Date.now() })) };
   }
   async event(tx: Connection, conversationId: string, kind: string, payload: unknown) {
     await tx.run('UPDATE conversations SET sequence=sequence+1 WHERE id=?', [conversationId]);
@@ -353,7 +374,7 @@ export class Service {
     await tx.run('INSERT INTO events(id,conversation_id,sequence,kind,payload,created_at) VALUES(?,?,?,?,?,?)', [randomUUID(), conversationId, event.sequence, kind, JSON.stringify(payload), Date.now()]); return event;
   }
   async send(userId: string, requestId: string, conversationId: string, content: string, replyTo?: string | null, attachmentIds: string[] = [], asTts = false) {
-    let reopened = false; const spoken = ttsMessage(content);
+    let reopened = false, posted = false; const spoken = ttsMessage(content);
     if (!spoken.text && !attachmentIds.length) fail(400, 'VALIDATION', 'Type a message after /tts.');
     const event = await this.mutate(userId, requestId, 'message.send', { conversationId, content, replyTo, attachmentIds, ...(asTts ? { tts: true } : {}) }, async tx => {
       const cv = await this.conversation(tx, userId, conversationId, true);
@@ -367,10 +388,12 @@ export class Service {
       }
       const messageId = randomUUID();
       await tx.run('INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)', [messageId, conversationId, Number(cv.sequence) + 1, userId, spoken.text, replyTo || null, Date.now()]);
+      await this.replaceMentions(tx, messageId, conversationId, userId, spoken.text);
       for (const a of attachmentIds) await tx.run('UPDATE attachments SET message_id=? WHERE id=?', [messageId, a]);
       if (cv.kind === 'dm') { reopened = Boolean(await tx.one('SELECT user_id FROM dm_members WHERE conversation_id=? AND hidden=1', [conversationId])); await tx.run('UPDATE dm_members SET hidden=0 WHERE conversation_id=?', [conversationId]); }
+      posted = true;
       return this.event(tx, conversationId, 'message', await this.messageView(tx, messageId));
-    }); if (reopened) await this.notify('state:changed', {}); await this.notify('conversation:event', event); if ((spoken.requested || asTts) && spoken.text) this.onTts?.(userId, event.payload as Message); return event;
+    }); if (reopened) await this.notify('state:changed', {}); if (posted) await this.notify('conversation:event', event); if ((spoken.requested || asTts) && spoken.text) this.onTts?.(userId, event.payload as Message); return event;
   }
   async changeMessage(userId: string, requestId: string, messageId: string, body: { content?: string; delete?: boolean; emoji?: string; removeReaction?: boolean }) {
     const event = await this.mutate(userId, requestId, 'message.change', { messageId, ...body }, async tx => {
@@ -392,6 +415,7 @@ export class Service {
         }
         if (m!.deleted) fail(409, 'DELETED', 'Message has been deleted.');
         await tx.run('UPDATE messages SET content=?,deleted=?,edited_at=? WHERE id=?', [body.delete ? '' : body.content!, body.delete ? 1 : 0, Date.now(), messageId]);
+        await this.replaceMentions(tx, messageId, m!.conversation_id, m!.user_id, body.delete ? '' : body.content!);
         if (body.delete) { await tx.run('DELETE FROM reactions WHERE message_id=?', [messageId]); await tx.run("UPDATE attachments SET state='unavailable' WHERE message_id=?", [messageId]); }
       }
       return this.event(tx, m!.conversation_id, 'message', await this.messageView(tx, messageId));
@@ -486,6 +510,7 @@ export class Service {
     const result = await this.db.transaction(async tx => {
       const ch = await this.channel(tx, userId, channelId);
       if (ch.kind !== 'voice') fail(400, 'NOT_VOICE', 'Select a voice channel.');
+      if (ch.timeoutUntil > Date.now()) fail(403, 'TIMED_OUT', 'You are timed out in this server.');
       await this.maintainRoom(tx, channelId);
       const previous = await tx.one('SELECT * FROM voice_members WHERE user_id=?', [userId]);
       if (previous && previous.socket_id === socketId && previous.channel_id === channelId) return { epoch: previous.epoch, room: await this.roomView(tx, channelId) };
@@ -640,8 +665,9 @@ export class Service {
       const from = await this.channel(tx, actorId, fromChannel, 'moderate'), to = await this.channel(tx, actorId, toChannel, 'moderate');
       const target = await this.member(tx, targetId, from.server_id), actor = await tx.one('SELECT instance_admin FROM users WHERE id=?', [actorId]);
       if (from.server_id !== to.server_id || to.kind !== 'voice' || fromChannel === toChannel) fail(400, 'INVALID_MOVE', 'Choose another voice channel in this server.');
-      if (!actor!.instance_admin && ((await tx.one('SELECT instance_admin FROM users WHERE id=?', [targetId]))!.instance_admin || !canManage(await this.authority(tx, { role: from.role, user_id: actorId, server_id: from.server_id }), await this.authority(tx, target)))) fail(403, 'HIERARCHY', 'Cannot move this member.');
+      if (!actor!.instance_admin && ((await tx.one('SELECT instance_admin FROM users WHERE id=?', [targetId]))!.instance_admin || !canMoveMember(await this.authority(tx, { role: from.role, user_id: actorId, server_id: from.server_id }), await this.authority(tx, target)))) fail(403, 'HIERARCHY', 'Cannot move this member.');
       const access = await this.channel(tx, targetId, toChannel);
+      if (access.timeoutUntil > Date.now()) fail(403, 'TIMED_OUT', 'This member is timed out.');
       if (access.locked && !['owner', 'administrator'].includes(access.role)) fail(403, 'VOICE_LOCKED', 'The destination is locked.');
       await this.maintainRoom(tx, toChannel);
       if ((await tx.one('SELECT COUNT(*) AS count FROM voice_members WHERE channel_id=?', [toChannel]))!.count >= Math.min(access.user_limit, this.c.maxVoice)) fail(409, 'ROOM_FULL', 'The destination is full.');
@@ -653,8 +679,10 @@ export class Service {
     await this.notify('voice:move', result); await this.notify('voice:changed', {}); return { success: true };
   }
   async cleanup() {
+    let timeoutExpired = false;
     await this.db.transaction(async tx => {
       const now = Date.now();
+      if (await tx.one('SELECT user_id FROM server_timeouts WHERE expires_at<=? LIMIT 1', [now])) { await tx.run('DELETE FROM server_timeouts WHERE expires_at<=?', [now]); timeoutExpired = true; }
       await tx.run('DELETE FROM recovery_attempts WHERE expires_at<?', [now]);
       await tx.run('DELETE FROM sessions WHERE expires_at<?', [now]); await tx.run('DELETE FROM used_refresh WHERE expires_at<?', [now]);
       await tx.run('DELETE FROM invites WHERE expires_at<? OR remaining<1', [now]);
@@ -665,6 +693,7 @@ export class Service {
       // Empty channels need no work; retain coordinator rows/epochs for fencing.
       for (const ch of await tx.all('SELECT channel_id AS id FROM voice_members UNION SELECT channel_id AS id FROM coordinators WHERE user_id IS NOT NULL')) await this.maintainRoom(tx, ch.id, false);
     });
+    if (timeoutExpired) await this.notify('state:changed', {});
   }
 }
 
