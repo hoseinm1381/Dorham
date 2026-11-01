@@ -5,5 +5,6 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   setLanguage: value => ipcRenderer.invoke('ui:language', value),
   configureVoiceHotkey: value => ipcRenderer.invoke('voice:configure', value),
   onVoiceHotkey: listener => { const handler = (_event, value) => listener(value); ipcRenderer.on('voice:hotkey', handler); return () => ipcRenderer.removeListener('voice:hotkey', handler); },
+  getOverlay: () => ipcRenderer.invoke('overlay:get'), configureOverlay: value => ipcRenderer.invoke('overlay:configure', value), updateOverlay: value => ipcRenderer.send('overlay:update', value),
   setInCall: value => ipcRenderer.send('call:set', value === true), systemAudioSafe: false, getAppInfo: () => ipcRenderer.invoke('app:info'), checkUpdate: () => ipcRenderer.invoke('update:check'), installUpdate: () => ipcRenderer.invoke('update:install')
 }));

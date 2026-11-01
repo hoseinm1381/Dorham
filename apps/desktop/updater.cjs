@@ -7,7 +7,7 @@ function createUpdater(app, net, options = {}) {
   const { RELEASE_ORIGIN, releaseFile, newerVersion } = options.contracts || require('./release-contract.cjs');
   let busy = false;
   async function latest() {
-    const response = await net.fetch(`${RELEASE_ORIGIN}/downloads/latest.json`, { cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(15000) });
+    const response = await net.fetch(`${RELEASE_ORIGIN}/downloads/windows.json`, { cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw Error('Update check unavailable');
     const text = await response.text(); if (text.length > 16384) throw Error('Invalid update response');
     return releaseFile(JSON.parse(text), 'windows');

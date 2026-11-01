@@ -1309,5 +1309,13 @@
   "TTS is busy. Your message was sent normally.": "گفتار مشغول است. پیام شما به‌صورت معمولی ارسال شد.",
   "You cannot use TTS in this voice channel. Your message was sent normally.": "در این کانال امکان استفاده از گفتار را ندارید. پیام شما به‌صورت معمولی ارسال شد.",
   "TTS is limited to 400 characters and one request every 4 seconds. Your message was sent normally.": "گفتار حداکثر ۴۰۰ نویسه و یک درخواست در هر ۴ ثانیه می‌پذیرد. پیام شما به‌صورت معمولی ارسال شد.",
-  "Type a message after /tts.": "پس از ‎/tts متن پیام را بنویسید."
+  "Type a message after /tts.": "پس از ‎/tts متن پیام را بنویسید.",
+  "Windows voice overlay": "نمایش وضعیت صدا روی بازی در ویندوز",
+  "Show voice overlay in games": "نمایش وضعیت کانال صوتی روی بازی",
+  "Overlay position": "محل نمایش",
+  "Top left": "بالا چپ",
+  "Top right": "بالا راست",
+  "Bottom left": "پایین چپ",
+  "Bottom right": "پایین راست",
+  "Click-through voice status on your main display. Works with windowed or borderless games; exclusive fullscreen is not supported.": "وضعیت صدا روی نمایشگر اصلی شما نمایش داده می‌شود و کلیک‌ها به بازی می‌رسند. برای بازی‌های پنجره‌ای یا بدون حاشیه است؛ تمام‌صفحهٔ انحصاری پشتیبانی نمی‌شود."
 }

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, ArrowUpCircle, X } from 'lucide-react';
-import { RELEASE_ORIGIN, releaseFile, type ReleaseManifest } from '../../../packages/contracts/src/releases';
+import { RELEASE_ORIGIN, releaseDownloads, type ReleaseManifest } from '../../../packages/contracts/src/releases';
 import { useRelease, releasePlatform } from './ReleaseProvider';
 import { t } from './i18n';
 import './releases.css';
 export function ReleaseActions({ inCall = false }: { inCall?: boolean }) {
   const { info, refresh, install } = useRelease();
-  const [open, setOpen] = useState(false), [manifest, setManifest] = useState<ReleaseManifest | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false), [manifest, setManifest] = useState<Pick<ReleaseManifest, 'windows' | 'android'> | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -18,9 +18,9 @@ export function ReleaseActions({ inCall = false }: { inCall?: boolean }) {
   async function load() {
     setOpen(true); setError(''); setBusy(true);
     try {
-      const response = await fetch(`${RELEASE_ORIGIN}/downloads/latest.json`, { credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      const response = await fetch(`${RELEASE_ORIGIN}/downloads/releases.json`, { credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw Error('Downloads are temporarily unavailable.');
-      const value: unknown = await response.json(); releaseFile(value, 'windows'); releaseFile(value, 'android'); setManifest(value as ReleaseManifest);
+      const value: unknown = await response.json(); setManifest(releaseDownloads(value));
       await refresh();
     } catch { setError('Downloads are temporarily unavailable.'); } finally { setBusy(false); }
   }

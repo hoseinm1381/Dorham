@@ -6,6 +6,11 @@ directories:
 files:
   - main.cjs
   - preload.cjs
+  - voice-overlay.cjs
+  - overlay-preload.cjs
+  - overlay.html
+  - overlay.css
+  - overlay-renderer.js
   - updater.cjs
   - release-contract.cjs
   - voice-hotkeys.cjs

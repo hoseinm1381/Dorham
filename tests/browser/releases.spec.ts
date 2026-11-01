@@ -5,7 +5,7 @@ const entry = (platform: 'windows' | 'android') => ({ version: '1.0.0', appId: '
 const manifest = { schema: 1, version: '1.0.0', windows: entry('windows'), android: entry('android') };
 test.use({ trace: 'off', video: 'off' });
 test('small download menu works before sign-in, after sign-in and on mobile', async ({ page }) => {
-  await page.route(origin + '/downloads/latest.json', route => route.fulfill({ json: manifest, headers: { 'access-control-allow-origin': '*' } }));
+  await page.route(origin + '/downloads/releases.json', route => route.fulfill({ json: manifest, headers: { 'access-control-allow-origin': '*' } }));
   await page.goto('/'); const downloads = page.getByRole('button', { name: 'Download apps', exact: true });
   await expect(downloads).toBeVisible(); await downloads.click();
   await expect(page.getByRole('link', { name: 'Windows 1.0.0' })).toHaveAttribute('href', manifest.windows.url);
@@ -30,7 +30,7 @@ test('native update notice stays small and invokes the native update action', as
   await update.click(); await expect.poll(() => page.evaluate(() => (window as any).__updateCalls)).toBe(1);
 });
 test('missing release metadata does not break sign-in or offer invalid download links', async ({ page }) => {
-  await page.route(origin + '/downloads/latest.json', route => route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' } }));
+  await page.route(origin + '/downloads/releases.json', route => route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' } }));
   await page.goto('/'); await page.getByRole('button', { name: 'Download apps', exact: true }).click();
   await expect(page.getByText('Downloads are temporarily unavailable.', { exact: false })).toBeVisible();
   await expect(page.locator('.release-menu a')).toHaveCount(0); await expect(page.getByLabel('Username', { exact: true })).toBeEnabled();

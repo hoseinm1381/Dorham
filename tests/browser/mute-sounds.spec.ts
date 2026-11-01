@@ -12,6 +12,7 @@ async function api(page: Page, route: string, body?: object) {
 }
 async function instrument(page: Page) {
   await page.addInitScript(({ tlsOnly }) => {
+    localStorage.setItem('dorham.noiseRemoval.v1', 'off'); localStorage.setItem('dorham.voiceClarity.v1', 'false');
     localStorage.setItem('dorham-sounds', JSON.stringify({ voice: false, messages: false }));
     const Peer = RTCPeerConnection; (window as any).__volumePeers = [];
     (window as any).RTCPeerConnection = new Proxy(Peer, { construct(Target, args) {
@@ -96,18 +97,18 @@ test('mute and unmute cues are audible only locally, fire once per state change 
     for (const name of ['Mute microphone', 'Unmute microphone']) await self.getByRole('button', { name, exact: true }).click();
     await expect(cues(self)).resolves.toEqual([]); expect(await level(self)).toBeLessThan(0.000001);
     await settings(); await self.getByRole('tab', { name: 'Notifications', exact: true }).click(); await voice.check();
-    await self.getByRole('tab', { name: 'Audio', exact: true }).click(); await self.getByLabel('Voice input mode', { exact: true }).selectOption('push');
+    await self.getByRole('tab', { name: 'Audio', exact: true }).click(); await self.getByText('Advanced audio', { exact: true }).click(); await self.getByLabel('Voice input mode', { exact: true }).selectOption('push');
     await self.getByRole('button', { name: 'Record talk hotkey', exact: true }).click(); await self.keyboard.press('F9');
     await self.getByRole('button', { name: 'Close dialog', exact: true }).click(); await self.waitForTimeout(300); await clear();
     await self.keyboard.down('F9'); await expect.poll(() => cues(self)).toEqual(['unmute']);
     await self.keyboard.down('F9'); await expect(cues(self)).resolves.toEqual(['unmute']);
     await self.keyboard.up('F9'); await self.keyboard.up('F9'); await expect.poll(() => cues(self)).toEqual(['unmute', 'mute']);
-    await settings(); await self.getByRole('tab', { name: 'Audio', exact: true }).click(); await self.getByLabel('Voice input mode', { exact: true }).selectOption('toggle');
+    await settings(); await self.getByRole('tab', { name: 'Audio', exact: true }).click(); await self.getByText('Advanced audio', { exact: true }).click(); await self.getByLabel('Voice input mode', { exact: true }).selectOption('toggle');
     await self.getByRole('button', { name: 'Close dialog', exact: true }).click(); await clear();
     await self.keyboard.press('F9'); await self.evaluate(() => window.dispatchEvent(new Event('blur'))); await expect.poll(() => cues(self)).toEqual(['unmute']);
     await self.keyboard.press('F9'); await expect.poll(() => cues(self)).toEqual(['unmute', 'mute']);
     await clear(); await self.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(self.locator('.voice-panel')).toHaveCount(0); await expect(cues(self)).resolves.toEqual([]);
     await mkdir('artifacts/evidence', { recursive: true });
-    await writeFile('artifacts/evidence/v054-mute-sounds.json', JSON.stringify({ muteRms, unmuteRms, muteNotes: [520,350], unmuteNotes: [350,520], localOnly: true, muteSilenceAtPeer: true, enabledByDefault: true, preferenceRespected: true, button: true, pushToTalk: true, toggleToTalk: true, noRepeatedKeyCues: true, noDisconnectMuteCue: true, physicalSpeaker: 'not measured' }, null, 2));
+    await writeFile('artifacts/evidence/v105-mute-sounds.json', JSON.stringify({ muteRms, unmuteRms, muteNotes: [520,350], unmuteNotes: [350,520], localOnly: true, muteSilenceAtPeer: true, enabledByDefault: true, preferenceRespected: true, button: true, pushToTalk: true, toggleToTalk: true, noRepeatedKeyCues: true, noDisconnectMuteCue: true, physicalSpeaker: 'not measured' }, null, 2));
   } finally { await a.close(); await b.close(); }
 });

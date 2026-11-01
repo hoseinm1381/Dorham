@@ -22,3 +22,9 @@ export function releaseFile(value: unknown, platform: ReleasePlatform): ReleaseF
   if (platform === 'android' && (!Number.isSafeInteger(file.versionCode) || file.versionCode! < 1)) throw Error('Invalid Android build number');
   return file;
 }
+
+export function releaseDownloads(value: unknown): Pick<ReleaseManifest, 'windows' | 'android'> {
+  const catalog = value as { schema?: number; windows?: unknown; android?: unknown };
+  if (catalog?.schema === 2) return { windows: releaseFile(catalog.windows, 'windows'), android: releaseFile(catalog.android, 'android') };
+  return { windows: releaseFile(value, 'windows'), android: releaseFile(value, 'android') };
+}

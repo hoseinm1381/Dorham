@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { releaseFile, newerVersion, RELEASE_ORIGIN } from '../packages/contracts/src/releases';
+import { releaseFile, releaseDownloads, newerVersion, RELEASE_ORIGIN } from '../packages/contracts/src/releases';
 const file = { version: '1.0.1', url: RELEASE_ORIGIN + '/downloads/1.0.1/Dorham-1.0.1-Windows-x64.exe', appId: 'com.dorham.chat', sha256: 'a'.repeat(64), size: 4096 };
 const manifest = { schema: 1, version: '1.0.1', windows: file };
 it('compares release numbers numerically and never suggests downgrades or malformed versions', () => {
@@ -9,4 +9,10 @@ it('compares release numbers numerically and never suggests downgrades or malfor
 it('only accepts the canonical app identity, exact trusted path and bounded digest-bearing release', () => {
   expect(releaseFile(manifest, 'windows')).toEqual(file);
   for (const patch of [{ url: 'https://example.com/install.exe' }, { url: file.url + '?redirect=evil' }, { appId: 'other.app' }, { sha256: 'invalid' }, { size: 1024 * 1024 * 400 }, { version: '0.1.0' }]) expect(() => releaseFile({ ...manifest, windows: { ...file, ...patch } }, 'windows')).toThrow();
+});
+
+it('validates independently versioned platform releases without weakening schema-1 checks', () => {
+ const android = { version: '1.0.0', appId: 'com.dorham.chat', sha256: 'b'.repeat(64), size: 4096, versionCode: 1000000, url: RELEASE_ORIGIN + '/downloads/1.0.0/Dorham-1.0.0-Android.apk' };
+ expect(releaseDownloads({ schema: 2, windows: manifest, android: { schema: 1, version: '1.0.0', android } })).toEqual({windows:file,android});
+ expect(() => releaseDownloads({ schema: 2, windows: manifest, android: { schema: 1, version: '1.0.1', android } })).toThrow();
 });

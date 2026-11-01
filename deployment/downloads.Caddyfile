@@ -4,8 +4,18 @@
 (dorham_downloads) {
     handle_path /downloads/* {
         root * /var/lib/dorham-downloads
-        @latest path /latest.json
-        header @latest Cache-Control "no-store"
+        # Legacy Windows apps fetch latest.json in the main process without an
+        # Origin header. Android and old renderer menus retain the unchanged
+        # schema-1 manifest; new clients use explicit platform metadata.
+        @legacyWindows {
+            path /latest.json
+            header User-Agent *Electron/*
+            not header Origin *
+        }
+        rewrite @legacyWindows /windows.json
+        @metadata path /latest.json /windows.json /android.json /releases.json
+        header @metadata Cache-Control "no-store"
+        header @metadata Vary "User-Agent, Origin"
         @packages path_regexp packages ^/[0-9]+\.[0-9]+\.[0-9]+/[^/]+$
         header @packages Cache-Control "public, max-age=31536000, immutable"
         header Access-Control-Allow-Origin "*"
