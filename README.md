@@ -1,4 +1,6 @@
-**Current release: web and Windows 1.0.5** — louder mute/unmute feedback and an optional native Windows voice overlay for windowed/borderless games. Android remains 1.0.4. See [release verification](docs/RELEASE-1.0.5.md).
+**Current Windows release: 1.0.6** — more transparent voice overlay, microphone/headphone status icons and a dedicated Settings → Game overlay tab. Web remains 1.0.5; Android/backend remain 1.0.4. See [release details](docs/RELEASE-1.0.6-WINDOWS.md).
+
+**Previous release: web and Windows 1.0.5** — louder mute/unmute feedback and an optional native Windows voice overlay for windowed/borderless games. Android remains 1.0.4. See [release verification](docs/RELEASE-1.0.5.md).
 
 **Previous web/server update: 1.0.4, live at https://dorhamapp.ir/** — all 64 emoji reactions, keep-open selection, larger single emojis and local Farsi/English voice-channel TTS. Windows and signed Android 1.0.4 installers are published with the existing update identities. See [release details](docs/RELEASE-1.0.4.md) and [native release checks](docs/RELEASE-1.0.4-NATIVE.md).
 

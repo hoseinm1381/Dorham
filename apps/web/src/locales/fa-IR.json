@@ -1317,5 +1317,6 @@
   "Top right": "بالا راست",
   "Bottom left": "پایین چپ",
   "Bottom right": "پایین راست",
-  "Click-through voice status on your main display. Works with windowed or borderless games; exclusive fullscreen is not supported.": "وضعیت صدا روی نمایشگر اصلی شما نمایش داده می‌شود و کلیک‌ها به بازی می‌رسند. برای بازی‌های پنجره‌ای یا بدون حاشیه است؛ تمام‌صفحهٔ انحصاری پشتیبانی نمی‌شود."
+  "Click-through voice status on your main display. Works with windowed or borderless games; exclusive fullscreen is not supported.": "وضعیت صدا روی نمایشگر اصلی شما نمایش داده می‌شود و کلیک‌ها به بازی می‌رسند. برای بازی‌های پنجره‌ای یا بدون حاشیه است؛ تمام‌صفحهٔ انحصاری پشتیبانی نمی‌شود.",
+  "Game overlay": "نمایش روی بازی"
 }
