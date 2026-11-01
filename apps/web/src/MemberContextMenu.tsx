@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Channel, PublicUser, Server, ServerMember, VoicePresence, VoiceRoom } from '@dorham/contracts';
+import type { MediaTransport } from '@dorham/media';
+import { MicrophoneGainControl } from './MicrophoneGainControl';
 import { canMoveMember, type MemberModerationInfo } from '../../../packages/contracts/src/moderation';
 import { request } from './api';
 import { t, formatNumber } from './i18n';
 import './member-moderation.css';
 
-type Target = { user: PublicUser; serverId: string; x: number; y: number; trigger: HTMLElement };
+type Target = { user: PublicUser; serverId: string | null; x: number; y: number; trigger: HTMLElement };
 type LocalAudio = { level: number; restore: number; change: (level: number) => void };
-type Options = { me?: PublicUser; serverId: string | null; servers: Server[]; channels: Channel[]; members: ServerMember[]; presence: VoicePresence[]; room: VoiceRoom | null; volumes: Record<string, number>; setVolume: (id: string, level: number) => void; profile: (user: PublicUser) => void; error: (error: unknown) => void; changed: () => Promise<void> };
+type Options = { me?: PublicUser; serverId: string | null; servers: Server[]; channels: Channel[]; members: ServerMember[]; presence: VoicePresence[]; room: VoiceRoom | null; transport: MediaTransport | null; volumes: Record<string, number>; setVolume: (id: string, level: number) => void; profile: (user: PublicUser) => void; error: (error: unknown) => void; changed: () => Promise<void> };
 export function useMemberModeration(o: Options) {
  const [target, setTarget] = useState<Target | null>(null), [drag, setDrag] = useState<{ userId: string; channelId: string; serverId: string } | null>(null), [over, setOver] = useState('');
  const audible = useRef<Record<string, number>>({});
@@ -23,7 +25,7 @@ export function useMemberModeration(o: Options) {
   return {
    onContextMenu: (e: MouseEvent<HTMLElement>) => {
     const serverId = o.channels.find(c => c.id === channelId)?.serverId || o.serverId;
-    if (!serverId) return;
+    if (!serverId && user.id !== o.me?.id) return;
     e.preventDefault(); e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect();
     setTarget({ user, serverId, x: e.clientX || rect.left + 10, y: e.clientY || rect.bottom, trigger: e.currentTarget });
    },
@@ -53,13 +55,13 @@ export function useMemberModeration(o: Options) {
    o.setVolume(audioId, level);
   }
  } : undefined;
- return { bind, drop, menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}`} target={target} channels={o.channels} audio={audio} close={() => setTarget(null)} profile={o.profile} changed={o.changed}/> };
+ return { bind, drop, menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}`} target={target} channels={o.channels} audio={audio} microphone={target.user.id === o.me?.id ? { transport: o.transport, error: o.error } : undefined} close={() => setTarget(null)} profile={o.profile} changed={o.changed}/> };
 }
 
-function MemberContextMenu({ target, channels, audio, close, profile, changed }: { target: Target; channels: Channel[]; audio?: LocalAudio; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
+function MemberContextMenu({ target, channels, audio, microphone, close, profile, changed }: { target: Target; channels: Channel[]; audio?: LocalAudio; microphone?: { transport: MediaTransport | null; error: (error: unknown) => void }; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
  const ref = useRef<HTMLDivElement>(null), [info, setInfo] = useState<MemberModerationInfo | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [moving, setMoving] = useState(false), [confirm, setConfirm] = useState<'kick' | 'ban' | 'timeout' | null>(null), [seconds, setSeconds] = useState(600), [reason, setReason] = useState('');
  const [position, setPosition] = useState({ left: target.x, top: target.y });
- useEffect(() => { let active = true; void request<MemberModerationInfo>(`/servers/${target.serverId}/members/${target.user.id}/moderation`).then(value => { if (active) setInfo(value); }).catch(() => { if (active) setError('Member controls are unavailable.'); }); return () => { active = false; }; }, []);
+ useEffect(() => { if (microphone || !target.serverId) return; let active = true; void request<MemberModerationInfo>(`/servers/${target.serverId}/members/${target.user.id}/moderation`).then(value => { if (active) setInfo(value); }).catch(() => { if (active) setError('Member controls are unavailable.'); }); return () => { active = false; }; }, []);
  useLayoutEffect(() => { const rect = ref.current?.getBoundingClientRect(); if (rect) setPosition({ left: Math.max(8, Math.min(target.x, innerWidth - rect.width - 8)), top: Math.max(8, Math.min(target.y, innerHeight - rect.height - 8)) }); }, [info, moving, confirm, target.x, target.y]);
  useEffect(() => {
   const outside = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
@@ -85,12 +87,13 @@ function MemberContextMenu({ target, channels, audio, close, profile, changed }:
    <div className="context-confirm-buttons"><button type="button" disabled={busy} onClick={() => setConfirm(null)}>{t('Cancel')}</button><button className="danger" type="submit" disabled={busy}>{t(confirm === 'ban' ? 'Confirm ban' : confirm === 'kick' ? 'Confirm kick' : 'Apply timeout')}</button></div>
   </form> : <>
    <button role="menuitem" disabled={busy} onClick={() => { close(); profile(target.user); }}>{t('View profile')}</button>
+   {microphone && <MicrophoneGainControl transport={microphone.transport} onError={microphone.error} compact/>}
    {audio && <div className="member-local-audio" role="group" aria-label={t('Personal voice volume')}>
     <label><span>{t('Voice volume for {name}', { name: target.user.displayName })}<output>{formatNumber(audio.level)}%</output></span><input type="range" min={0} max={200} step={1} value={audio.level} aria-label={t('Voice volume for {name}', { name: target.user.displayName })} title={t('0% mutes this person; 100% is original volume; 200% doubles the audio signal.')} onChange={e => audio.change(Number(e.target.value))}/></label>
     <small>{t('Only changes what you hear.')}</small>
     <button type="button" role="menuitemcheckbox" aria-checked={audio.level === 0} onClick={() => audio.change(audio.level === 0 ? audio.restore : 0)}>{t(audio.level === 0 ? 'Unmute for me' : 'Mute for me')}</button>
    </div>}
-   {!info && !error && <p role="status">{t('Please wait…')}</p>}
+   {!microphone && !info && !error && <p role="status">{t('Please wait…')}</p>}
    {info?.voice && <>
     {info.actions.move && destinations.length > 0 && <><button role="menuitem" disabled={busy} aria-expanded={moving} onClick={() => setMoving(!moving)}>{t('Move to voice channel')} <span aria-hidden="true">▸</span></button>{moving && <div className="context-destinations">{destinations.map(c => <button role="menuitem" key={c.id} disabled={busy} onClick={() => { void action(`/voice/${info.voice!.channelId}/move`, { userId: target.user.id, channelId: c.id }); }}>{c.name}</button>)}</div>}</>}
     {info.actions.voice && <><button role="menuitem" disabled={busy} onClick={() => voiceAction(info.voice!.serverMuted ? 'unmute' : 'mute')}>{t(info.voice.serverMuted ? 'Allow microphone' : 'Server mute')}</button><button role="menuitem" disabled={busy} onClick={() => voiceAction(info.voice!.serverDeafened ? 'undeafen' : 'deafen')}>{t(info.voice.serverDeafened ? 'Allow listening' : 'Server deafen')}</button><button role="menuitem" disabled={busy} onClick={() => voiceAction(info.voice!.sharingAllowed ? 'denyShare' : 'allowShare')}>{t(info.voice.sharingAllowed ? 'Disallow screen sharing' : 'Allow screen sharing')}</button><button role="menuitem" disabled={busy} onClick={() => voiceAction('stopShare')}>{t('Stop screen share')}</button><button className="danger" role="menuitem" disabled={busy} onClick={() => voiceAction('kick')}>{t('Disconnect from voice')}</button></>}

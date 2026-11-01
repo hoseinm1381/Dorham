@@ -37,6 +37,43 @@ async function instrument(page: Page, amplitude = 0.04) {
   }, { tlsOnly: process.env.DORHAM_AUDIO_TLS_ONLY === '1', amplitude });
 }
 
+test('quick microphone gain on my user spans 0–200%, persists and shares advanced settings without bypassing mute', async ({ browser }) => {
+  test.setTimeout(150000);
+  const a = await browser.newContext({ permissions: ['microphone'] }), b = await browser.newContext({ permissions: ['microphone'] }), sender = await a.newPage(), receiver = await b.newPage();
+  try {
+    for (const p of [sender, receiver]) await instrument(p);
+    const suffix = Date.now().toString().slice(-7), name = `QuickMicA${suffix}`;
+    await register(sender, name); await register(receiver, `QuickMicB${suffix}`);
+    const quick = () => sender.getByRole('slider', { name: 'Microphone volume', exact: true });
+    const open = () => sender.locator('.account-bar .account-info').click({ button: 'right' });
+    await open(); await expect(quick()).toHaveAttribute('min', '0'); await expect(quick()).toHaveAttribute('max', '200');
+    await quick().focus(); await quick().press('End'); await expect(quick()).toHaveValue('200'); await quick().press('Home'); await expect(quick()).toHaveValue('0');
+    await expect(sender.getByRole('slider', { name: 'Advanced microphone gain', exact: true })).toHaveCount(0);
+    await sender.reload(); await open(); await expect(quick()).toHaveValue('0'); await quick().fill('50'); await sender.keyboard.press('Escape');
+    const server = await api(sender, '/servers', { name: 'Quick microphone lab' }), invite = await api(sender, `/servers/${server.id}/invites`, {}); await api(receiver, '/invites/join', { code: invite.code });
+    for (const p of [sender, receiver]) { await p.getByRole('button', { name: 'Open Quick microphone lab', exact: true }).click(); await p.getByRole('button', { name: 'Lounge', exact: true }).click(); }
+    await receiver.getByRole('button', { name: 'Mute microphone', exact: true }).click();
+    await expect.poll(() => level(receiver), { timeout: 45000 }).toBeGreaterThan(0.005); await receiver.waitForTimeout(3000);
+    await sender.locator('.voice-mini-members button').filter({ hasText: name }).click({ button: 'right' }); await expect(quick()).toHaveValue('50'); await quick().fill('100');
+    await receiver.waitForTimeout(500); const normal = await level(receiver), measurements: Record<string, number> = {};
+    for (const [percent, ratio] of [[25, 0.25], [200, 2], [0, 0]]) {
+      await quick().fill(String(percent));
+      if (ratio === 0) await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
+      else await expect.poll(async () => (await level(receiver)) / normal / ratio).toBeCloseTo(1, 1);
+      measurements[String(percent)] = await level(receiver);
+    }
+    await sender.keyboard.press('Escape'); await sender.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await open(); await quick().fill('200'); await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
+    await sender.keyboard.press('Escape'); await sender.getByRole('button', { name: 'Unmute microphone', exact: true }).click(); await expect.poll(async () => (await level(receiver)) / normal / 2).toBeCloseTo(1, 1);
+    await settings(sender); const advanced = () => sender.getByRole('slider', { name: 'Advanced microphone gain', exact: true }); await expect(advanced()).toHaveValue('200'); await advanced().fill('250'); await expect.poll(async () => (await level(receiver)) / normal / 2.5).toBeCloseTo(1, 1);
+    await sender.getByRole('button', { name: 'Close dialog', exact: true }).click(); await open(); await expect(quick()).toHaveValue('200'); await expect(sender.locator('.member-local-audio output')).toHaveText('250%');
+    // Opening the quick menu must preserve a gain set above its range.
+    await expect.poll(async () => (await level(receiver)) / normal / 2.5).toBeCloseTo(1, 1); await quick().fill('150'); await expect.poll(async () => (await level(receiver)) / normal / 1.5).toBeCloseTo(1, 1);
+    await sender.screenshot({ path: 'artifacts/evidence/quick-mic-menu.png' }); await sender.keyboard.press('Escape'); await settings(sender); await expect(advanced()).toHaveValue('150'); await sender.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await sender.reload(); await open(); await expect(quick()).toHaveValue('150'); await sender.keyboard.press('Escape'); await sender.getByRole('button', { name: 'Open Quick microphone lab', exact: true }).click(); await sender.getByRole('button', { name: 'Lounge', exact: true }).click(); await expect.poll(async () => (await level(receiver)) / normal / 1.5, { timeout: 45000 }).toBeCloseTo(1, 1);
+    await mkdir('artifacts/evidence', { recursive: true }); await writeFile('artifacts/evidence/quick-mic-browser.json', JSON.stringify({ transport: (await api(receiver, '/bootstrap')).mediaTransport, quickRange: [0, 200], measurements, trueZeroSilence: true, muteNotBypassed: true, savedBeforeJoin: true, zeroAnd150PersistAfterReload: true, advanced250PreservedOnOpen: true, advancedAndQuickShareSetting: true, sidebarAndAccountSelfMenus: true, source: 'Synthetic microphone over decoded WebRTC; not physical microphone acceptance.' }, null, 2));
+  } finally { await a.close(); await b.close(); }
+});
+
 test('opt-in +30 dB boost reaches a separate listener, stays silent while muted and returns to the normal range', async ({ browser }) => {
   const a = await browser.newContext({ permissions: ['microphone'] }), b = await browser.newContext({ permissions: ['microphone'] }), sender = await a.newPage(), receiver = await b.newPage();
   try {
@@ -45,7 +82,7 @@ test('opt-in +30 dB boost reaches a separate listener, stays silent while muted 
     const server = await api(sender, '/servers', { name: 'Boost lab' }), invite = await api(sender, `/servers/${server.id}/invites`, {}); await api(receiver, '/invites/join', { code: invite.code });
     for (const page of [sender, receiver]) { await page.getByRole('button', { name: 'Open Boost lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
     await receiver.getByRole('button', { name: 'Mute microphone', exact: true }).click(); await expect.poll(() => level(receiver)).toBeGreaterThan(0.0005); await receiver.waitForTimeout(1500); const baseline = await level(receiver);
-    await settings(sender); const boost = sender.getByLabel('Allow microphone boost up to +45 dB', { exact: true }), gain = sender.getByRole('slider', { name: 'Microphone volume', exact: true });
+    await settings(sender); const boost = sender.getByLabel('Allow microphone boost up to +45 dB', { exact: true }), gain = sender.getByRole('slider', { name: 'Advanced microphone gain', exact: true });
     await boost.check(); await gain.fill('30'); let ratio = 0;
     await expect.poll(async () => ratio = (await level(receiver)) / baseline).toBeGreaterThan(28); expect(ratio).toBeLessThan(35);
     await gain.fill('45'); let highestRatio = 0;
@@ -120,7 +157,7 @@ test('own microphone gain changes transmitted audio at 50–250%, respects mute 
     await api(receiver, '/invites/join', { code: invite.code });
     // Decoded Opus amplitude is checked within 5% relative tolerance.
     // Save before joining to exercise the deferred adapter's initialization.
-    await settings(sender); const gain = () => sender.getByRole('slider', { name: 'Microphone volume', exact: true });
+    await settings(sender); const gain = () => sender.getByRole('slider', { name: 'Advanced microphone gain', exact: true });
     await expect(gain()).toHaveValue('100'); await gain().fill('50');
     await sender.getByRole('button', { name: 'Close dialog', exact: true }).click();
     for (const page of [sender, receiver]) { await page.getByRole('button', { name: 'Open Microphone gain lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }

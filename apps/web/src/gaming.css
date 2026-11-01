@@ -1,4 +1,4 @@
-.gaming-voice { padding:8px 14px; flex:0 0 auto; max-height:36vh; overflow:auto; background:#171a23; }
+.voice-stage.gaming-voice { padding:8px 14px; flex:0 0 auto; max-height:36vh; overflow:auto; background:#171a23; }
 .gaming-voice-header,.gaming-voice-header>span { display:flex; align-items:center; gap:10px; }
 .gaming-voice-header { justify-content:space-between; min-height:34px; }
 .gaming-voice-header strong { font-size:13px; }
@@ -6,6 +6,7 @@
 .gaming-voice-header button { min-height:32px; padding:5px 9px; border:1px solid #ffffff15; border-radius:6px; display:inline-flex; align-items:center; gap:5px; }
 .gaming-voice-header .check-row { margin:0; font-size:11px; }
 .gaming-voice .share-list { margin:6px 0 0; display:flex; gap:8px; flex-wrap:wrap; }
+.gaming-voice .share-list:empty { display:none; }
 .gaming-voice .share-list>div { display:flex; gap:10px; padding:7px 10px; border:1px solid #ffffff10; background:#222633; border-radius:8px; align-items:center; }
 .gaming-voice .share-list>div>span:first-of-type { display:flex; align-items:center; gap:6px; font-size:12px; }
 .gaming-voice .watch-stream { min-height:36px; padding:8px 17px; background:#7567d8; color:#fff; border-radius:7px; font-size:13px; font-weight:650; }
@@ -51,7 +52,7 @@
 .modal-backdrop .modal { outline:none; }
 dialog.modal-backdrop { padding:0; border:0; margin:0; max-width:none; max-height:none; width:100vw; height:100dvh; color:inherit; }
 dialog.modal-backdrop::backdrop { background:#0009; }
-@media(max-width:700px) { .gaming-voice { padding:6px 8px; } .gaming-voice-header { flex-wrap:wrap; gap:5px; } .gaming-voice-header>span { gap:5px; flex-wrap:wrap; } .gaming-voice .share-list>div { flex-wrap:wrap; width:100%; } .gaming-voice .watch-stream { margin-inline-start:auto; } .gaming-voice .screens.multi-streams { grid-template-columns:1fr; grid-auto-rows:minmax(150px,1fr); } .main.stream-viewer-active.chat-drawer-open>.message-scroll { flex-basis:100px; } .icon-button { min-width:34px; min-height:34px; } }
+@media(max-width:700px) { .voice-stage.gaming-voice { padding:6px 8px; } .gaming-voice-header { flex-wrap:wrap; gap:5px; } .gaming-voice-header>span { gap:5px; flex-wrap:wrap; } .gaming-voice .share-list>div { flex-wrap:wrap; width:100%; } .gaming-voice .watch-stream { margin-inline-start:auto; } .gaming-voice .screens.multi-streams { grid-template-columns:1fr; grid-auto-rows:minmax(150px,1fr); } .main.stream-viewer-active.chat-drawer-open>.message-scroll { flex-basis:100px; } .icon-button { min-width:34px; min-height:34px; } }
 @media(prefers-reduced-motion:reduce) { *,*:before,*:after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
 
 .gaming-voice .stream-view:fullscreen,.gaming-voice .screen:fullscreen { width:100vw; height:100dvh; padding:12px; background:#0b0d12; color:#e7e8f0; }

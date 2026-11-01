@@ -3,7 +3,7 @@ import { BoostNoiseFilter } from './boost-noise-filter';
 import { StrongDenoiser, type NoiseRemoval, type NoiseRemovalState } from './strong-denoiser';
 // This graph feeds the outgoing track only; it never monitors the mic locally.
 export const maximumMicrophoneGain = 10 ** (45 / 20);
-export function clampMicrophoneGain(value: number) { return Number.isFinite(value) ? Math.max(0.5, Math.min(maximumMicrophoneGain, value)) : 1; }
+export function clampMicrophoneGain(value: number) { return Number.isFinite(value) ? Math.max(0, Math.min(maximumMicrophoneGain, value)) : 1; }
 export class MicrophoneGain {
   readonly name = 'dorham-microphone-gain';
   processedTrack?: MediaStreamTrack;

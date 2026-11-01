@@ -1367,5 +1367,9 @@
   "Personal voice volume": "بلندی صدای شخصی",
   "Only changes what you hear.": "فقط صدایی را که شما می‌شنوید تغییر می‌دهد.",
   "Mute for me": "بی‌صدا کردن برای من",
-  "Unmute for me": "پخش دوبارهٔ صدا برای من"
+  "Unmute for me": "پخش دوبارهٔ صدا برای من",
+  "My microphone": "میکروفون من",
+  "Advanced microphone gain": "تقویت پیشرفتهٔ میکروفون",
+  "More controls are in Settings → Audio → Advanced audio.": "کنترل‌های بیشتر در تنظیمات ← صدا ← تنظیمات پیشرفتهٔ صدا هستند.",
+  "Higher gain is set in Advanced audio.": "تقویت بیشتر در تنظیمات پیشرفتهٔ صدا تنظیم شده است."
 }
