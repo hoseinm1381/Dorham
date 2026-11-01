@@ -1,4 +1,6 @@
-**Current Windows release: 1.0.6** — more transparent voice overlay, microphone/headphone status icons and a dedicated Settings → Game overlay tab. Web remains 1.0.5; Android/backend remain 1.0.4. See [release details](docs/RELEASE-1.0.6-WINDOWS.md).
+**Current Android release: 1.0.6** — louder mute/unmute cues and Copy message text, with the existing signing identity. See [Android release checks](docs/RELEASE-1.0.6-ANDROID.md).
+
+**Current Windows release: 1.0.6** — more transparent voice overlay, microphone/headphone status icons and a dedicated Settings → Game overlay tab. Web remains 1.0.5; backend remains 1.0.4. See [release details](docs/RELEASE-1.0.6-WINDOWS.md).
 
 **Previous release: web and Windows 1.0.5** — louder mute/unmute feedback and an optional native Windows voice overlay for windowed/borderless games. Android remains 1.0.4. See [release verification](docs/RELEASE-1.0.5.md).
 

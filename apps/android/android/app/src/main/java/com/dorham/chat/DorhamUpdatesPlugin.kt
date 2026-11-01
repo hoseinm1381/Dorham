@@ -24,7 +24,7 @@ class DorhamUpdatesPlugin : Plugin() {
   return (URL(address).openConnection() as HttpURLConnection).apply { instanceFollowRedirects = false; connectTimeout = 15000; readTimeout = 30000; setRequestProperty("Cache-Control", "no-cache") }
  }
  private fun latest(): JSONObject {
-  val conn = connection("$origin/downloads/latest.json")
+  val conn = connection("$origin/downloads/android.json")
   try {
    require(conn.responseCode == 200)
    val bytes = java.io.ByteArrayOutputStream()

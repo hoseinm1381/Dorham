@@ -1,4 +1,6 @@
-Current Windows release **1.0.6** refines overlay transparency and microphone/headphone indicators, and moves its controls to Settings → Game overlay. It retains the current shell and installer identity. Web stays 1.0.5; Android and backend stay 1.0.4. See [Windows patch details](RELEASE-1.0.6-WINDOWS.md).
+Current Android release **1.0.6** adds the louder mute/unmute cues and native text copying. Signing identity is preserved; physical device checks remain pending. Windows remains its existing 1.0.6 binary. See [Android details](RELEASE-1.0.6-ANDROID.md).
+
+Current Windows release **1.0.6** refines overlay transparency and microphone/headphone indicators, and moves its controls to Settings → Game overlay. It retains the current shell and installer identity. Web stays 1.0.5; backend stays 1.0.4. See [Windows patch details](RELEASE-1.0.6-WINDOWS.md).
 
 Previous web/Windows release **1.0.5** doubles the mute/unmute cue signal and adds an optional native click-through Windows voice overlay under Settings → Audio. It supports windowed/borderless games; exclusive fullscreen is unsupported. All 174 unit/API tests, browser cue/privacy/talk-key checks, actual native click-through/position/lifecycle and the real 1.0.4-to-1.0.5 installer upgrade pass. Web and Windows downloads are live; Android and backend remain 1.0.4. Fresh rollback backup is independently verified. See [1.0.5 details](RELEASE-1.0.5.md).
 
