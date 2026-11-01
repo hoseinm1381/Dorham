@@ -1,6 +1,6 @@
-# 1.0.7 — local preparation
+# 1.0.7 — released
 
-**Not pushed or deployed.** These changes are local source and a local Windows installer. Public web remains 1.0.5, backend 1.0.4, Windows 1.0.6 and Android 1.0.6. Android is not rebuilt or synced for this work.
+**Released at https://dorhamapp.ir/** after operator approval. Web, backend and Windows are 1.0.7; Android remains the accepted signed 1.0.6 release. Android was not rebuilt or synced. Windows keeps the existing installer/app identity and remains unsigned as authorized.
 
 Web and Windows receive the message-text Copy action already accepted on Android 1.0.6. The louder mute/unmute cues and transparent Windows overlay are retained. The operator confirmed the Android 1.0.6 update over 1.0.4, retained login, English/Persian copying and louder cues; that APK and signing identity remain unchanged.
 
@@ -26,7 +26,7 @@ The operator reported **Invalid capture constraints** on Windows 1.0.6. The same
 
 Native testing also exposed repeated-share playback using an emptied browser-owned stream container in the mesh path. Video playback now holds its own stream container around the live receiver track, while signaling still uses the announced stream ID. This fixes stop/restart playback without changing microphone capture or the SFU implementation.
 
-The current local installer is **`artifacts/v1.0.7/windows-avatars/Dorham-1.0.7-Windows-x64.exe`**. The earlier `windows/`, `windows-screen-fix/`, `windows-mentions/` and `windows-tts-loading/` builds are superseded and preserved for evidence. Nothing is published. Android remains unchanged at 1.0.6.
+The released installer is **`artifacts/v1.0.7/windows-avatars/Dorham-1.0.7-Windows-x64.exe`**. The earlier `windows/`, `windows-screen-fix/`, `windows-mentions/` and `windows-tts-loading/` builds are superseded and preserved for evidence. Windows is published at https://dorhamapp.ir/downloads/1.0.7/Dorham-1.0.7-Windows-x64.exe. Android remains unchanged at 1.0.6.
 
 ## Server memory cleanup
 
@@ -59,4 +59,17 @@ Schema 10 adds `server_bans` and `server_timeouts`, with foreign keys and expiry
 - Installed Windows checks pass the Copy action with an intercepted clipboard, a secure application origin, member-menu rendering and self-action restrictions. The actual system clipboard is not read or written by these tests.
 - The initial installed overlay regression passes preferences, position, real voice mute/deafen indicators, profile image, Persian states, transparent background, Win32 click-through flags, an actual click reaching the underlying borderless fixture, and hide-on-leave/lock behavior. A later expanded combined scenario intermittently failed the foreground-window identity assertion after synthetic pointer input; it is retained as a test limitation. No overlay implementation changed in 1.0.7. Exclusive fullscreen remains unsupported; a real game acceptance check for 1.0.7 is not claimed.
 
-Evidence is under `artifacts/evidence/v107-*`; browser/native logs are under `artifacts/logs/`. The current Windows installer is `artifacts/v1.0.7/windows-avatars/Dorham-1.0.7-Windows-x64.exe`; earlier local packages are preserved but superseded. Current packaged web/artwork/shell checks are in `v107-memory-avatars-payload.json`. Its shell/installer identity is unchanged; the earlier installed upgrade/capture results above are historical and were not repeated for this artwork-only client rebuild. It remains unsigned, as authorized for previous releases. No real remote SFU moderation enforcement test, production migration, deployment or public download verification has been performed for 1.0.7.
+Evidence is under `artifacts/evidence/v107-*`; browser/native logs are under `artifacts/logs/`. The current Windows installer is `artifacts/v1.0.7/windows-avatars/Dorham-1.0.7-Windows-x64.exe`; earlier local packages are preserved but superseded. Current packaged web/artwork/shell checks are in `v107-memory-avatars-payload.json`. Its shell/installer identity is unchanged; the earlier installed upgrade/capture results above are historical and were not repeated for this artwork-only client rebuild. It remains unsigned, as authorized for previous releases. The additional Linux, production and public checks below supersede the earlier local-only gate status.
+
+
+## Deployment verification
+
+- Source code commit `1a4a26256ed3365077bd18f6761809f15010f125` and its compiled bundle were pushed to the existing GitHub branches. A later documentation-only commit records these results; executable/web payloads remain the tested builds.
+- The fresh 4.1 MB private rollback backup was explicitly approved for transfer to the operator laptop. Independent verification passes every saved table/file digest, SQLite integrity and foreign keys. It stays outside Git and public artifacts.
+- An isolated Linux restore migrates the existing schema to 11 and preserves 34 persistent table hashes. The first restore attempt had root-owned temporary WAL companions; correcting ownership in the fixture resolved startup. This required no production source change.
+- A single guarded Chrome client joins real LiveKit rooms belonging only to the fresh Linux test database, publishes generated device audio, and passes server permission updates, voice move/reconnect, timeout removal/chat blocking and ban/invite blocking. Real Piper synthesizes Farsi and English through authenticated API/socket delivery; the worker stops and restarts after idle, with cold-start notices. The fixture accelerates the idle limit to five seconds; production retains the tested 180-second default. Long-lived SFU credentials are never exported. Test rooms, accounts and the final fixture database are removed.
+- The application-only restart preserves all 34 persistent table hashes and 20 avatar/attachment files. Schema 11, all 135 current web files and 229 runtime bundle files are verified. LiveKit, Caddy and HAProxy process identities remain unchanged. Private configuration is byte-for-byte unchanged, and both service memory limits remain 1024 MiB.
+- Public Windows metadata now advertises 1.0.7; Android stays 1.0.6 with identical APK and manifest bytes. Legacy updater routing is verified. The Windows updater offers 1.0.7 to 1.0.6 and reports no update to 1.0.7. The public Get apps menu shows the matching Windows/Android links without creating a production account.
+- The pre-release 202-test suite, lint/types and builds remain the code validation baseline. Public file/installer verification is recorded in `v107-public-verification.json`; rollout and runtime evidence is in `v107-server-rollout.json`, `v107-linux-tts-sfu.json`, `v107-release-backup-verification.json`, `v107-publication.json`, `v107-online-updater.json` and `v107-public-ui.json`.
+
+The previous application and private backup are retained for rollback. Existing client sessions may reconnect after the app restart. Physical Android TTS and a new real-game overlay acceptance run are not claimed; Android and overlay code are unchanged in this release.
