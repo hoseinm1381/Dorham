@@ -6,7 +6,8 @@ if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw Error('In
 const root = path.resolve(`artifacts/v${version}`), output = path.join(root, 'downloads', version);
 await mkdir(output, { recursive: true });
 if (process.argv.includes('--windows-only')) {
-  const previous = JSON.parse(await readFile(process.env.DORHAM_PREVIOUS_MANIFEST || 'artifacts/v1.0.4/downloads/latest.json', 'utf8'));
+  if (!process.env.DORHAM_PREVIOUS_MANIFEST) throw Error('Set DORHAM_PREVIOUS_MANIFEST to the currently published Android manifest before a Windows-only release.');
+  const previous = JSON.parse(await readFile(process.env.DORHAM_PREVIOUS_MANIFEST, 'utf8'));
   const { default: contracts } = await import('../apps/desktop/release-contract.cjs'); const { releaseFile } = contracts;
   releaseFile(previous, 'android');
   const name = `Dorham-${version}-Windows-x64.exe`, file = path.join(root, 'windows', name), bytes = await readFile(file);
