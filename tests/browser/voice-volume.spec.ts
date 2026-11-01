@@ -68,7 +68,11 @@ test('person volume changes decoded audio from silence to real 200% amplificatio
     for (const page of [sender, receiver]) { await page.getByRole('button', { name: 'Open Volume lab', exact: true }).click(); await page.getByRole('button', { name: 'Lounge', exact: true }).click(); }
     await receiver.getByRole('button', { name: 'Mute microphone', exact: true }).click();
     await receiver.getByRole('button', { name: 'Voice controls', exact: true }).click();
+    await expect(receiver.locator('.voice-card input[type=range]')).toHaveCount(0);
+    await receiver.locator('.voice-mini-members button').filter({ hasText: sourceName }).click({ button: 'right' });
+    await expect(receiver.getByRole('menu', { name: 'Member actions', exact: true }).getByRole('menuitem', { name: 'Server mute', exact: true })).toHaveCount(0);
     const slider = () => receiver.getByRole('slider', { name: `Voice volume for ${sourceName}`, exact: true });
+    await slider().focus(); await slider().press('Home'); await expect(slider()).toHaveValue('0'); await slider().press('End'); await expect(slider()).toHaveValue('200'); await slider().fill('100');
     await expect.poll(() => level(receiver), { timeout: 45000 }).toBeGreaterThan(0.01);
     await receiver.waitForTimeout(800); const normal = await level(receiver), measurements: Record<string, number> = { '100': normal };
     for (const [percent, ratio] of [[50, 0.5], [200, 2], [0, 0], [100, 1]]) {
@@ -78,6 +82,8 @@ test('person volume changes decoded audio from silence to real 200% amplificatio
       measurements[String(percent)] = await level(receiver);
     }
     await slider().fill('200'); await expect.poll(async () => (await level(receiver)) / normal).toBeCloseTo(2, 1);
+    await receiver.getByRole('menuitemcheckbox', { name: 'Mute for me', exact: true }).click(); await expect.poll(() => level(receiver)).toBeLessThan(0.000001);
+    await receiver.getByRole('menuitemcheckbox', { name: 'Unmute for me', exact: true }).click(); await expect(slider()).toHaveValue('200'); await expect.poll(async () => (await level(receiver)) / normal).toBeCloseTo(2, 1);
     await receiver.evaluate(async () => { for (const context of (window as any).__volumeMeters.keys()) if (context.state === 'running') await context.suspend(); });
     await slider().fill('100'); await expect.poll(async () => (await level(receiver)) / normal).toBeCloseTo(1, 1);
     await slider().fill('200'); await expect.poll(async () => (await level(receiver)) / normal).toBeCloseTo(2, 1);
@@ -86,7 +92,8 @@ test('person volume changes decoded audio from silence to real 200% amplificatio
     await receiver.getByRole('button', { name: 'Disconnect voice', exact: true }).click(); await expect(receiver.locator('.voice-panel')).toHaveCount(0); await receiver.getByRole('button', { name: 'Lounge', exact: true }).click();
     await expect.poll(async () => (await level(receiver)) / normal, { timeout: 45000 }).toBeCloseTo(2, 1);
     await receiver.reload(); await receiver.getByRole('button', { name: 'Open Volume lab', exact: true }).click(); await receiver.getByRole('button', { name: 'Lounge', exact: true }).click();
-    await receiver.getByRole('button', { name: 'Voice controls', exact: true }).click(); await expect(slider()).toHaveValue('200');
+    await receiver.locator('.voice-mini-members button').filter({ hasText: sourceName }).click({ button: 'right' }); await expect(slider()).toHaveValue('200');
+    await receiver.screenshot({ path: 'artifacts/evidence/v108-personal-volume-menu.png' });
     await expect.poll(async () => (await level(receiver)) / normal, { timeout: 45000 }).toBeCloseTo(2, 1);
     const transport = (await api(receiver, '/bootstrap')).mediaTransport;
     await mkdir('artifacts/evidence', { recursive: true });

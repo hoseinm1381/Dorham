@@ -3,13 +3,16 @@ import { createPortal } from 'react-dom';
 import type { Channel, PublicUser, Server, ServerMember, VoicePresence, VoiceRoom } from '@dorham/contracts';
 import { canMoveMember, type MemberModerationInfo } from '../../../packages/contracts/src/moderation';
 import { request } from './api';
-import { t } from './i18n';
+import { t, formatNumber } from './i18n';
 import './member-moderation.css';
 
 type Target = { user: PublicUser; serverId: string; x: number; y: number; trigger: HTMLElement };
-type Options = { me?: PublicUser; serverId: string | null; servers: Server[]; channels: Channel[]; members: ServerMember[]; presence: VoicePresence[]; room: VoiceRoom | null; profile: (user: PublicUser) => void; error: (error: unknown) => void; changed: () => Promise<void> };
+type LocalAudio = { level: number; restore: number; change: (level: number) => void };
+type Options = { me?: PublicUser; serverId: string | null; servers: Server[]; channels: Channel[]; members: ServerMember[]; presence: VoicePresence[]; room: VoiceRoom | null; volumes: Record<string, number>; setVolume: (id: string, level: number) => void; profile: (user: PublicUser) => void; error: (error: unknown) => void; changed: () => Promise<void> };
 export function useMemberModeration(o: Options) {
  const [target, setTarget] = useState<Target | null>(null), [drag, setDrag] = useState<{ userId: string; channelId: string; serverId: string } | null>(null), [over, setOver] = useState('');
+ const audible = useRef<Record<string, number>>({});
+ useEffect(() => { audible.current = {}; }, [o.me?.id]);
  useEffect(() => { setTarget(null); setDrag(null); setOver(''); }, [o.serverId, o.me?.id]);
  function source(user: PublicUser) { return o.room?.members.some(m => m.user.id === user.id) ? o.room.channelId : o.presence.find(v => v.members.some(m => m.user.id === user.id))?.channelId; }
  function allowed(user: PublicUser, channelId?: string) {
@@ -41,10 +44,19 @@ export function useMemberModeration(o: Options) {
    onDrop: (e: DragEvent<HTMLElement>) => { if (!enabled || !drag) return; e.preventDefault(); const from = drag; setDrag(null); setOver(''); void request(`/voice/${from.channelId}/move`, { userId: from.userId, channelId: channel.id }).then(o.changed).catch(o.error); }
   };
  }
- return { bind, drop, menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}`} target={target} channels={o.channels} close={() => setTarget(null)} profile={o.profile} changed={o.changed}/> };
+ const audioId = target?.user.id;
+ const audio: LocalAudio | undefined = audioId && audioId !== o.me?.id && o.room?.members.some(m => m.user.id === audioId) ? {
+  level: o.volumes[audioId] ?? 100, restore: audible.current[audioId] || 100,
+  change: value => {
+   const level = Math.max(0, Math.min(200, value)), previous = o.volumes[audioId] ?? 100;
+   if (level > 0) audible.current[audioId] = level; else if (previous > 0) audible.current[audioId] = previous;
+   o.setVolume(audioId, level);
+  }
+ } : undefined;
+ return { bind, drop, menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}`} target={target} channels={o.channels} audio={audio} close={() => setTarget(null)} profile={o.profile} changed={o.changed}/> };
 }
 
-function MemberContextMenu({ target, channels, close, profile, changed }: { target: Target; channels: Channel[]; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
+function MemberContextMenu({ target, channels, audio, close, profile, changed }: { target: Target; channels: Channel[]; audio?: LocalAudio; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
  const ref = useRef<HTMLDivElement>(null), [info, setInfo] = useState<MemberModerationInfo | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [moving, setMoving] = useState(false), [confirm, setConfirm] = useState<'kick' | 'ban' | 'timeout' | null>(null), [seconds, setSeconds] = useState(600), [reason, setReason] = useState('');
  const [position, setPosition] = useState({ left: target.x, top: target.y });
  useEffect(() => { let active = true; void request<MemberModerationInfo>(`/servers/${target.serverId}/members/${target.user.id}/moderation`).then(value => { if (active) setInfo(value); }).catch(() => { if (active) setError('Member controls are unavailable.'); }); return () => { active = false; }; }, []);
@@ -56,14 +68,14 @@ function MemberContextMenu({ target, channels, close, profile, changed }: { targ
   ref.current?.querySelector<HTMLButtonElement>('button')?.focus();
   return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); window.removeEventListener('resize', close); };
  }, []);
- useEffect(() => { ref.current?.querySelector<HTMLElement>(confirm ? 'select,input,button' : '[role=menuitem]')?.focus(); }, [confirm]);
+ useEffect(() => { ref.current?.querySelector<HTMLElement>(confirm ? 'select,input,button' : '[role^=menuitem]')?.focus(); }, [confirm]);
  async function action(route: string, body: unknown) { setBusy(true); setError(''); try { await request(route, body); await changed(); close(); } catch (e) { setError(e instanceof Error ? e.message : 'Action failed. Try again.'); setBusy(false); } }
  const memberRoute = `/servers/${target.serverId}/members/${target.user.id}/moderate`;
  const voiceAction = (actionName: string) => { if (info?.voice) void action(`/voice/${info.voice.channelId}/moderate`, { userId: target.user.id, action: actionName }); };
  const destinations = channels.filter(c => c.serverId === target.serverId && c.kind === 'voice' && c.id !== info?.voice?.channelId && c.permissions.moderate);
  return createPortal(<div ref={ref} className="member-context-menu" role={confirm ? 'dialog' : 'menu'} aria-label={t(confirm ? 'Confirm moderation action' : 'Member actions')} style={position} onContextMenu={e => e.preventDefault()} onKeyDown={e => {
-  if (confirm || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
-  const buttons = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role=menuitem]:not(:disabled)') || []); if (!buttons.length) return; e.preventDefault(); const index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus();
+  if (confirm || (e.target as HTMLElement).closest('input,select,textarea') || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+  const buttons = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role^=menuitem]:not(:disabled)') || []); if (!buttons.length) return; e.preventDefault(); const index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus();
  }}><strong className="context-person"><bdi>{target.user.displayName}</bdi></strong>
   {confirm ? <form onSubmit={e => { e.preventDefault(); void action(memberRoute, { action: confirm, ...(confirm === 'timeout' ? { seconds } : {}), reason }); }}>
    <h3>{t(confirm === 'ban' ? 'Ban from server' : confirm === 'kick' ? 'Kick from server' : 'Time out member')}</h3>
@@ -73,6 +85,11 @@ function MemberContextMenu({ target, channels, close, profile, changed }: { targ
    <div className="context-confirm-buttons"><button type="button" disabled={busy} onClick={() => setConfirm(null)}>{t('Cancel')}</button><button className="danger" type="submit" disabled={busy}>{t(confirm === 'ban' ? 'Confirm ban' : confirm === 'kick' ? 'Confirm kick' : 'Apply timeout')}</button></div>
   </form> : <>
    <button role="menuitem" disabled={busy} onClick={() => { close(); profile(target.user); }}>{t('View profile')}</button>
+   {audio && <div className="member-local-audio" role="group" aria-label={t('Personal voice volume')}>
+    <label><span>{t('Voice volume for {name}', { name: target.user.displayName })}<output>{formatNumber(audio.level)}%</output></span><input type="range" min={0} max={200} step={1} value={audio.level} aria-label={t('Voice volume for {name}', { name: target.user.displayName })} title={t('0% mutes this person; 100% is original volume; 200% doubles the audio signal.')} onChange={e => audio.change(Number(e.target.value))}/></label>
+    <small>{t('Only changes what you hear.')}</small>
+    <button type="button" role="menuitemcheckbox" aria-checked={audio.level === 0} onClick={() => audio.change(audio.level === 0 ? audio.restore : 0)}>{t(audio.level === 0 ? 'Unmute for me' : 'Mute for me')}</button>
+   </div>}
    {!info && !error && <p role="status">{t('Please wait…')}</p>}
    {info?.voice && <>
     {info.actions.move && destinations.length > 0 && <><button role="menuitem" disabled={busy} aria-expanded={moving} onClick={() => setMoving(!moving)}>{t('Move to voice channel')} <span aria-hidden="true">▸</span></button>{moving && <div className="context-destinations">{destinations.map(c => <button role="menuitem" key={c.id} disabled={busy} onClick={() => { void action(`/voice/${info.voice!.channelId}/move`, { userId: target.user.id, channelId: c.id }); }}>{c.name}</button>)}</div>}</>}

@@ -1,0 +1,23 @@
+# 1.0.8 — web chat and personal voice controls
+
+Web-only patch. Backend and Windows remain 1.0.7; Android remains 1.0.6. No native application is rebuilt, synced or repackaged, and native download/update manifests stay unchanged. Publication is prepared after the checks below.
+
+## One composer when switching chats
+
+The mention input and emoji picker were sibling components with the same conversation-ID React key. Switching conversations could leave an old input in the form, creating several placeholders and a stale input reference. They now have separate key namespaces while still resetting their own state when the conversation changes.
+
+A real Chrome regression reproduced two textareas on 1.0.7. The fixed build keeps exactly one input and emoji trigger through six cycles of English/Persian channels, different servers and a DM. It also sends Persian text to the correct conversation, selects a mention after switching and sends at mobile width. No duplicate-key/DOM errors occur. Evidence: `v108-composer-browser.json` and `v108-composer-before-fix.log`.
+
+## Right-click personal voice volume
+
+The per-person slider moves from the expanded voice cards to the existing user context menu. Right-click a participant in your current voice channel from their voice card, sidebar row, member entry or message author. It offers 0–200% volume and Mute/Unmute for me. These controls are available to ordinary members and affect only their own playback; role-protected server moderation remains separate. The menu stays open while adjusting volume, and range-input Home/End/arrow keys retain their normal behavior. Existing saved levels, output routing and TTS speaker levels are retained. A temporary mute restores the last audible level while the app remains open; saved zero remains muted after reload.
+
+The real two-client WebRTC regression uses generated microphone audio and measures decoded playback at 0/50/100/200%, including actual 2× amplitude, local mute/unmute, suspended-context recovery, deafen, rejoin, reload and persistence. It confirms no sliders remain on voice cards and an ordinary member gets personal volume controls without server-mute authority. Screenshot: `v108-personal-volume-menu.png`.
+
+## Verification and deployment boundary
+
+- All 202 unit/API tests pass, along with lint, TypeScript and the web production build. Backend/native code and schema are unchanged.
+- Composer and real-audio browser checks pass under the unchanged 4 GiB combined browser budget, with a 3500 MiB stop threshold. Only owned fixtures are cleaned up. Managed Windows cleanup required elevated termination for the earlier composer fixture; the audio run completed its own cleanup.
+- Deploy only the web payload after a verified web rollback backup. Retain existing hashed assets for already-open clients. Do not restart Dorham, LiveKit or proxies; preserve the 1024 MiB service limits, backend files, database, accounts, uploads and native manifests.
+
+The previously released Windows 1.0.7 contains the earlier composer code; the operator explicitly deferred native builds for this patch. Refresh the browser tab after web publication to load 1.0.8.

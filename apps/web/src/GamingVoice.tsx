@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type HTMLAttributes } from 'react';
-import { MonitorUp, Radio, X, MessageCircle, Maximize, Volume2 } from 'lucide-react';
+import { MonitorUp, Radio, X, MessageCircle, Maximize } from 'lucide-react';
 import type { PublicUser, Share, VoiceRoom } from '@dorham/contracts';
 import type { MediaTransport, RemoteScreen } from '@dorham/media';
 import { t, formatNumber } from './i18n';
@@ -23,7 +23,7 @@ function StreamScreen({ screen, name, close }: { screen: RemoteScreen; name: str
 type Props = {
   room: VoiceRoom; userId: string; name: string; transport: MediaTransport | null; navigation: string | null;
   screens: Record<string, RemoteScreen>; localScreen: RemoteScreen | null; previewOwn: boolean; toggleOwn: () => void;
-  speaking: Record<string, boolean>; volumes: Record<string, number>; setVolume: (id: string, value: number) => void;
+  speaking: Record<string, boolean>;
   memberInteractions?: (user: PublicUser, channelId: string) => HTMLAttributes<HTMLElement>;
   profile: (user: PublicUser) => void; error: (e: unknown) => void; viewer: (active: boolean) => void;
   chatOpen: boolean; toggleChat: () => void; moderation?: (userId: string, action: 'mute' | 'unmute' | 'kick' | 'stopShare') => void;
@@ -54,7 +54,7 @@ export function GamingVoice(p: Props) {
       <button aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{t(expanded ? 'Minimize voice' : 'Voice controls')}</button>
       {active && <><label className="check-row"><input type="checkbox" checked={multi} onChange={e => { const enabled = e.target.checked; setMulti(enabled); if (!enabled) for (const id of selected.slice(1)) void stopWatching(id).catch(p.error); }}/>{t('Multi-view')}</label><button className="viewer-chat-toggle" aria-expanded={p.chatOpen} onClick={p.toggleChat}><MessageCircle size={15}/>{t(p.chatOpen ? 'Hide chat' : 'Show chat')}</button><button aria-label={t('Close stream viewer')} onClick={() => { void closeViewer().catch(p.error); }}><X size={17}/></button></>}
     </span></header>
-    {expanded && <div className="voice-cards">{p.room.members.map(m => <div {...p.memberInteractions?.(m.user, p.room.channelId)} key={m.user.id} className={`voice-card ${p.speaking[m.user.id] ? 'speaking' : ''}`}><button onClick={() => p.profile(m.user)}><span className="avatar small">{m.user.displayName.slice(0, 2)}</span><strong><bdi>{m.user.displayName}</bdi></strong></button><span>{t(m.serverMuted ? 'Muted by moderator' : m.deafened ? 'Deafened' : m.muted ? 'Microphone muted' : p.speaking[m.user.id] ? 'Speaking' : 'Listening')}</span>{m.user.id !== p.userId && <label className="volume-slider" title={t("0% mutes this person; 100% is original volume; 200% doubles the audio signal.")}><Volume2 size={14}/><input type="range" aria-label={t('Voice volume for {name}', { name: m.user.displayName })} min={0} max={200} value={p.volumes[m.user.id] ?? 100} onChange={e => p.setVolume(m.user.id, Number(e.target.value))}/><small>{formatNumber(p.volumes[m.user.id] ?? 100)}%</small></label>}</div>)}</div>}
+    {expanded && <div className="voice-cards">{p.room.members.map(m => <div {...p.memberInteractions?.(m.user, p.room.channelId)} key={m.user.id} className={`voice-card ${p.speaking[m.user.id] ? 'speaking' : ''}`}><button onClick={() => p.profile(m.user)}><span className="avatar small">{m.user.displayName.slice(0, 2)}</span><strong><bdi>{m.user.displayName}</bdi></strong></button><span>{t(m.serverMuted ? 'Muted by moderator' : m.deafened ? 'Deafened' : m.muted ? 'Microphone muted' : p.speaking[m.user.id] ? 'Speaking' : 'Listening')}</span></div>)}</div>}
     <div className="share-list">{p.room.shares.map(share => <div key={share.id}><MonitorUp size={17}/><span><bdi>{person(share.userId)}</bdi><small className="live-badge">LIVE</small></span>{share.userId === p.userId ? <><span className="share-tier">{t(share.tier === 'fallback' ? '15fps · waiting for a 30fps slot' : '30fps available')}</span><label className="own-preview-toggle"><input type="checkbox" checked={previewSelected} onChange={() => { if (p.previewOwn && previewClosed) setPreviewClosed(false); else { setPreviewClosed(false); p.toggleOwn(); } }}/>{t('Preview my screen')}</label></> : <button className="watch-stream" aria-label={t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')} onClick={() => { void watch(share).catch(p.error); }}>{t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')}</button>}</div>)}</div>
     {active && <div className={`screens ${multi ? 'multi-streams' : 'single-stream'}`}>
       {showOwn && p.localScreen && <StreamScreen screen={p.localScreen} name={t('Your screen preview')} close={() => setPreviewClosed(true)}/>}
