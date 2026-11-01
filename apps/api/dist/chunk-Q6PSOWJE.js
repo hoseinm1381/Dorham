@@ -62,9 +62,11 @@ async function limited(fn) {
   }
 }
 
-// apps/api/src/accounts.ts
-import { randomUUID as randomUUID2 } from "crypto";
-import { z as z4 } from "zod";
+// packages/contracts/src/moderation.ts
+function canMoveMember(actor, target) {
+  return target !== "owner" && (canManage(actor, target) || actor === target && ["administrator", "moderator"].includes(actor));
+}
+var timeoutDurations = [60, 600, 3600, 86400, 604800];
 
 // packages/contracts/src/tts.ts
 function ttsMessage(content) {
@@ -72,9 +74,22 @@ function ttsMessage(content) {
   return { requested, text: requested ? content.trim().replace(/^\/tts\s*/i, "").trim() : content };
 }
 
+// packages/contracts/src/mentions.ts
+function protectedRanges(text) {
+  return [...text.matchAll(/https?:\/\/[^\s<>]+|`[^`]*(?:`|$)/g)].map((m) => [m.index, m.index + m[0].length]);
+}
+function mentionTokens(text) {
+  const protectedText = protectedRanges(text), tokens = [];
+  for (const m of text.matchAll(/(^|[^\p{L}\p{N}_/@\\])@([a-zA-Z0-9_]{3,32})(?![\p{L}\p{N}_])/gu)) {
+    const start = m.index + m[1].length, end = start + m[2].length + 1;
+    if (!protectedText.some(([a, b]) => start >= a && start < b)) tokens.push({ start, end, username: m[2] });
+  }
+  return tokens;
+}
+
 // apps/api/src/service.ts
-import { randomUUID, createHmac } from "crypto";
-import { z as z3 } from "zod";
+import { randomUUID as randomUUID2, createHmac } from "crypto";
+import { z as z4 } from "zod";
 
 // apps/api/src/turn.ts
 import { z as z2 } from "zod";
@@ -145,6 +160,178 @@ var CloudflareTurn = class {
     }
   }
 };
+
+// apps/api/src/accounts.ts
+import { randomUUID } from "crypto";
+import { z as z3 } from "zod";
+async function initialRecoveryCodes(tx, userId) {
+  const codes = Array.from({ length: 8 }, () => token().slice(0, 24));
+  for (const code of codes) await tx.run("INSERT INTO recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)", [userId, hash(code), Date.now()]);
+  return codes;
+}
+var normalizeAnswer = (answer) => answer.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+async function audit(tx, actor, action, target, details = {}) {
+  await tx.run("INSERT INTO audit_log(id,actor_id,action,target_id,details,created_at) VALUES(?,?,?,?,?,?)", [randomUUID(), actor, action, target, JSON.stringify(details), Date.now()]);
+  await tx.run("DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log ORDER BY created_at DESC LIMIT 500 OFFSET 10000)");
+}
+async function administrator(tx, userId) {
+  const user = await tx.one("SELECT * FROM users WHERE id=? AND banned=0 AND guest=0", [userId]);
+  if (!user?.instance_admin) fail(403, "FORBIDDEN", "Global administration is required.");
+  return user;
+}
+async function verifyCurrent(user, password) {
+  if (user.guest || !await passwordVerify(user.password_hash, password)) fail(401, "INVALID_CREDENTIALS", "Current password is incorrect.");
+}
+function publicAccountRoutes(app, service, authRate, sessionFor, disconnect) {
+  const { db, c } = service;
+  app.post("/api/v1/auth/guest", { config: authRate }, async (req, reply) => {
+    const b = z3.object({ displayName: z3.string().trim().min(1).max(48), code: z3.string().min(10).max(100), language: z3.enum(["en-US", "fa-IR"]).optional(), requestId }).parse(req.body);
+    if (!c.guestsEnabled) fail(403, "GUESTS_DISABLED", "Guest access is disabled.");
+    const userId = await db.transaction(async (tx) => {
+      const fingerprint = hash(JSON.stringify({ code: b.code, displayName: b.displayName }));
+      const previous = await tx.one("SELECT m.user_id,m.fingerprint,m.response,u.guest FROM mutations m JOIN users u ON u.id=m.user_id WHERE m.request_id=? AND m.operation='guest.create'", [b.requestId]);
+      if (previous) {
+        if (!previous.guest) fail(409, "NOT_GUEST", "This account is already registered.");
+        if (previous.fingerprint !== fingerprint) fail(409, "IDEMPOTENCY_CONFLICT", "Request identifier was already used with different input.");
+        return { userId: previous.user_id, ...JSON.parse(previous.response || "{}") };
+      }
+      const inv = await tx.one("SELECT i.*,s.allow_guests FROM invites i JOIN servers s ON s.id=i.server_id WHERE i.hash=? AND i.expires_at>=? AND i.remaining>0", [hash(b.code), Date.now()]);
+      if (!inv?.allow_guests) fail(403, "GUEST_INVITE_REQUIRED", "A valid invitation to a guest-enabled server is required.");
+      if (Number((await tx.one("SELECT COUNT(*) AS count FROM users")).count) >= c.maxUsers) fail(409, "ACCOUNT_LIMIT", "This instance has reached its account limit.");
+      if (Number((await tx.one("SELECT COUNT(*) AS count FROM users WHERE guest=1")).count) >= c.maxGuests) fail(409, "GUEST_LIMIT", "Guest capacity has been reached.");
+      const uid = randomUUID(), now = Date.now();
+      await tx.run("INSERT INTO users(id,username,display_name,password_hash,guest,created_at,language) VALUES(?,?,?,?,1,?,?)", [uid, `guest_${uid.replaceAll("-", "").slice(0, 20)}`, b.displayName, "!guest-no-password", now, b.language || ""]);
+      await tx.run("INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,?,?)", [inv.server_id, uid, "member", now]);
+      await tx.run("UPDATE invites SET remaining=remaining-1 WHERE hash=?", [hash(b.code)]);
+      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [uid, b.requestId, "guest.create", fingerprint, JSON.stringify({ serverId: inv.server_id, channelId: inv.channel_id }), now]);
+      await audit(tx, uid, "guest.create", inv.server_id);
+      return { userId: uid, serverId: inv.server_id, channelId: inv.channel_id };
+    });
+    await service.notify("state:changed", {});
+    return reply.code(201).send({ ...await sessionFor(userId.userId, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Guest device")), landing: { serverId: userId.serverId, channelId: userId.channelId } });
+  });
+  app.post("/api/v1/auth/recover", { config: authRate }, async (req) => {
+    const b = z3.object({ username: z3.string().trim().min(1).max(32), code: z3.string().max(128), password: passwordSchema, requestId }).parse(req.body);
+    const subject = hash(b.username.toLowerCase());
+    await db.transaction(async (tx) => {
+      const old = await tx.one("SELECT * FROM recovery_attempts WHERE subject=?", [subject]);
+      const attempts = old && old.expires_at > Date.now() ? Number(old.attempts) + 1 : 1;
+      if (attempts > 5) fail(429, "RECOVERY_LIMIT", "Recovery is temporarily unavailable. Try later or contact the administrator.");
+      await tx.run("INSERT INTO recovery_attempts(subject,attempts,expires_at) VALUES(?,?,?) ON CONFLICT(subject) DO UPDATE SET attempts=excluded.attempts,expires_at=excluded.expires_at", [subject, attempts, old && old.expires_at > Date.now() ? old.expires_at : Date.now() + 36e5]);
+    });
+    const user = await db.one("SELECT * FROM users WHERE username=? AND guest=0 AND banned=0", [b.username.toLowerCase()]);
+    const codeHash = hash(b.code.trim());
+    if (!user || !await db.one("SELECT code_hash FROM recovery_codes WHERE user_id=? AND code_hash=?", [user.id, codeHash])) fail(401, "RECOVERY_INVALID", "Recovery details are invalid or unavailable.");
+    const encoded = await passwordHash(b.password);
+    await db.transaction(async (tx) => {
+      if (!await tx.one("SELECT code_hash FROM recovery_codes WHERE user_id=? AND code_hash=?", [user.id, codeHash])) fail(401, "RECOVERY_INVALID", "Recovery details are invalid or unavailable.");
+      await tx.run("DELETE FROM recovery_codes WHERE user_id=? AND code_hash=?", [user.id, codeHash]);
+      await tx.run("UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?", [encoded, user.id]);
+      await tx.run("DELETE FROM sessions WHERE user_id=?", [user.id]);
+      await tx.run("DELETE FROM voice_members WHERE user_id=?", [user.id]);
+      await audit(tx, user.id, "account.recover", user.id);
+    });
+    await disconnect();
+    await service.notify("voice:changed", {});
+    return { success: true };
+  });
+}
+function protectedAccountRoutes(api, service, disconnect) {
+  const { db, c } = service;
+  api.post("/auth/upgrade", async (req) => {
+    const b = registerSchema.parse(req.body);
+    if (!req.account.guest) fail(409, "NOT_GUEST", "This account is already registered.");
+    const encoded = await passwordHash(b.password);
+    const result = await service.mutate(req.account.id, b.requestId, "guest.upgrade", { username: b.username, displayName: b.displayName, password: hash(b.password) }, async (tx) => {
+      if (!c.registrationOpen) fail(403, "REGISTRATION_CLOSED", "Registration is closed.");
+      if (!await tx.one("SELECT id FROM users WHERE id=? AND guest=1", [req.account.id])) fail(409, "NOT_GUEST", "This account is already registered.");
+      await tx.run("UPDATE users SET username=?,display_name=?,password_hash=?,guest=0 WHERE id=?", [b.username.toLowerCase(), b.displayName, encoded, req.account.id]);
+      await audit(tx, req.account.id, "guest.upgrade", req.account.id);
+      return { success: true };
+    });
+    await service.notify("state:changed", {});
+    return result;
+  });
+  api.get("/auth/sessions", async (req) => ({ sessions: (await db.all("SELECT id,device_name,native,created_at,last_seen,expires_at FROM sessions WHERE user_id=? AND expires_at>=? ORDER BY created_at DESC", [req.account.id, Date.now()])).map((s) => ({ id: s.id, device: s.device_name, native: Boolean(s.native), createdAt: Number(s.created_at), lastSeen: Number(s.last_seen), expiresAt: Number(s.expires_at), current: s.id === req.session.id })) }));
+  api.post("/auth/sessions/revoke", async (req) => {
+    const b = z3.object({ sessionId: id.optional(), all: z3.boolean().default(false), requestId }).refine((b2) => b2.sessionId || b2.all).parse(req.body);
+    await service.mutate(req.account.id, b.requestId, "session.revoke", b, async (tx) => {
+      if (b.all) await tx.run("DELETE FROM sessions WHERE user_id=?", [req.account.id]);
+      else await tx.run("DELETE FROM sessions WHERE user_id=? AND id=?", [req.account.id, b.sessionId]);
+      await audit(tx, req.account.id, "session.revoke", b.all ? "all" : b.sessionId);
+      return { success: true };
+    });
+    await disconnect();
+    return { success: true };
+  });
+  api.post("/auth/recovery-codes", async (req) => {
+    const b = z3.object({ password: z3.string().max(128), requestId }).parse(req.body);
+    await verifyCurrent(req.account, b.password);
+    const codes = Array.from({ length: 8 }, () => token().slice(0, 24));
+    await db.transaction(async (tx) => {
+      if (await tx.one("SELECT request_id FROM mutations WHERE user_id=? AND request_id=?", [req.account.id, b.requestId])) fail(409, "CODES_ALREADY_ISSUED", "Codes are shown only once. Generate a new set if needed.");
+      await tx.run("DELETE FROM recovery_codes WHERE user_id=?", [req.account.id]);
+      for (const code of codes) await tx.run("INSERT INTO recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)", [req.account.id, hash(code), Date.now()]);
+      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [req.account.id, b.requestId, "recovery.issue", hash("issued"), '{"success":true}', Date.now()]);
+      await audit(tx, req.account.id, "recovery.issue", req.account.id);
+    });
+    return { codes };
+  });
+  api.get("/auth/recovery", async (req) => ({ prompt: !req.account.guest && !req.account.recovery_prompt_seen, question: (await db.one("SELECT question FROM recovery_questions WHERE user_id=?", [req.account.id]))?.question || null, codesRemaining: Number((await db.one("SELECT COUNT(*) AS count FROM recovery_codes WHERE user_id=?", [req.account.id])).count), questions: ["What was your favorite school subject?", "What is a memorable personal preference?", "Custom question"] }));
+  api.post("/auth/recovery-acknowledge", async (req) => {
+    z3.object({ requestId }).parse(req.body);
+    if (req.account.guest) fail(403, "GUEST_ACCOUNT", "Register before setting up recovery.");
+    await db.run("UPDATE users SET recovery_prompt_seen=1 WHERE id=?", [req.account.id]);
+    return { success: true };
+  });
+  api.post("/auth/recovery-question", async (req) => {
+    const b = z3.object({ password: z3.string().max(128), question: z3.string().trim().min(5).max(200), answer: z3.string().min(1).max(200), requestId }).parse(req.body);
+    await verifyCurrent(req.account, b.password);
+    const encoded = await passwordHash(normalizeAnswer(b.answer));
+    return service.mutate(req.account.id, b.requestId, "recovery.question", { question: b.question, answer: hash(normalizeAnswer(b.answer)) }, async (tx) => {
+      await tx.run("INSERT INTO recovery_questions(user_id,question,answer_hash) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET question=excluded.question,answer_hash=excluded.answer_hash", [req.account.id, b.question, encoded]);
+      await audit(tx, req.account.id, "recovery.question", req.account.id);
+      return { success: true };
+    });
+  });
+  api.get("/admin/users", async (req) => {
+    await administrator(db, req.account.id);
+    return { users: (await db.all("SELECT * FROM users ORDER BY created_at LIMIT 250")).map(publicUser) };
+  });
+  api.get("/admin/audit", async (req) => {
+    await administrator(db, req.account.id);
+    const before = z3.coerce.number().int().positive().optional().parse(req.query.before);
+    return { events: await db.all("SELECT * FROM audit_log WHERE created_at<? ORDER BY created_at DESC LIMIT 100", [before || Date.now() + 1]) };
+  });
+  api.post("/admin/users/:id", async (req) => {
+    const targetId = id.parse(req.params.id), b = z3.object({ action: z3.enum(["ban", "unban", "revoke", "resetPassword"]), requestId }).parse(req.body);
+    await administrator(db, req.account.id);
+    const temporaryPassword = b.action === "resetPassword" ? token().slice(0, 20) : null;
+    const encoded = temporaryPassword ? await passwordHash(temporaryPassword) : null;
+    await db.transaction(async (tx) => {
+      await administrator(tx, req.account.id);
+      if (await tx.one("SELECT request_id FROM mutations WHERE user_id=? AND request_id=?", [req.account.id, b.requestId])) fail(409, "ALREADY_APPLIED", "Administrative action was already applied.");
+      const target = await tx.one("SELECT * FROM users WHERE id=?", [targetId]);
+      if (!target || target.instance_admin) fail(403, "PROTECTED_ACCOUNT", "The global administrator cannot be modified by this operation.");
+      if (b.action === "ban" || b.action === "unban") await tx.run("UPDATE users SET banned=? WHERE id=?", [b.action === "ban" ? 1 : 0, targetId]);
+      if (encoded) {
+        if (target.guest) fail(400, "GUEST_ACCOUNT", "Convert the guest account before setting a password.");
+        await tx.run("UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?", [encoded, targetId]);
+        await tx.run("DELETE FROM recovery_codes WHERE user_id=?", [targetId]);
+      }
+      if (b.action !== "unban") {
+        await tx.run("DELETE FROM sessions WHERE user_id=?", [targetId]);
+        await tx.run("DELETE FROM voice_members WHERE user_id=?", [targetId]);
+      }
+      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [req.account.id, b.requestId, "admin.user", hash(JSON.stringify({ targetId, action: b.action })), '{"success":true}', Date.now()]);
+      await audit(tx, req.account.id, `admin.${b.action}`, targetId);
+    });
+    await disconnect();
+    await service.notify("voice:changed", {});
+    await service.notify("state:changed", {});
+    return { success: true, ...temporaryPassword ? { temporaryPassword } : {} };
+  });
+}
 
 // apps/api/src/read-snapshot.ts
 function readSnapshot(tx) {
@@ -220,13 +407,14 @@ var Service = class {
   async member(tx, userId, serverId, permission) {
     const account = await tx.one("SELECT * FROM users WHERE id=? AND banned=0", [userId]);
     if (!account) fail(403, "FORBIDDEN", "Account access is unavailable.");
+    if (await tx.one("SELECT user_id FROM server_bans WHERE server_id=? AND user_id=?", [serverId, userId])) fail(403, "SERVER_BANNED", "You are banned from this server.");
     if (account.instance_admin) {
       if (!await tx.one("SELECT id FROM servers WHERE id=?", [serverId])) fail(404, "NOT_FOUND", "Server not found.");
       return { server_id: serverId, user_id: userId, role: "owner", globalAdmin: true };
     }
     if (account.guest && permission && ["manageChannels", "manageMembers", "moderate"].includes(permission)) fail(403, "GUEST_ACCOUNT", "Register before using administration controls.");
     if (account.guest && !(await tx.one("SELECT allow_guests FROM servers WHERE id=?", [serverId]))?.allow_guests) fail(403, "GUESTS_DISABLED", "This server does not allow guests.");
-    const m = await tx.one("SELECT * FROM members WHERE server_id=? AND user_id=?", [serverId, userId]);
+    const m = await tx.one("SELECT m.*,(SELECT expires_at FROM server_timeouts t WHERE t.server_id=m.server_id AND t.user_id=m.user_id) AS timeout_until FROM members m WHERE m.server_id=? AND m.user_id=?", [serverId, userId]);
     if (!m || permission && !(await this.memberPermissions(tx, m.role, userId, serverId))[permission]) fail(403, "FORBIDDEN", "You do not have permission.");
     return m;
   }
@@ -241,11 +429,14 @@ var Service = class {
       permissions2.manageMembers = false;
       permissions2.moderate = false;
     }
+    if (role !== "owner" && Number((await tx.one("SELECT expires_at AS timeout_until FROM server_timeouts WHERE server_id=? AND user_id=?", [serverId, userId]))?.timeout_until || 0) > Date.now()) {
+      for (const p of Object.keys(permissions2)) if (p !== "view") permissions2[p] = false;
+    }
     return permissions2;
   }
   async authority(tx, member) {
     if (member.role !== "member") return member.role;
-    const p = await this.memberPermissions(tx, member.role, member.user_id, member.server_id);
+    const p = resolveCustomPermissions(member.role, (await this.assignedRoles(tx, member.user_id, member.server_id)).map((r) => r.permissions));
     return p.moderate || p.manageMembers ? "moderator" : "member";
   }
   async channel(tx, userId, channelId, permission = "view") {
@@ -270,8 +461,12 @@ var Service = class {
         if (!allowed) fail(403, "TAG_REQUIRED", "This voice channel requires an assigned tag.");
       }
     }
+    if (Number(m.timeout_until || 0) > Date.now() && permission !== "view") fail(403, "TIMED_OUT", "You are timed out in this server.");
+    if (Number(m.timeout_until || 0) > Date.now()) {
+      for (const p of Object.keys(permissions2)) if (p !== "view") permissions2[p] = false;
+    }
     if (!permissions2.view || !permissions2[permission]) fail(403, "FORBIDDEN", "Channel permission denied.");
-    return { ...ch, role: m.role, permissions: permissions2 };
+    return { ...ch, role: m.role, permissions: permissions2, timeoutUntil: Number(m.timeout_until || 0) };
   }
   async conversation(tx, userId, conversationId, write = false) {
     const cv = await tx.one("SELECT * FROM conversations WHERE id=?", [conversationId]);
@@ -321,7 +516,7 @@ var Service = class {
       for (const ch of allChannels) {
         try {
           const access = await this.channel(tx, userId, ch.id);
-          channels.push({ id: ch.id, serverId: ch.server_id, name: ch.name, kind: ch.kind, conversationId: ch.conversation_id, permissions: access.permissions, locked: Boolean(ch.locked), userLimit: Math.min(ch.user_limit, this.c.maxVoice), tagMode: ch.tag_mode, requiredTags: (await tx.all("SELECT tag_id FROM channel_tags WHERE channel_id=?", [ch.id])).map((t) => t.tag_id) });
+          channels.push({ id: ch.id, serverId: ch.server_id, name: ch.name, kind: ch.kind, conversationId: ch.conversation_id, permissions: access.permissions, locked: Boolean(ch.locked), userLimit: Math.min(ch.user_limit, this.c.maxVoice), tagMode: ch.tag_mode, timeoutUntil: access.timeoutUntil, requiredTags: (await tx.all("SELECT tag_id FROM channel_tags WHERE channel_id=?", [ch.id])).map((t) => t.tag_id) });
         } catch {
         }
       }
@@ -342,7 +537,7 @@ var Service = class {
       if ((await tx.one("SELECT guest FROM users WHERE id=?", [userId]))?.guest) fail(403, "GUEST_ACCOUNT", "Register before creating a server.");
       const count = await tx.one("SELECT COUNT(*) AS count FROM members WHERE user_id=?", [userId]);
       if (count.count >= 20) fail(409, "LIMIT", "You may join at most 20 servers.");
-      const serverId = randomUUID();
+      const serverId = randomUUID2();
       const now = Date.now();
       await tx.run("INSERT INTO servers(id,name,owner_id,created_at) VALUES(?,?,?,?)", [serverId, name, userId, now]);
       await tx.run("INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,?,?)", [serverId, userId, "owner", now]);
@@ -354,7 +549,7 @@ var Service = class {
     return result;
   }
   async insertChannel(tx, serverId, name, kind) {
-    const channelId = randomUUID(), conversationId = kind === "text" ? randomUUID() : null, now = Date.now();
+    const channelId = randomUUID2(), conversationId = kind === "text" ? randomUUID2() : null, now = Date.now();
     if (conversationId) await tx.run("INSERT INTO conversations(id,kind,created_at) VALUES(?,?,?)", [conversationId, "channel", now]);
     await tx.run("INSERT INTO channels(id,server_id,name,kind,conversation_id,created_at) VALUES(?,?,?,?,?,?)", [channelId, serverId, name, kind, conversationId, now]);
     return { id: channelId };
@@ -477,7 +672,7 @@ var Service = class {
       if (!["owner", "administrator"].includes(actor.role) || (await tx.one("SELECT guest FROM users WHERE id=?", [userId]))?.guest) fail(403, "FORBIDDEN", "Only owners and administrators can manage custom roles.");
       const existing = body.roleId ? await tx.one("SELECT * FROM custom_roles WHERE id=? AND server_id=?", [body.roleId, serverId]) : void 0;
       if (body.roleId && !existing) fail(404, "NOT_FOUND", "Role not found.");
-      const roleId = body.roleId || randomUUID();
+      const roleId = body.roleId || randomUUID2();
       if (body.userId) {
         if (!existing || body.assigned === void 0) fail(400, "INVALID_ROLE", "Choose a role and assignment.");
         const target = await this.member(tx, body.userId, serverId);
@@ -508,6 +703,7 @@ var Service = class {
       const inv = await tx.one("SELECT * FROM invites WHERE hash=?", [hash(code)]);
       if (!inv || inv.expires_at < Date.now() || inv.remaining < 1) fail(404, "INVITE_EXPIRED", "Invite is invalid, expired, or exhausted.");
       const account = await tx.one("SELECT guest FROM users WHERE id=?", [userId]);
+      if (await tx.one("SELECT user_id FROM server_bans WHERE server_id=? AND user_id=?", [inv.server_id, userId])) fail(403, "SERVER_BANNED", "You are banned from this server.");
       if (account.guest && !(await tx.one("SELECT allow_guests FROM servers WHERE id=?", [inv.server_id]))?.allow_guests) fail(403, "GUESTS_DISABLED", "This server does not allow guests.");
       if (await tx.one("SELECT role FROM members WHERE user_id=? AND server_id=?", [userId, inv.server_id])) return { id: inv.server_id, channelId: inv.channel_id };
       if ((await tx.one("SELECT COUNT(*) AS count FROM members WHERE user_id=?", [userId])).count >= 20) fail(409, "LIMIT", "Server membership limit reached.");
@@ -520,8 +716,8 @@ var Service = class {
   }
   async members(userId, serverId) {
     await this.member(this.db, userId, serverId);
-    const rows = await this.db.all("SELECT u.*,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.server_id=? ORDER BY m.joined_at", [serverId]);
-    return Promise.all(rows.map(async (u) => ({ user: { ...publicUser(u), tags: (await this.db.all("SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?", [u.id, serverId])).map((t) => ({ id: t.id, serverId: t.server_id, name: t.name, color: t.color })) }, role: u.role, customRoles: await this.assignedRoles(this.db, u.id, serverId) })));
+    const rows = await this.db.all("SELECT u.*,m.role,COALESCE(t.expires_at,0) AS timeout_until FROM members m JOIN users u ON u.id=m.user_id LEFT JOIN server_timeouts t ON t.server_id=m.server_id AND t.user_id=m.user_id WHERE m.server_id=? ORDER BY m.joined_at", [serverId]);
+    return Promise.all(rows.map(async (u) => ({ user: { ...publicUser(u), tags: (await this.db.all("SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?", [u.id, serverId])).map((t) => ({ id: t.id, serverId: t.server_id, name: t.name, color: t.color })) }, role: u.role, timeoutUntil: Number(u.timeout_until || 0), authority: u.instance_admin ? "owner" : await this.authority(this.db, { role: u.role, user_id: u.id, server_id: serverId }), customRoles: await this.assignedRoles(this.db, u.id, serverId) })));
   }
   async changeMember(actorId, requestId2, serverId, targetId, body) {
     const result = await this.mutate(actorId, requestId2, "member.change", { serverId, targetId, ...body }, async (tx) => {
@@ -603,30 +799,48 @@ var Service = class {
         await tx.run("UPDATE dm_members SET hidden=0 WHERE conversation_id=? AND user_id=?", [old.conversation_id, userId]);
         return { id: old.conversation_id };
       }
-      const cv = randomUUID();
+      const cv = randomUUID2();
       await tx.run("INSERT INTO conversations(id,kind,created_at) VALUES(?,?,?)", [cv, "dm", Date.now()]);
       for (const u of [userId, otherId]) await tx.run("INSERT INTO dm_members(conversation_id,user_id) VALUES(?,?)", [cv, u]);
       await tx.run("INSERT INTO dm_pairs(pair_key,conversation_id) VALUES(?,?)", [pair, cv]);
       return { id: cv };
     });
   }
+  async replaceMentions(tx, messageId, conversationId, authorId, content) {
+    await tx.run("DELETE FROM message_mentions WHERE message_id=?", [messageId]);
+    const names = [...new Set(mentionTokens(content).map((t) => t.username.toLowerCase()))];
+    if (!names.length) return;
+    const channel = await tx.one("SELECT id,server_id FROM channels WHERE conversation_id=?", [conversationId]);
+    if (!channel) return;
+    const candidates = await tx.all(`SELECT u.id,u.username FROM users u JOIN members m ON m.user_id=u.id WHERE m.server_id=? AND u.banned=0 AND u.must_change_password=0 AND LOWER(u.username) IN (${names.map(() => "?").join(",")}) AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.user_id=u.id AND b.blocked_id=?) OR (b.user_id=? AND b.blocked_id=u.id))`, [channel.server_id, ...names, authorId, authorId]);
+    for (const user of candidates) {
+      try {
+        await this.channel(tx, user.id, channel.id);
+      } catch (e) {
+        if (e instanceof AppError && [403, 404].includes(e.status)) continue;
+        throw e;
+      }
+      await tx.run("INSERT INTO message_mentions(message_id,user_id,username) VALUES(?,?,?)", [messageId, user.id, user.username]);
+    }
+  }
   async messageView(tx, messageId) {
     const m = await tx.one("SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id=?", [messageId]);
     if (!m) fail(404, "NOT_FOUND", "Message not found.");
     const reactions = {};
     for (const r of await tx.all("SELECT emoji,user_id FROM reactions WHERE message_id=?", [messageId])) (reactions[r.emoji] ||= []).push(r.user_id);
-    return { id: m.id, conversationId: m.conversation_id, sequence: Number(m.sequence), author: publicUser({ ...m, id: m.user_id }), content: m.deleted ? "" : m.content, replyTo: m.reply_to, createdAt: Number(m.created_at), editedAt: m.edited_at ? Number(m.edited_at) : null, deleted: Boolean(m.deleted), reactions: Object.entries(reactions).map(([emoji, userIds]) => ({ emoji, userIds })), attachments: m.deleted ? [] : (await tx.all("SELECT * FROM attachments WHERE message_id=?", [messageId])).map((a) => ({ id: a.id, name: a.name, size: Number(a.size), expiresAt: Number(a.expires_at), available: a.state === "ready" && Number(a.expires_at) > Date.now() })) };
+    const mentions = m.deleted ? [] : (await tx.all("SELECT mm.user_id,mm.username,u.display_name FROM message_mentions mm JOIN users u ON u.id=mm.user_id WHERE mm.message_id=?", [messageId])).map((u) => ({ userId: u.user_id, username: u.username, displayName: u.display_name }));
+    return { id: m.id, conversationId: m.conversation_id, sequence: Number(m.sequence), author: publicUser({ ...m, id: m.user_id }), content: m.deleted ? "" : m.content, replyTo: m.reply_to, createdAt: Number(m.created_at), editedAt: m.edited_at ? Number(m.edited_at) : null, deleted: Boolean(m.deleted), reactions: Object.entries(reactions).map(([emoji, userIds]) => ({ emoji, userIds })), mentions, attachments: m.deleted ? [] : (await tx.all("SELECT * FROM attachments WHERE message_id=?", [messageId])).map((a) => ({ id: a.id, name: a.name, size: Number(a.size), expiresAt: Number(a.expires_at), available: a.state === "ready" && Number(a.expires_at) > Date.now() })) };
   }
   async event(tx, conversationId, kind, payload) {
     await tx.run("UPDATE conversations SET sequence=sequence+1 WHERE id=?", [conversationId]);
     const cv = await tx.one("SELECT sequence,kind FROM conversations WHERE id=?", [conversationId]);
     const event = { conversationId, sequence: Number(cv.sequence), kind, payload, direct: cv.kind === "dm" };
     if ((await tx.one("SELECT COUNT(*) AS count FROM events")).count >= 5e4) await tx.run("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY created_at LIMIT 200)");
-    await tx.run("INSERT INTO events(id,conversation_id,sequence,kind,payload,created_at) VALUES(?,?,?,?,?,?)", [randomUUID(), conversationId, event.sequence, kind, JSON.stringify(payload), Date.now()]);
+    await tx.run("INSERT INTO events(id,conversation_id,sequence,kind,payload,created_at) VALUES(?,?,?,?,?,?)", [randomUUID2(), conversationId, event.sequence, kind, JSON.stringify(payload), Date.now()]);
     return event;
   }
   async send(userId, requestId2, conversationId, content, replyTo, attachmentIds = [], asTts = false) {
-    let reopened = false;
+    let reopened = false, posted = false;
     const spoken = ttsMessage(content);
     if (!spoken.text && !attachmentIds.length) fail(400, "VALIDATION", "Type a message after /tts.");
     const event = await this.mutate(userId, requestId2, "message.send", { conversationId, content, replyTo, attachmentIds, ...asTts ? { tts: true } : {} }, async (tx) => {
@@ -639,17 +853,19 @@ var Service = class {
       if ((await tx.one("SELECT COUNT(*) AS count FROM messages")).count >= this.c.maxMessages) {
         await tx.run("DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY created_at LIMIT 200)");
       }
-      const messageId = randomUUID();
+      const messageId = randomUUID2();
       await tx.run("INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)", [messageId, conversationId, Number(cv.sequence) + 1, userId, spoken.text, replyTo || null, Date.now()]);
+      await this.replaceMentions(tx, messageId, conversationId, userId, spoken.text);
       for (const a of attachmentIds) await tx.run("UPDATE attachments SET message_id=? WHERE id=?", [messageId, a]);
       if (cv.kind === "dm") {
         reopened = Boolean(await tx.one("SELECT user_id FROM dm_members WHERE conversation_id=? AND hidden=1", [conversationId]));
         await tx.run("UPDATE dm_members SET hidden=0 WHERE conversation_id=?", [conversationId]);
       }
+      posted = true;
       return this.event(tx, conversationId, "message", await this.messageView(tx, messageId));
     });
     if (reopened) await this.notify("state:changed", {});
-    await this.notify("conversation:event", event);
+    if (posted) await this.notify("conversation:event", event);
     if ((spoken.requested || asTts) && spoken.text) this.onTts?.(userId, event.payload);
     return event;
   }
@@ -673,6 +889,7 @@ var Service = class {
         }
         if (m.deleted) fail(409, "DELETED", "Message has been deleted.");
         await tx.run("UPDATE messages SET content=?,deleted=?,edited_at=? WHERE id=?", [body.delete ? "" : body.content, body.delete ? 1 : 0, Date.now(), messageId]);
+        await this.replaceMentions(tx, messageId, m.conversation_id, m.user_id, body.delete ? "" : body.content);
         if (body.delete) {
           await tx.run("DELETE FROM reactions WHERE message_id=?", [messageId]);
           await tx.run("UPDATE attachments SET state='unavailable' WHERE message_id=?", [messageId]);
@@ -787,6 +1004,7 @@ var Service = class {
     const result = await this.db.transaction(async (tx) => {
       const ch = await this.channel(tx, userId, channelId);
       if (ch.kind !== "voice") fail(400, "NOT_VOICE", "Select a voice channel.");
+      if (ch.timeoutUntil > Date.now()) fail(403, "TIMED_OUT", "You are timed out in this server.");
       await this.maintainRoom(tx, channelId);
       const previous = await tx.one("SELECT * FROM voice_members WHERE user_id=?", [userId]);
       if (previous && previous.socket_id === socketId && previous.channel_id === channelId) return { epoch: previous.epoch, room: await this.roomView(tx, channelId) };
@@ -794,7 +1012,7 @@ var Service = class {
       if (ch.locked && !["owner", "administrator"].includes(ch.role)) fail(403, "VOICE_LOCKED", "This voice channel is locked.");
       if (count.count >= Math.min(ch.user_limit, this.c.maxVoice)) fail(409, "ROOM_FULL", "Voice channel is full.");
       await tx.run("DELETE FROM voice_members WHERE user_id=?", [userId]);
-      const epoch = randomUUID(), now = Date.now();
+      const epoch = randomUUID2(), now = Date.now();
       const restriction = await tx.one("SELECT * FROM voice_restrictions WHERE channel_id=? AND user_id=?", [channelId, userId]);
       await tx.run("INSERT INTO voice_members(user_id,channel_id,socket_id,epoch,server_muted,server_deafened,eligible,heartbeat,joined_at) VALUES(?,?,?,?,?,?,?,?,?)", [userId, channelId, socketId, epoch, ch.permissions.speak && !restriction?.muted ? 0 : 1, restriction?.deafened || 0, eligible ? 1 : 0, now, now]);
       if (previous && previous.channel_id !== channelId) await this.maintainRoom(tx, previous.channel_id);
@@ -857,7 +1075,7 @@ var Service = class {
       const standard = await tx.one("SELECT COUNT(*) AS count FROM share_leases WHERE tier='standard'");
       const tier = Number(standard.count) < this.c.standardShareSlots ? "standard" : "fallback";
       if (tier === "fallback" && Number(room.count) > 0) fail(409, "SHARE_LIMIT", "All three 30fps slots are occupied. This room already has a screen.");
-      const now = Date.now(), leaseId = randomUUID();
+      const now = Date.now(), leaseId = randomUUID2();
       await tx.run("INSERT INTO share_leases(id,user_id,channel_id,expires_at,tier,started_at,requested_fps,include_audio,policy_revision) VALUES(?,?,?,?,?,?,15,?,1)", [leaseId, userId, vm.channel_id, now + 3e4, tier, now, Number(includeAudio)]);
       return { lease: shareView(await tx.one("SELECT * FROM share_leases WHERE id=?", [leaseId]), this.c) };
     });
@@ -941,7 +1159,7 @@ var Service = class {
     const result = await this.mutate(actorId, rid, "tag.change", { serverId, ...body }, async (tx) => {
       const actor = await this.member(tx, actorId, serverId, "manageChannels");
       if (body.tagId && !await tx.one("SELECT id FROM tags WHERE id=? AND server_id=?", [body.tagId, serverId])) fail(404, "NOT_FOUND", "Tag not found.");
-      const tagId = body.tagId || randomUUID();
+      const tagId = body.tagId || randomUUID2();
       if (body.userId) {
         const target = await this.member(tx, body.userId, serverId);
         if (actorId !== body.userId && !actor.globalAdmin && !canManage(actor.role, target.role)) fail(403, "HIERARCHY", "Cannot assign tags to this role.");
@@ -970,8 +1188,9 @@ var Service = class {
       const from = await this.channel(tx, actorId, fromChannel, "moderate"), to = await this.channel(tx, actorId, toChannel, "moderate");
       const target = await this.member(tx, targetId, from.server_id), actor = await tx.one("SELECT instance_admin FROM users WHERE id=?", [actorId]);
       if (from.server_id !== to.server_id || to.kind !== "voice" || fromChannel === toChannel) fail(400, "INVALID_MOVE", "Choose another voice channel in this server.");
-      if (!actor.instance_admin && ((await tx.one("SELECT instance_admin FROM users WHERE id=?", [targetId])).instance_admin || !canManage(await this.authority(tx, { role: from.role, user_id: actorId, server_id: from.server_id }), await this.authority(tx, target)))) fail(403, "HIERARCHY", "Cannot move this member.");
+      if (!actor.instance_admin && ((await tx.one("SELECT instance_admin FROM users WHERE id=?", [targetId])).instance_admin || !canMoveMember(await this.authority(tx, { role: from.role, user_id: actorId, server_id: from.server_id }), await this.authority(tx, target)))) fail(403, "HIERARCHY", "Cannot move this member.");
       const access = await this.channel(tx, targetId, toChannel);
+      if (access.timeoutUntil > Date.now()) fail(403, "TIMED_OUT", "This member is timed out.");
       if (access.locked && !["owner", "administrator"].includes(access.role)) fail(403, "VOICE_LOCKED", "The destination is locked.");
       await this.maintainRoom(tx, toChannel);
       if ((await tx.one("SELECT COUNT(*) AS count FROM voice_members WHERE channel_id=?", [toChannel])).count >= Math.min(access.user_limit, this.c.maxVoice)) fail(409, "ROOM_FULL", "The destination is full.");
@@ -986,8 +1205,13 @@ var Service = class {
     return { success: true };
   }
   async cleanup() {
+    let timeoutExpired = false;
     await this.db.transaction(async (tx) => {
       const now = Date.now();
+      if (await tx.one("SELECT user_id FROM server_timeouts WHERE expires_at<=? LIMIT 1", [now])) {
+        await tx.run("DELETE FROM server_timeouts WHERE expires_at<=?", [now]);
+        timeoutExpired = true;
+      }
       await tx.run("DELETE FROM recovery_attempts WHERE expires_at<?", [now]);
       await tx.run("DELETE FROM sessions WHERE expires_at<?", [now]);
       await tx.run("DELETE FROM used_refresh WHERE expires_at<?", [now]);
@@ -998,185 +1222,16 @@ var Service = class {
       await this.expireVoice(tx, now);
       for (const ch of await tx.all("SELECT channel_id AS id FROM voice_members UNION SELECT channel_id AS id FROM coordinators WHERE user_id IS NOT NULL")) await this.maintainRoom(tx, ch.id, false);
     });
+    if (timeoutExpired) await this.notify("state:changed", {});
   }
 };
 var schemas = {
-  name: z3.string().trim().min(1).max(64),
-  profile: z3.object({ displayName: z3.string().trim().min(1).max(48), bio: z3.string().max(500), status: z3.enum(["online", "idle", "busy"]), language: z3.enum(["en-US", "fa-IR"]).optional(), requestId }),
-  channel: z3.object({ name: z3.string().trim().min(1).max(64), kind: z3.enum(["text", "voice"]), requestId }),
-  role: z3.enum(["owner", "administrator", "moderator", "member"]),
-  permissions: z3.object({ view: z3.boolean().optional(), write: z3.boolean().optional(), speak: z3.boolean().optional(), share: z3.boolean().optional(), manageChannels: z3.boolean().optional(), manageMembers: z3.boolean().optional(), moderate: z3.boolean().optional(), createInvites: z3.boolean().optional() }).strict()
+  name: z4.string().trim().min(1).max(64),
+  profile: z4.object({ displayName: z4.string().trim().min(1).max(48), bio: z4.string().max(500), status: z4.enum(["online", "idle", "busy"]), language: z4.enum(["en-US", "fa-IR"]).optional(), requestId }),
+  channel: z4.object({ name: z4.string().trim().min(1).max(64), kind: z4.enum(["text", "voice"]), requestId }),
+  role: z4.enum(["owner", "administrator", "moderator", "member"]),
+  permissions: z4.object({ view: z4.boolean().optional(), write: z4.boolean().optional(), speak: z4.boolean().optional(), share: z4.boolean().optional(), manageChannels: z4.boolean().optional(), manageMembers: z4.boolean().optional(), moderate: z4.boolean().optional(), createInvites: z4.boolean().optional() }).strict()
 };
-
-// apps/api/src/accounts.ts
-async function initialRecoveryCodes(tx, userId) {
-  const codes = Array.from({ length: 8 }, () => token().slice(0, 24));
-  for (const code of codes) await tx.run("INSERT INTO recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)", [userId, hash(code), Date.now()]);
-  return codes;
-}
-var normalizeAnswer = (answer) => answer.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
-async function audit(tx, actor, action, target, details = {}) {
-  await tx.run("INSERT INTO audit_log(id,actor_id,action,target_id,details,created_at) VALUES(?,?,?,?,?,?)", [randomUUID2(), actor, action, target, JSON.stringify(details), Date.now()]);
-  await tx.run("DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log ORDER BY created_at DESC LIMIT 500 OFFSET 10000)");
-}
-async function administrator(tx, userId) {
-  const user = await tx.one("SELECT * FROM users WHERE id=? AND banned=0 AND guest=0", [userId]);
-  if (!user?.instance_admin) fail(403, "FORBIDDEN", "Global administration is required.");
-  return user;
-}
-async function verifyCurrent(user, password) {
-  if (user.guest || !await passwordVerify(user.password_hash, password)) fail(401, "INVALID_CREDENTIALS", "Current password is incorrect.");
-}
-function publicAccountRoutes(app, service, authRate, sessionFor, disconnect) {
-  const { db, c } = service;
-  app.post("/api/v1/auth/guest", { config: authRate }, async (req, reply) => {
-    const b = z4.object({ displayName: z4.string().trim().min(1).max(48), code: z4.string().min(10).max(100), language: z4.enum(["en-US", "fa-IR"]).optional(), requestId }).parse(req.body);
-    if (!c.guestsEnabled) fail(403, "GUESTS_DISABLED", "Guest access is disabled.");
-    const userId = await db.transaction(async (tx) => {
-      const fingerprint = hash(JSON.stringify({ code: b.code, displayName: b.displayName }));
-      const previous = await tx.one("SELECT m.user_id,m.fingerprint,m.response,u.guest FROM mutations m JOIN users u ON u.id=m.user_id WHERE m.request_id=? AND m.operation='guest.create'", [b.requestId]);
-      if (previous) {
-        if (!previous.guest) fail(409, "NOT_GUEST", "This account is already registered.");
-        if (previous.fingerprint !== fingerprint) fail(409, "IDEMPOTENCY_CONFLICT", "Request identifier was already used with different input.");
-        return { userId: previous.user_id, ...JSON.parse(previous.response || "{}") };
-      }
-      const inv = await tx.one("SELECT i.*,s.allow_guests FROM invites i JOIN servers s ON s.id=i.server_id WHERE i.hash=? AND i.expires_at>=? AND i.remaining>0", [hash(b.code), Date.now()]);
-      if (!inv?.allow_guests) fail(403, "GUEST_INVITE_REQUIRED", "A valid invitation to a guest-enabled server is required.");
-      if (Number((await tx.one("SELECT COUNT(*) AS count FROM users")).count) >= c.maxUsers) fail(409, "ACCOUNT_LIMIT", "This instance has reached its account limit.");
-      if (Number((await tx.one("SELECT COUNT(*) AS count FROM users WHERE guest=1")).count) >= c.maxGuests) fail(409, "GUEST_LIMIT", "Guest capacity has been reached.");
-      const uid = randomUUID2(), now = Date.now();
-      await tx.run("INSERT INTO users(id,username,display_name,password_hash,guest,created_at,language) VALUES(?,?,?,?,1,?,?)", [uid, `guest_${uid.replaceAll("-", "").slice(0, 20)}`, b.displayName, "!guest-no-password", now, b.language || ""]);
-      await tx.run("INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,?,?)", [inv.server_id, uid, "member", now]);
-      await tx.run("UPDATE invites SET remaining=remaining-1 WHERE hash=?", [hash(b.code)]);
-      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [uid, b.requestId, "guest.create", fingerprint, JSON.stringify({ serverId: inv.server_id, channelId: inv.channel_id }), now]);
-      await audit(tx, uid, "guest.create", inv.server_id);
-      return { userId: uid, serverId: inv.server_id, channelId: inv.channel_id };
-    });
-    await service.notify("state:changed", {});
-    return reply.code(201).send({ ...await sessionFor(userId.userId, req.headers["x-dorham-native"] === "1", reply, String(req.headers["user-agent"] || "Guest device")), landing: { serverId: userId.serverId, channelId: userId.channelId } });
-  });
-  app.post("/api/v1/auth/recover", { config: authRate }, async (req) => {
-    const b = z4.object({ username: z4.string().trim().min(1).max(32), code: z4.string().max(128), password: passwordSchema, requestId }).parse(req.body);
-    const subject = hash(b.username.toLowerCase());
-    await db.transaction(async (tx) => {
-      const old = await tx.one("SELECT * FROM recovery_attempts WHERE subject=?", [subject]);
-      const attempts = old && old.expires_at > Date.now() ? Number(old.attempts) + 1 : 1;
-      if (attempts > 5) fail(429, "RECOVERY_LIMIT", "Recovery is temporarily unavailable. Try later or contact the administrator.");
-      await tx.run("INSERT INTO recovery_attempts(subject,attempts,expires_at) VALUES(?,?,?) ON CONFLICT(subject) DO UPDATE SET attempts=excluded.attempts,expires_at=excluded.expires_at", [subject, attempts, old && old.expires_at > Date.now() ? old.expires_at : Date.now() + 36e5]);
-    });
-    const user = await db.one("SELECT * FROM users WHERE username=? AND guest=0 AND banned=0", [b.username.toLowerCase()]);
-    const codeHash = hash(b.code.trim());
-    if (!user || !await db.one("SELECT code_hash FROM recovery_codes WHERE user_id=? AND code_hash=?", [user.id, codeHash])) fail(401, "RECOVERY_INVALID", "Recovery details are invalid or unavailable.");
-    const encoded = await passwordHash(b.password);
-    await db.transaction(async (tx) => {
-      if (!await tx.one("SELECT code_hash FROM recovery_codes WHERE user_id=? AND code_hash=?", [user.id, codeHash])) fail(401, "RECOVERY_INVALID", "Recovery details are invalid or unavailable.");
-      await tx.run("DELETE FROM recovery_codes WHERE user_id=? AND code_hash=?", [user.id, codeHash]);
-      await tx.run("UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?", [encoded, user.id]);
-      await tx.run("DELETE FROM sessions WHERE user_id=?", [user.id]);
-      await tx.run("DELETE FROM voice_members WHERE user_id=?", [user.id]);
-      await audit(tx, user.id, "account.recover", user.id);
-    });
-    await disconnect();
-    await service.notify("voice:changed", {});
-    return { success: true };
-  });
-}
-function protectedAccountRoutes(api, service, disconnect) {
-  const { db, c } = service;
-  api.post("/auth/upgrade", async (req) => {
-    const b = registerSchema.parse(req.body);
-    if (!req.account.guest) fail(409, "NOT_GUEST", "This account is already registered.");
-    const encoded = await passwordHash(b.password);
-    const result = await service.mutate(req.account.id, b.requestId, "guest.upgrade", { username: b.username, displayName: b.displayName, password: hash(b.password) }, async (tx) => {
-      if (!c.registrationOpen) fail(403, "REGISTRATION_CLOSED", "Registration is closed.");
-      if (!await tx.one("SELECT id FROM users WHERE id=? AND guest=1", [req.account.id])) fail(409, "NOT_GUEST", "This account is already registered.");
-      await tx.run("UPDATE users SET username=?,display_name=?,password_hash=?,guest=0 WHERE id=?", [b.username.toLowerCase(), b.displayName, encoded, req.account.id]);
-      await audit(tx, req.account.id, "guest.upgrade", req.account.id);
-      return { success: true };
-    });
-    await service.notify("state:changed", {});
-    return result;
-  });
-  api.get("/auth/sessions", async (req) => ({ sessions: (await db.all("SELECT id,device_name,native,created_at,last_seen,expires_at FROM sessions WHERE user_id=? AND expires_at>=? ORDER BY created_at DESC", [req.account.id, Date.now()])).map((s) => ({ id: s.id, device: s.device_name, native: Boolean(s.native), createdAt: Number(s.created_at), lastSeen: Number(s.last_seen), expiresAt: Number(s.expires_at), current: s.id === req.session.id })) }));
-  api.post("/auth/sessions/revoke", async (req) => {
-    const b = z4.object({ sessionId: id.optional(), all: z4.boolean().default(false), requestId }).refine((b2) => b2.sessionId || b2.all).parse(req.body);
-    await service.mutate(req.account.id, b.requestId, "session.revoke", b, async (tx) => {
-      if (b.all) await tx.run("DELETE FROM sessions WHERE user_id=?", [req.account.id]);
-      else await tx.run("DELETE FROM sessions WHERE user_id=? AND id=?", [req.account.id, b.sessionId]);
-      await audit(tx, req.account.id, "session.revoke", b.all ? "all" : b.sessionId);
-      return { success: true };
-    });
-    await disconnect();
-    return { success: true };
-  });
-  api.post("/auth/recovery-codes", async (req) => {
-    const b = z4.object({ password: z4.string().max(128), requestId }).parse(req.body);
-    await verifyCurrent(req.account, b.password);
-    const codes = Array.from({ length: 8 }, () => token().slice(0, 24));
-    await db.transaction(async (tx) => {
-      if (await tx.one("SELECT request_id FROM mutations WHERE user_id=? AND request_id=?", [req.account.id, b.requestId])) fail(409, "CODES_ALREADY_ISSUED", "Codes are shown only once. Generate a new set if needed.");
-      await tx.run("DELETE FROM recovery_codes WHERE user_id=?", [req.account.id]);
-      for (const code of codes) await tx.run("INSERT INTO recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)", [req.account.id, hash(code), Date.now()]);
-      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [req.account.id, b.requestId, "recovery.issue", hash("issued"), '{"success":true}', Date.now()]);
-      await audit(tx, req.account.id, "recovery.issue", req.account.id);
-    });
-    return { codes };
-  });
-  api.get("/auth/recovery", async (req) => ({ prompt: !req.account.guest && !req.account.recovery_prompt_seen, question: (await db.one("SELECT question FROM recovery_questions WHERE user_id=?", [req.account.id]))?.question || null, codesRemaining: Number((await db.one("SELECT COUNT(*) AS count FROM recovery_codes WHERE user_id=?", [req.account.id])).count), questions: ["What was your favorite school subject?", "What is a memorable personal preference?", "Custom question"] }));
-  api.post("/auth/recovery-acknowledge", async (req) => {
-    z4.object({ requestId }).parse(req.body);
-    if (req.account.guest) fail(403, "GUEST_ACCOUNT", "Register before setting up recovery.");
-    await db.run("UPDATE users SET recovery_prompt_seen=1 WHERE id=?", [req.account.id]);
-    return { success: true };
-  });
-  api.post("/auth/recovery-question", async (req) => {
-    const b = z4.object({ password: z4.string().max(128), question: z4.string().trim().min(5).max(200), answer: z4.string().min(1).max(200), requestId }).parse(req.body);
-    await verifyCurrent(req.account, b.password);
-    const encoded = await passwordHash(normalizeAnswer(b.answer));
-    return service.mutate(req.account.id, b.requestId, "recovery.question", { question: b.question, answer: hash(normalizeAnswer(b.answer)) }, async (tx) => {
-      await tx.run("INSERT INTO recovery_questions(user_id,question,answer_hash) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET question=excluded.question,answer_hash=excluded.answer_hash", [req.account.id, b.question, encoded]);
-      await audit(tx, req.account.id, "recovery.question", req.account.id);
-      return { success: true };
-    });
-  });
-  api.get("/admin/users", async (req) => {
-    await administrator(db, req.account.id);
-    return { users: (await db.all("SELECT * FROM users ORDER BY created_at LIMIT 250")).map(publicUser) };
-  });
-  api.get("/admin/audit", async (req) => {
-    await administrator(db, req.account.id);
-    const before = z4.coerce.number().int().positive().optional().parse(req.query.before);
-    return { events: await db.all("SELECT * FROM audit_log WHERE created_at<? ORDER BY created_at DESC LIMIT 100", [before || Date.now() + 1]) };
-  });
-  api.post("/admin/users/:id", async (req) => {
-    const targetId = id.parse(req.params.id), b = z4.object({ action: z4.enum(["ban", "unban", "revoke", "resetPassword"]), requestId }).parse(req.body);
-    await administrator(db, req.account.id);
-    const temporaryPassword = b.action === "resetPassword" ? token().slice(0, 20) : null;
-    const encoded = temporaryPassword ? await passwordHash(temporaryPassword) : null;
-    await db.transaction(async (tx) => {
-      await administrator(tx, req.account.id);
-      if (await tx.one("SELECT request_id FROM mutations WHERE user_id=? AND request_id=?", [req.account.id, b.requestId])) fail(409, "ALREADY_APPLIED", "Administrative action was already applied.");
-      const target = await tx.one("SELECT * FROM users WHERE id=?", [targetId]);
-      if (!target || target.instance_admin) fail(403, "PROTECTED_ACCOUNT", "The global administrator cannot be modified by this operation.");
-      if (b.action === "ban" || b.action === "unban") await tx.run("UPDATE users SET banned=? WHERE id=?", [b.action === "ban" ? 1 : 0, targetId]);
-      if (encoded) {
-        if (target.guest) fail(400, "GUEST_ACCOUNT", "Convert the guest account before setting a password.");
-        await tx.run("UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?", [encoded, targetId]);
-        await tx.run("DELETE FROM recovery_codes WHERE user_id=?", [targetId]);
-      }
-      if (b.action !== "unban") {
-        await tx.run("DELETE FROM sessions WHERE user_id=?", [targetId]);
-        await tx.run("DELETE FROM voice_members WHERE user_id=?", [targetId]);
-      }
-      await tx.run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", [req.account.id, b.requestId, "admin.user", hash(JSON.stringify({ targetId, action: b.action })), '{"success":true}', Date.now()]);
-      await audit(tx, req.account.id, `admin.${b.action}`, targetId);
-    });
-    await disconnect();
-    await service.notify("voice:changed", {});
-    await service.notify("state:changed", {});
-    return { success: true, ...temporaryPassword ? { temporaryPassword } : {} };
-  });
-}
 
 export {
   id,
@@ -1188,6 +1243,9 @@ export {
   registerSchema,
   messageSchema,
   signalSchema,
+  canManage,
+  canMoveMember,
+  timeoutDurations,
   AppError,
   fail,
   token,
@@ -1195,13 +1253,13 @@ export {
   equal,
   passwordHash,
   passwordVerify,
-  initialRecoveryCodes,
-  audit,
-  publicAccountRoutes,
-  protectedAccountRoutes,
   readSnapshot,
   publicUser,
   Service,
-  schemas
+  schemas,
+  initialRecoveryCodes,
+  audit,
+  publicAccountRoutes,
+  protectedAccountRoutes
 };
-//# sourceMappingURL=chunk-XCW5YO2D.js.map
+//# sourceMappingURL=chunk-Q6PSOWJE.js.map

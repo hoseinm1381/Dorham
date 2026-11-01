@@ -8,6 +8,8 @@ SQLite uses a 256 MiB page ceiling and a bounded WAL journal policy; avatars hav
 
 `GET /api/v1/admin/metrics` requires instance administration and reports process RSS, CPU time, event-loop delay, uptime, connected users, messages, share leases, database-file bytes, and storage warnings. Maintenance checks SQLite and avatar budgets every minute and logs a warning when either crosses 80%. CPU is cumulative; compare two samples over an interval. These are application budgets, not a provider resource meter; monitor actual disk allocation and backup space separately. PostgreSQL storage remains an operator-managed external budget.
 
+Local 1.0.7 also reports TTS worker state and cache bytes in administrator metrics. Its speech child exits after 180 idle seconds, after active/queued work finishes; it reloads on the next request. Maintenance expires temporary speech caches every five seconds, with an 8 MiB audio budget. `TTS_IDLE_SECONDS` and `TTS_AUDIO_CACHE_MIB` tune these defaults. Compare whole-service memory (including the speech child) with host available RAM; Node RSS alone omits child memory. See the [read-only live audit and local tests](MEMORY-1.0.7.md). These changes are not deployed yet.
+
 ## Backups
 
 From the source repository, with `.env` pointing at the intended data directory:

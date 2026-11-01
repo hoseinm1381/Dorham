@@ -1,0 +1,11 @@
+# Android 1.0.6
+
+Android receives the 1.0.5 mute/unmute sound increase: twice the signal amplitude (+6.02 dB), with all other cues unchanged. Message text can be copied with a compact Copy button on touch screens and the message action toolbar. Copy preserves original English/Persian text, emoji and newlines. Deleted and attachment-only messages have no text-copy action. Android uses its native clipboard write API; it does not read the clipboard or request extra permissions.
+
+The signed APK retains com.dorham.chat and the permanent original signing certificate, with versionCode 1000006. It updates the existing 1.0.4 app. The new native updater uses android.json; latest.json continues to support older Android clients. Windows remains the already published 1.0.6 binary. Public web and backend remain 1.0.5 and 1.0.4 respectively.
+
+Release compilation, vital lint, signature verification, 16 KiB ZIP alignment and 64-bit native ELF load alignment pass. All 124 frontend files match the APK; native clipboard registration and the platform update endpoint are included. The mobile Chrome copy check passes for mixed English/Persian/emoji/newlines and deleted-message handling. Offline audio rendering against 1.0.4 gives exact RMS ratios of 2 for mute/unmute and 1 for the other four cues. The operator subsequently confirmed the physical update over 1.0.4, retained login, English/Persian copying into another app and louder mute/unmute cues on the established Poco F3 / Android 13 device. This acceptance does not add a new native TTS playback result.
+
+After the new APK and metadata are verified, obsolete public installers, previous server deployment copies and redundant temporary release uploads are pruned. Current metadata references are hash-checked before deletion. The running app, public web assets, database, uploads, speech models, private backups and the most recent full server rollback are retained. scripts/prune-server-releases.py previews candidates by default and requires --apply to delete them; use it after future release promotion to avoid accumulating old versions.
+
+Future Windows-only packaging requires DORHAM_PREVIOUS_MANIFEST to point to the currently published Android manifest. The obsolete hard-coded 1.0.4 fallback is removed so a later Windows release cannot restore links to pruned Android installers.

@@ -55,6 +55,8 @@ function config(overrides = {}) {
     livekitSecret: process.env.LIVEKIT_API_SECRET || "",
     livekitApiUrl: process.env.LIVEKIT_API_URL || "",
     mediaAdmissionSecret: process.env.MEDIA_ADMISSION_SECRET || "",
+    ttsIdleSeconds: num("TTS_IDLE_SECONDS", 180),
+    ttsAudioCacheMiB: num("TTS_AUDIO_CACHE_MIB", 8),
     ...overrides
   };
   if (Boolean(c.cloudflareTurnKeyId) !== Boolean(c.cloudflareTurnApiToken)) throw new Error("Both Cloudflare TURN key ID and API token are required");
@@ -65,6 +67,7 @@ function config(overrides = {}) {
   if (c.attachmentDir === c.dataDir || c.attachmentDir === path.parse(c.attachmentDir).root) throw new Error("ATTACHMENT_DIR must be a dedicated attachment directory.");
   if (c.uploadHardMiB < c.uploadSoftMiB || c.uploadSmallMiB > 100) throw new Error("Invalid shared upload policy.");
   if (c.mediaAdmissionSecret && c.mediaAdmissionSecret.length < 32) throw new Error("MEDIA_ADMISSION_SECRET must contain at least 32 characters.");
+  if (c.ttsIdleSeconds > 3600 || c.ttsAudioCacheMiB > 64) throw new Error("TTS idle time must be at most 3600 seconds and its audio cache at most 64 MiB.");
   if (c.production && !c.publicUrl.startsWith("https://")) throw new Error("Production PUBLIC_URL must use HTTPS");
   return c;
 }
@@ -176,6 +179,18 @@ async function migrateExpansion(db) {
     await tx.run("ALTER TABLE invites ADD COLUMN channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL");
     await tx.run("CREATE INDEX messages_activity ON messages(conversation_id,created_at)");
     await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(9,?)", [Date.now()]);
+  });
+  await db.transaction(async (tx) => {
+    if (await tx.one("SELECT version FROM schema_migrations WHERE version=10")) return;
+    await tx.run("CREATE TABLE server_timeouts (server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, expires_at BIGINT NOT NULL, reason TEXT NOT NULL DEFAULT '', PRIMARY KEY(server_id,user_id))");
+    await tx.run("CREATE INDEX server_timeouts_expiry ON server_timeouts(expires_at)");
+    await tx.run("CREATE TABLE server_bans (server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, target_role TEXT NOT NULL DEFAULT 'member', reason TEXT NOT NULL DEFAULT '', created_at BIGINT NOT NULL, PRIMARY KEY(server_id,user_id))");
+    await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(10,?)", [Date.now()]);
+  });
+  await db.transaction(async (tx) => {
+    if (await tx.one("SELECT version FROM schema_migrations WHERE version=11")) return;
+    await tx.run("CREATE TABLE message_mentions (message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, username TEXT NOT NULL, PRIMARY KEY(message_id,user_id))");
+    await tx.run("INSERT INTO schema_migrations(version,applied_at) VALUES(11,?)", [Date.now()]);
   });
 }
 
@@ -313,4 +328,4 @@ export {
   config,
   openDatabase
 };
-//# sourceMappingURL=chunk-GUKVT4SI.js.map
+//# sourceMappingURL=chunk-HNV7BZL5.js.map

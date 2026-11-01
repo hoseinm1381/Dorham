@@ -2,6 +2,8 @@ import {
   AppError,
   Service,
   audit,
+  canManage,
+  canMoveMember,
   credentialsSchema,
   equal,
   fail,
@@ -22,31 +24,239 @@ import {
   shareStartSchema,
   shareUpdateSchema,
   signalSchema,
+  timeoutDurations,
   token
-} from "./chunk-XCW5YO2D.js";
+} from "./chunk-Q6PSOWJE.js";
 import {
   config,
   openDatabase
-} from "./chunk-GUKVT4SI.js";
+} from "./chunk-HNV7BZL5.js";
+
+// apps/api/src/member-moderation.ts
+async function powers(service, tx, actorId, serverId, targetId) {
+  const actor = await service.member(tx, actorId, serverId), target = await service.member(tx, targetId, serverId);
+  const actorRole = await service.authority(tx, actor), targetRole = await service.authority(tx, target);
+  const p = await service.memberPermissions(tx, actor.role, actorId, serverId);
+  const account = await tx.one("SELECT instance_admin FROM users WHERE id=?", [targetId]);
+  const protectedTarget = actorId === targetId || !actor.globalAdmin && account?.instance_admin;
+  const higher = !protectedTarget && canManage(actorRole, targetRole);
+  return { target, targetRole, actions: { voice: Boolean(p.moderate && higher), move: Boolean(p.moderate && !protectedTarget && canMoveMember(actorRole, targetRole)), timeout: Boolean(p.moderate && higher), kick: Boolean(p.manageMembers && higher), ban: Boolean(p.manageMembers && higher) } };
+}
+async function moderationInfo(service, actorId, serverId, targetId) {
+  return service.db.transaction(async (tx) => {
+    const { target, targetRole, actions } = await powers(service, tx, actorId, serverId, targetId);
+    const vm = await tx.one("SELECT v.* FROM voice_members v JOIN channels c ON c.id=v.channel_id WHERE v.user_id=? AND c.server_id=?", [targetId, serverId]);
+    const restriction = vm && await tx.one("SELECT sharing_allowed FROM voice_restrictions WHERE user_id=? AND channel_id=?", [targetId, vm.channel_id]);
+    return { userId: targetId, role: targetRole, timeoutUntil: Number(target.timeout_until || 0), actions, voice: vm ? { channelId: vm.channel_id, serverMuted: Boolean(vm.server_muted), serverDeafened: Boolean(vm.server_deafened), sharingAllowed: restriction?.sharing_allowed !== 0 } : null };
+  });
+}
+async function moderateMember(service, actorId, rid, serverId, targetId, body) {
+  const result = await service.mutate(actorId, rid, "member.moderate", { serverId, targetId, ...body }, async (tx) => {
+    if (body.action === "unban") {
+      const actor = await service.member(tx, actorId, serverId, "manageMembers");
+      const ban = await tx.one("SELECT * FROM server_bans WHERE server_id=? AND user_id=?", [serverId, targetId]);
+      if (!ban) fail(404, "NOT_BANNED", "This user is not banned from this server.");
+      if (!canManage(await service.authority(tx, actor), ban.target_role)) fail(403, "HIERARCHY", "You cannot manage this role.");
+      await tx.run("DELETE FROM server_bans WHERE server_id=? AND user_id=?", [serverId, targetId]);
+    } else {
+      const { targetRole, actions } = await powers(service, tx, actorId, serverId, targetId);
+      if (!actions[body.action === "untimeout" ? "timeout" : body.action]) fail(403, "HIERARCHY", "You cannot moderate this member.");
+      if (body.action === "timeout" || body.action === "untimeout") {
+        if (body.action === "timeout" && !timeoutDurations.includes(body.seconds)) fail(400, "INVALID_TIMEOUT", "Choose a timeout duration.");
+        if (body.action === "timeout") await tx.run("INSERT INTO server_timeouts(server_id,user_id,actor_id,expires_at,reason) VALUES(?,?,?,?,?) ON CONFLICT(server_id,user_id) DO UPDATE SET actor_id=excluded.actor_id,expires_at=excluded.expires_at,reason=excluded.reason", [serverId, targetId, actorId, Date.now() + body.seconds * 1e3, body.reason || ""]);
+        else await tx.run("DELETE FROM server_timeouts WHERE server_id=? AND user_id=?", [serverId, targetId]);
+      } else {
+        if (body.action === "ban") await tx.run("INSERT INTO server_bans(server_id,user_id,actor_id,target_role,reason,created_at) VALUES(?,?,?,?,?,?)", [serverId, targetId, actorId, targetRole, body.reason || "", Date.now()]);
+        await tx.run("DELETE FROM user_tags WHERE user_id=? AND tag_id IN (SELECT id FROM tags WHERE server_id=?)", [targetId, serverId]);
+        await tx.run("DELETE FROM members WHERE server_id=? AND user_id=?", [serverId, targetId]);
+      }
+      if (body.action !== "untimeout") await tx.run("DELETE FROM voice_members WHERE user_id=? AND channel_id IN (SELECT id FROM channels WHERE server_id=?)", [targetId, serverId]);
+    }
+    await audit(tx, actorId, `member.${body.action}`, targetId, { serverId, seconds: body.seconds, reason: body.reason });
+    return { success: true };
+  });
+  await service.notify("state:changed", {});
+  await service.notify("voice:changed", {});
+  return result;
+}
+async function serverBans(service, actorId, serverId) {
+  return service.db.transaction(async (tx) => {
+    const actor = await service.member(tx, actorId, serverId, "manageMembers"), role = await service.authority(tx, actor);
+    return { bans: (await tx.all("SELECT b.user_id,b.reason,b.created_at,b.target_role,u.display_name FROM server_bans b JOIN users u ON u.id=b.user_id WHERE b.server_id=? ORDER BY b.created_at DESC", [serverId])).map((b) => ({ userId: b.user_id, displayName: b.display_name, reason: b.reason, createdAt: Number(b.created_at), canUnban: canManage(role, b.target_role) })) };
+  });
+}
 
 // apps/api/src/tts.ts
 import { spawn } from "child_process";
+
+// apps/api/src/speech-worker.ts
 import { createInterface } from "readline";
+var unavailable = () => Error("TTS is unavailable. Your message was sent normally.");
+var SpeechWorker = class {
+  constructor(start, idleMs) {
+    this.start = start;
+    this.idleMs = idleMs;
+  }
+  start;
+  idleMs;
+  child;
+  reader;
+  pending;
+  retiring;
+  closed = false;
+  lastUsed = Date.now();
+  starts = 0;
+  idleStops = 0;
+  launch() {
+    const child = this.start();
+    this.child = child;
+    this.starts++;
+    child.stderr.resume();
+    const reader = createInterface({ input: child.stdout });
+    this.reader = reader;
+    reader.on("line", (line) => {
+      if (this.child !== child || !this.pending) return;
+      const pending = this.pending;
+      this.pending = void 0;
+      clearTimeout(pending.timer);
+      this.lastUsed = Date.now();
+      try {
+        const response = JSON.parse(line);
+        if (typeof response.audio !== "string") throw unavailable();
+        if (response.audio.length > 4e6) throw unavailable();
+        const audio = Buffer.from(response.audio, "base64");
+        if (audio.length > 3e6 || audio.toString("ascii", 0, 4) !== "RIFF") throw unavailable();
+        pending.resolve(audio);
+      } catch {
+        pending.reject(unavailable());
+      }
+    });
+    const ended = () => {
+      if (this.child !== child) return;
+      this.child = void 0;
+      this.reader = void 0;
+      reader.close();
+      const pending = this.pending;
+      this.pending = void 0;
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending.reject(unavailable());
+      }
+    };
+    child.on("error", ended);
+    child.on("exit", ended);
+    child.stdin.on("error", () => {
+      if (this.child !== child) return;
+      const pending = this.pending;
+      this.pending = void 0;
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending.reject(unavailable());
+      }
+      void this.retire();
+    });
+    return child;
+  }
+  async synthesize(text2, onColdStart) {
+    if (this.retiring) await this.retiring.done;
+    if (this.closed || this.pending) throw unavailable();
+    const cold = !this.child, child = this.child || this.launch();
+    this.lastUsed = Date.now();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending = void 0;
+        void this.retire();
+        reject(Error("TTS timed out. Your message was sent normally."));
+      }, 6e4);
+      const pending = { resolve, reject, timer };
+      this.pending = pending;
+      const write = () => {
+        if (this.child !== child || this.pending !== pending) return;
+        try {
+          child.stdin.write(JSON.stringify({ text: text2 }) + "\n");
+        } catch {
+          this.pending = void 0;
+          clearTimeout(timer);
+          void this.retire();
+          reject(unavailable());
+        }
+      };
+      if (cold && onColdStart) void Promise.resolve().then(onColdStart).then(write, write);
+      else write();
+    });
+  }
+  retire() {
+    const child = this.child;
+    if (!child) return this.retiring?.done;
+    this.child = void 0;
+    this.reader?.close();
+    this.reader = void 0;
+    let finish;
+    const done = new Promise((resolve) => {
+      finish = resolve;
+    });
+    this.retiring = { child, done };
+    const complete = () => {
+      clearTimeout(timer);
+      child.removeListener("exit", complete);
+      child.removeListener("error", complete);
+      if (this.retiring?.child === child) this.retiring = void 0;
+      finish();
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, 2e3);
+    timer.unref();
+    child.once("exit", complete);
+    child.once("error", complete);
+    child.kill();
+    return done;
+  }
+  cleanup() {
+    if (!this.closed && this.child && !this.pending && Date.now() - this.lastUsed >= this.idleMs) {
+      this.idleStops++;
+      void this.retire();
+    }
+  }
+  metrics() {
+    return { running: Boolean(this.child), stopping: Boolean(this.retiring), pid: this.child?.pid ?? null, busy: Boolean(this.pending), starts: this.starts, idleStops: this.idleStops, idleSeconds: this.idleMs / 1e3 };
+  }
+  async close() {
+    this.closed = true;
+    const pending = this.pending;
+    this.pending = void 0;
+    if (pending) {
+      clearTimeout(pending.timer);
+      pending.reject(unavailable());
+    }
+    await this.retire();
+  }
+};
+
+// apps/api/src/tts.ts
 import { existsSync } from "fs";
 import path from "path";
 var VoiceSpeech = class {
-  constructor(service, deliver, notice, engine) {
+  constructor(service, deliver, notice, engine, loading = () => {
+  }) {
     this.service = service;
     this.deliver = deliver;
     this.notice = notice;
     this.engine = engine;
+    this.loading = loading;
+    this.worker = new SpeechWorker(() => {
+      const python = process.env.DORHAM_TTS_PYTHON || "/opt/dorham-tts/venv/bin/python";
+      if (!existsSync(python)) throw Error("TTS is unavailable. Your message was sent normally.");
+      return spawn(python, ["-u", path.resolve("deployment/tts-worker.py")], { stdio: "pipe", windowsHide: true, env: { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" } });
+    }, service.c.ttsIdleSeconds * 1e3);
   }
   service;
   deliver;
   notice;
   engine;
-  process;
-  pending;
+  loading;
+  worker;
+  audioBytes = 0;
   queue = Promise.resolve();
   queued = 0;
   started = Date.now();
@@ -54,59 +264,34 @@ var VoiceSpeech = class {
   seen = /* @__PURE__ */ new Map();
   cooldown = /* @__PURE__ */ new Map();
   audio = /* @__PURE__ */ new Map();
-  synthesize(text2) {
-    if (this.engine) return this.engine(text2);
-    const python = process.env.DORHAM_TTS_PYTHON || "/opt/dorham-tts/venv/bin/python";
-    if (!existsSync(python)) return Promise.reject(Error("TTS is unavailable. Your message was sent normally."));
-    if (!this.process) {
-      const child = spawn(python, ["-u", path.resolve("deployment/tts-worker.py")], { stdio: "pipe", windowsHide: true, env: { ...process.env, OMP_NUM_THREADS: "1", OPENBLAS_NUM_THREADS: "1" } });
-      this.process = child;
-      child.stderr.resume();
-      createInterface({ input: child.stdout }).on("line", (line) => {
-        if (this.process !== child) return;
-        const p = this.pending;
-        if (!p) return;
-        this.pending = void 0;
-        clearTimeout(p.timer);
-        try {
-          const data = JSON.parse(line);
-          if (!data.audio) throw Error("synthesis");
-          const audio = Buffer.from(data.audio, "base64");
-          if (audio.length > 3e6 || audio.toString("ascii", 0, 4) !== "RIFF") throw Error("format");
-          p.resolve(audio);
-        } catch {
-          p.reject(Error("TTS is unavailable. Your message was sent normally."));
-        }
-      });
-      const ended = () => {
-        if (this.process !== child) return;
-        this.process = void 0;
-        const p = this.pending;
-        this.pending = void 0;
-        if (p) {
-          clearTimeout(p.timer);
-          p.reject(Error("TTS is unavailable. Your message was sent normally."));
-        }
-      };
-      child.on("error", ended);
-      child.on("exit", ended);
-    }
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending = void 0;
-        this.process?.kill();
-        this.process = void 0;
-        reject(Error("TTS timed out. Your message was sent normally."));
-      }, 6e4);
-      this.pending = { resolve, reject, timer };
-      this.process.stdin.write(JSON.stringify({ text: text2 }) + "\n");
-    });
+  removeAudio(id2) {
+    const entry = this.audio.get(id2);
+    if (!entry) return;
+    this.audioBytes -= entry.data.length;
+    this.audio.delete(id2);
+  }
+  cleanup() {
+    const now = Date.now();
+    for (const [id2, expires] of this.seen) if (expires <= now) this.seen.delete(id2);
+    for (const [id2, entry] of this.audio) if (entry.expires <= now) this.removeAudio(id2);
+    for (const [id2, at] of this.cooldown) if (at <= now - 6e4) this.cooldown.delete(id2);
+    if (this.queued === 0) this.worker.cleanup();
+  }
+  metrics() {
+    return { worker: this.worker.metrics(), queued: this.queued, cachedClips: this.audio.size, cachedAudioBytes: this.audioBytes, audioBudgetBytes: this.service.c.ttsAudioCacheMiB * 1048576, dedupEntries: this.seen.size, cooldownEntries: this.cooldown.size };
+  }
+  async audience(userId, message, sender, initial) {
+    if (this.closed) return null;
+    const current = await this.service.db.one("SELECT * FROM voice_members WHERE user_id=? AND channel_id=? AND epoch=? AND heartbeat>?", [userId, sender.channel_id, sender.epoch, Date.now() - 3e4]);
+    const stored = await this.service.db.one("SELECT content,deleted FROM messages WHERE id=?", [message.id]);
+    if (this.closed || !current || current.server_muted || !stored || stored.deleted || stored.content !== message.content) return null;
+    await this.service.db.transaction((tx) => this.service.channel(tx, userId, sender.channel_id, "speak"));
+    const members = await this.service.db.all("SELECT user_id,epoch,socket_id FROM voice_members WHERE channel_id=? AND deafened=0 AND server_deafened=0 AND heartbeat>?", [sender.channel_id, Date.now() - 3e4]);
+    return this.closed ? null : members.filter((m) => initial.some((i) => i.user_id === m.user_id && i.epoch === m.epoch));
   }
   async enqueue(userId, message) {
     const now = Date.now();
-    for (const [key, expiry] of this.seen) if (expiry < now) this.seen.delete(key);
-    for (const [key, value] of this.audio) if (value.expires < now) this.audio.delete(key);
-    for (const [key, at] of this.cooldown) if (at < now - 6e4) this.cooldown.delete(key);
+    this.cleanup();
     if (this.closed || this.seen.has(message.id) || message.createdAt < this.started - 1e3 || now - message.createdAt > 3e4) return;
     this.seen.set(message.id, now + 6e4);
     const sender = await this.service.db.one("SELECT * FROM voice_members WHERE user_id=? AND heartbeat>?", [userId, now - 3e4]);
@@ -132,16 +317,25 @@ var VoiceSpeech = class {
     this.queue = this.queue.then(async () => {
       try {
         if (this.closed) return;
-        const data = await this.synthesize(message.content);
-        const current = await this.service.db.one("SELECT * FROM voice_members WHERE user_id=? AND channel_id=? AND epoch=? AND heartbeat>?", [userId, sender.channel_id, sender.epoch, Date.now() - 3e4]);
-        const stored = await this.service.db.one("SELECT content,deleted FROM messages WHERE id=?", [message.id]);
-        if (!current || current.server_muted || !stored || stored.deleted || stored.content !== message.content) return;
-        await this.service.db.transaction((tx) => this.service.channel(tx, userId, sender.channel_id, "speak"));
-        const members = await this.service.db.all("SELECT user_id,epoch,socket_id FROM voice_members WHERE channel_id=? AND deafened=0 AND server_deafened=0 AND heartbeat>?", [sender.channel_id, Date.now() - 3e4]);
-        const recipients = new Map(members.filter((m) => initial.some((i) => i.user_id === m.user_id && i.epoch === m.epoch)).map((m) => [m.user_id, m.epoch]));
-        while (this.audio.size >= 8) this.audio.delete(this.audio.keys().next().value);
+        let announced = false;
+        const onColdStart = async () => {
+          if (announced || this.closed) return;
+          announced = true;
+          const members2 = await this.audience(userId, message, sender, initial);
+          if (!members2 || this.closed) return;
+          for (const member of members2) this.loading(member.socket_id, { id: message.id, channelId: sender.channel_id, userId, expiresAt: Date.now() + 15e3 });
+        };
+        const data = await (this.engine ? this.engine(message.content, onColdStart) : this.worker.synthesize(message.content, onColdStart));
+        if (this.closed) return;
+        const members = await this.audience(userId, message, sender, initial);
+        if (!members) return;
+        const recipients = new Map(members.map((m) => [m.user_id, m.epoch]));
+        const budget = this.service.c.ttsAudioCacheMiB * 1048576;
+        if (data.length > Math.min(budget, 3e6)) throw Error("Speech audio exceeds its memory budget.");
+        while (this.audio.size >= 8 || this.audioBytes + data.length > budget) this.removeAudio(this.audio.keys().next().value);
         const expires = Date.now() + 12e4;
         this.audio.set(message.id, { data, recipients, channelId: sender.channel_id, expires });
+        this.audioBytes += data.length;
         for (const member of members) if (recipients.has(member.user_id)) this.deliver(member.socket_id, { id: message.id, channelId: sender.channel_id, userId, expiresAt: expires });
       } catch {
         if (!this.closed) this.notice(userId, "TTS is unavailable. Your message was sent normally.");
@@ -152,14 +346,18 @@ var VoiceSpeech = class {
   }
   async read(userId, id2) {
     const item = this.audio.get(id2);
-    if (!item || item.expires < Date.now() || !item.recipients.has(userId)) return null;
+    if (item && item.expires <= Date.now()) this.removeAudio(id2);
+    if (this.closed || !item || item.expires <= Date.now() || !item.recipients.has(userId)) return null;
     const member = await this.service.db.one("SELECT epoch FROM voice_members WHERE user_id=? AND channel_id=? AND deafened=0 AND server_deafened=0 AND heartbeat>?", [userId, item.channelId, Date.now() - 3e4]);
     return member?.epoch === item.recipients.get(userId) ? item.data : null;
   }
-  close() {
+  async close() {
     this.closed = true;
-    this.process?.kill();
     this.audio.clear();
+    this.audioBytes = 0;
+    this.seen.clear();
+    this.cooldown.clear();
+    await this.worker.close();
   }
 };
 
@@ -260,7 +458,73 @@ import { monitorEventLoopDelay } from "perf_hooks";
 import { existsSync as existsSync2, openSync, writeSync, closeSync, readFileSync, unlinkSync } from "fs";
 import { mkdir as mkdir2, writeFile as writeFile2, unlink as unlink3, readdir as readdir2, stat as stat4 } from "fs/promises";
 import path5 from "path";
-import sharp2 from "sharp";
+
+// apps/api/src/profile-images.ts
+import sharp from "sharp";
+sharp.cache({ memory: 8, files: 0, items: 32 });
+sharp.concurrency(1);
+var ProfileImages = class {
+  active = false;
+  closed = false;
+  waiting = [];
+  rejected = 0;
+  completed = 0;
+  async acquire() {
+    if (this.closed) fail(503, "IMAGE_BUSY", "Image processing is unavailable. Try again shortly.");
+    if (!this.active) {
+      this.active = true;
+      return;
+    }
+    if (this.waiting.length >= 2) {
+      this.rejected++;
+      fail(429, "IMAGE_BUSY", "Image processing is busy. Try again shortly.");
+    }
+    await new Promise((resolve, reject) => {
+      const waiter = {
+        start: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        stop: () => {
+          clearTimeout(timer);
+          reject(new AppError(503, "IMAGE_BUSY", "Image processing is unavailable. Try again shortly."));
+        }
+      };
+      const timer = setTimeout(() => {
+        this.waiting.splice(this.waiting.indexOf(waiter), 1);
+        this.rejected++;
+        reject(new AppError(429, "IMAGE_BUSY", "Image processing is busy. Try again shortly."));
+      }, 1e4);
+      timer.unref();
+      this.waiting.push(waiter);
+    });
+  }
+  async resize(read) {
+    await this.acquire();
+    try {
+      const bytes = await read();
+      let image;
+      try {
+        image = await sharp(bytes, { limitInputPixels: 16e6 }).rotate().resize(128, 128, { fit: "cover" }).webp({ quality: 80 }).toBuffer();
+      } catch {
+        fail(400, "INVALID_IMAGE", "Image could not be decoded.");
+      }
+      this.completed++;
+      return { bytes, image };
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next.start();
+      else this.active = false;
+    }
+  }
+  metrics() {
+    return { active: Number(this.active), queued: this.waiting.length, maxActive: 1, maxQueued: 2, rejected: this.rejected, completed: this.completed, threadsPerImage: sharp.concurrency(), cache: sharp.cache() };
+  }
+  close() {
+    this.closed = true;
+    for (const waiter of this.waiting.splice(0)) waiter.stop();
+  }
+};
 
 // apps/api/src/sfu.ts
 import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
@@ -2442,21 +2706,14 @@ var ChessService = class {
 import { randomUUID as randomUUID4 } from "crypto";
 import { readdir, stat as stat3, writeFile, unlink as unlink2 } from "fs/promises";
 import path4 from "path";
-import sharp from "sharp";
 import { z as z7 } from "zod";
-function serverIcons(api, service, directory) {
+function serverIcons(api, service, directory, images) {
   api.post("/servers/:id/icon", async (req) => {
     const serverId = id.parse(req.params.id), rid = requestId.parse(req.headers["x-request-id"]);
     await service.member(service.db, req.account.id, serverId, "manageChannels");
     const file = await req.file();
     if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.mimetype)) fail(400, "INVALID_IMAGE", "Choose a PNG, JPG or WebP image.");
-    const bytes = await file.toBuffer();
-    let image;
-    try {
-      image = await sharp(bytes, { limitInputPixels: 16e6 }).rotate().resize(128, 128, { fit: "cover" }).webp({ quality: 80 }).toBuffer();
-    } catch {
-      fail(400, "INVALID_IMAGE", "Image could not be decoded.");
-    }
+    const { bytes, image } = await images.resize(() => file.toBuffer());
     if (image.length > 96 * 1024) fail(400, "IMAGE_TOO_LARGE", "Compressed image is too large.");
     let written = "", retired = null;
     try {
@@ -2519,7 +2776,7 @@ async function createApp(c = config(), options = {}) {
   const lock = openSync(lockPath, "wx");
   writeSync(lock, String(process.pid));
   closeSync(lock);
-  const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service);
+  const db = await openDatabase(c), service = new Service(db, c), sfu = new Sfu(c, service), attachments = new Attachments(service), images = new ProfileImages();
   const chess = new ChessService(service);
   chess.onError = (e) => app2.log.error({ err: e }, "Chess task failed");
   await chess.initialize();
@@ -2702,7 +2959,7 @@ async function createApp(c = config(), options = {}) {
     api.get("/chess/:id", async (req) => chess.get(req.account.id, id.parse(req.params.id)));
     api.post("/chess/:id", async (req) => chess.command(req.account.id, id.parse(req.params.id), chessCommand.parse(req.body)));
     attachments.register(api);
-    serverIcons(api, service, avatarDir);
+    serverIcons(api, service, avatarDir, images);
     api.post("/auth/renew", async (req, reply) => {
       z8.object({ requestId }).parse(req.body);
       if (req.session.native) fail(400, "NATIVE_REFRESH", "Use native credential renewal.");
@@ -2761,13 +3018,7 @@ async function createApp(c = config(), options = {}) {
       const rid = requestId.parse(req.headers["x-request-id"]);
       const file = await req.file();
       if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.mimetype)) fail(400, "IMAGE_REQUIRED", "Upload a PNG, JPEG, or WebP image.");
-      const bytes = await file.toBuffer();
-      let image;
-      try {
-        image = await sharp2(bytes, { limitInputPixels: 16e6 }).rotate().resize(128, 128, { fit: "cover" }).webp({ quality: 80 }).toBuffer();
-      } catch {
-        fail(400, "INVALID_IMAGE", "Image could not be decoded.");
-      }
+      const { bytes, image } = await images.resize(() => file.toBuffer());
       if (image.length > 96 * 1024) fail(400, "IMAGE_TOO_LARGE", "Compressed avatar is too large.");
       let retiredAvatar = null;
       const result = await service.mutate(req.account.id, rid, "avatar.change", { hash: hash(bytes.toString("base64")) }, async (tx) => {
@@ -2868,6 +3119,16 @@ async function createApp(c = config(), options = {}) {
       return service.read(req.account.id, b.requestId, id.parse(req.params.id), b.sequence);
     });
     api.get("/voice/:id", async (req) => service.room(req.account.id, id.parse(req.params.id)));
+    api.get("/servers/:serverId/members/:userId/moderation", async (req) => {
+      const p = req.params;
+      return moderationInfo(service, req.account.id, id.parse(p.serverId), id.parse(p.userId));
+    });
+    api.post("/servers/:serverId/members/:userId/moderate", async (req) => {
+      const p = req.params;
+      const b = z8.object({ requestId, action: z8.enum(["kick", "ban", "unban", "timeout", "untimeout"]), seconds: z8.union([z8.literal(60), z8.literal(600), z8.literal(3600), z8.literal(86400), z8.literal(604800)]).optional(), reason: z8.string().trim().max(320).optional() }).strict().parse(req.body);
+      return moderateMember(service, req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b);
+    });
+    api.get("/servers/:serverId/bans", async (req) => serverBans(service, req.account.id, id.parse(req.params.serverId)));
     api.post("/voice/:id/moderate", async (req) => {
       const b = z8.object({ userId: id, action: z8.enum(["mute", "unmute", "deafen", "undeafen", "denyShare", "allowShare", "kick", "stopShare"]), requestId }).parse(req.body);
       return service.moderate(req.account.id, b.requestId, id.parse(req.params.id), b.userId, b.action);
@@ -2892,13 +3153,13 @@ async function createApp(c = config(), options = {}) {
         const s = await stat4(path5.join(c.dataDir, f));
         if (s.isFile()) disk += s.size;
       }
-      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, realtime, sfuControl: sfu.metrics, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map((s) => s.data.userId)).size, accounts: (await db.one("SELECT COUNT(*) AS count FROM users")).count, messages: (await db.one("SELECT COUNT(*) AS count FROM messages")).count, shares: (await db.one("SELECT COUNT(*) AS count FROM share_leases")).count };
+      return { uptimeSeconds: process.uptime(), memory: process.memoryUsage(), tts: voiceSpeech.metrics(), images: images.metrics(), cpu: process.cpuUsage(), eventLoop: { meanMs: eventLoop.mean / 1e6, p95Ms: eventLoop.percentile(95) / 1e6, maxMs: eventLoop.max / 1e6 }, realtime, sfuControl: sfu.metrics, dataBytes: disk, storage: await storageStatus(), connectedUsers: new Set([...io.sockets.sockets.values()].map((s) => s.data.userId)).size, accounts: (await db.one("SELECT COUNT(*) AS count FROM users")).count, messages: (await db.one("SELECT COUNT(*) AS count FROM messages")).count, shares: (await db.one("SELECT COUNT(*) AS count FROM share_leases")).count };
     });
   }, { prefix: "/api/v1" });
   const io = new SocketServer(app2.server, { cors: { origin: c.origins, credentials: true }, maxHttpBufferSize: 128 * 1024, connectionStateRecovery: { maxDisconnectionDuration: 12e4, skipMiddlewares: false }, pingInterval: 2e4, pingTimeout: 1e4, allowRequest: (req, callback) => callback(null, allowed(req.headers.origin)) });
   const voiceSpeech = new VoiceSpeech(service, (socketId, event) => io.sockets.sockets.get(socketId)?.emit("voice:tts", event), (userId, text2) => {
     for (const socket of io.sockets.sockets.values()) if (socket.data.userId === userId) socket.emit("voice:tts-notice", { text: text2 });
-  }, options.ttsSynthesize);
+  }, options.ttsSynthesize, (socketId, event) => io.sockets.sockets.get(socketId)?.emit("voice:tts-loading", event));
   service.onTts = (userId, message) => {
     void voiceSpeech.enqueue(userId, message).catch(() => {
     });
@@ -3161,6 +3422,7 @@ async function createApp(c = config(), options = {}) {
     if (maintenanceRunning) return;
     maintenanceRunning = true;
     try {
+      voiceSpeech.cleanup();
       await service.cleanup();
       await disconnectInvalidSessions();
       await service.notify("voice:changed", {});
@@ -3181,6 +3443,7 @@ async function createApp(c = config(), options = {}) {
   }, 5e3);
   maintenance.unref();
   app2.addHook("preClose", async () => {
+    images.close();
     chess.close();
     games.close();
     clearInterval(maintenance);
@@ -3189,12 +3452,12 @@ async function createApp(c = config(), options = {}) {
   });
   app2.addHook("onClose", async () => {
     await new Promise((resolve) => io.close(() => resolve()));
-    voiceSpeech.close();
+    await voiceSpeech.close();
     await attachments.close();
     await db.close();
     if (existsSync2(lockPath) && readFileSync(lockPath, "utf8") === String(process.pid)) unlinkSync(lockPath);
   });
-  return { app: app2, db, service, io, chess, games, attachments, config: c };
+  return { app: app2, db, service, io, chess, games, attachments, images, config: c };
 }
 
 // apps/api/src/index.ts
