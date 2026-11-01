@@ -1,6 +1,6 @@
 # Server memory audit and local cleanup changes
 
-On 2026-11-01, read-only SSH samples inspected the existing VPS. The running backend is still **1.0.4**; **1.0.7 has not been pushed or deployed**. No service, configuration, kernel cache, database or file on the server was modified or restarted.
+On 2026-11-01, read-only SSH samples inspected the existing VPS. At that audit, the running backend was **1.0.4** and 1.0.7 was still local. It has since been released; see the deployment verification below. No service, configuration, kernel cache, database or file on the server was modified or restarted.
 
 ## Observed live memory
 
@@ -60,3 +60,8 @@ Lint, TypeScript, the API production build and all **190 unit/API tests in 39 fi
 Evidence: `artifacts/evidence/v107-memory-tests.json`, `artifacts/logs/v107-memory-tests.log`, and `artifacts/evidence/v107-memory-cleanup.json`. The compiled local server archive is rebuilt with these changes. The later loading-announcement change also updates the web/Windows player and bundled assets, so the current local Windows installer is rebuilt. Android remains 1.0.6. The original 190-test memory evidence is historical; the current suite and announcement checks are recorded in the 1.0.7 release notes.
 
 After publication is authorized, preserve the existing limits and verify real Farsi/English TTS, idle worker exit, reduced service memory, continued voice connectivity, and the next cold TTS request. No production improvement is claimed before that check.
+
+
+## Deployment verification
+
+Version 1.0.7 is now released after independent backup verification, an isolated Linux migration and real Piper/LiveKit checks. Both live service limits remain 1024 MiB and configuration is unchanged. The isolated Linux test confirms real worker retirement/restart using a five-second fixture limit; production uses the 180-second default. The post-release read-only snapshot is `artifacts/evidence/v107-server-memory-released.json`. RSS immediately after an application restart is not a controlled measurement of 180-second idle savings. A kernel journal scan timed out during the follow-up; direct cgroup counters and pressure were read instead. No OS cache flushing or forced GC was performed.
