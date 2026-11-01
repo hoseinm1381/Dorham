@@ -30,5 +30,10 @@ for (const platform of ['windows', 'android']) {
   manifest[platform] = { version, appId: 'com.dorham.chat', url: `https://dorhamapp.ir/downloads/${version}/${name}`, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), ...(platform === 'android' ? { versionCode: metadata.elements[0].versionCode } : {}) };
 }
 await writeFile(path.join(root, 'downloads/latest.json'), JSON.stringify(manifest, null, 2) + '\n');
+// Keep both legacy clients and the independent platform checkers current when
+// the next release rebuilds Android and Windows together.
+await writeFile(path.join(root, 'downloads/windows.json'), JSON.stringify(manifest, null, 2) + '\n');
+await writeFile(path.join(root, 'downloads/android.json'), JSON.stringify(manifest, null, 2) + '\n');
+await writeFile(path.join(root, 'downloads/releases.json'), JSON.stringify({ schema: 2, windows: manifest, android: manifest }, null, 2) + '\n');
 await writeFile(path.join(output, 'SHA256SUMS.txt'), ['windows', 'android'].map(platform => `${manifest[platform].sha256}  ${path.basename(new URL(manifest[platform].url).pathname)}\n`).join(''));
 console.log(`Prepared public downloads for ${version}; server upload is a separate step. No signing materials are included.`);
