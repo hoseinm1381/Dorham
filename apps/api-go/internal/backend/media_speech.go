@@ -44,7 +44,7 @@ type mediaSpeech struct {
 }
 
 func newMediaSpeech(m *Media) *mediaSpeech {
-	s := &mediaSpeech{m: m, seen: map[string]int64{}, cooldown: map[string]int64{}, audio: map[string]mediaClip{}, started: Now(), jobs: make(chan mediaSpeechJob, 4), done: make(chan struct{}), worker: &mediaSpeechWorker{idle: int64(m.a.C.TTSIdleSeconds) * 1000, lastUsed: Now()}}
+	s := &mediaSpeech{m: m, seen: map[string]int64{}, cooldown: map[string]int64{}, audio: map[string]mediaClip{}, started: Now(), jobs: make(chan mediaSpeechJob, 4), done: make(chan struct{}), worker: &mediaSpeechWorker{idle: int64(m.a.C.TTSIdleSeconds) * 1000, lastUsed: Now(), cpuPercent: m.a.C.TTSCPUPercent, timeout: time.Duration(m.a.C.TTSTimeoutSeconds) * time.Second}}
 	go s.loop()
 	return s
 }
@@ -325,6 +325,9 @@ type mediaSpeechWorker struct {
 	lastUsed, idle    int64
 	starts, idleStops int
 	start             func() *exec.Cmd
+	cpuPercent        int
+	timeout           time.Duration
+	isolation         *speechCPUGroup
 }
 
 func (w *mediaSpeechWorker) launch() error {
@@ -356,10 +359,23 @@ func (w *mediaSpeechWorker) launch() error {
 	}
 	out, e := cmd.StdoutPipe()
 	if e != nil {
+		in.Close()
 		return e
 	}
 	cmd.Stderr = io.Discard
+	group, release, e := prepareSpeechCPU(cmd, w.cpuPercent)
+	if e != nil {
+		in.Close()
+		out.Close()
+		return e
+	}
+	defer release()
 	if e = cmd.Start(); e != nil {
+		in.Close()
+		out.Close()
+		if group != nil {
+			group.kill()
+		}
 		return e
 	}
 	replies := make(chan mediaWorkerReply, 1)
@@ -369,6 +385,7 @@ func (w *mediaSpeechWorker) launch() error {
 	w.replies = replies
 	w.exited = exited
 	w.starts++
+	w.isolation = group
 	go func() {
 		defer close(exited)
 		scanner := bufio.NewScanner(out)
@@ -445,7 +462,11 @@ func (w *mediaSpeechWorker) synthesize(text string, cold func()) ([]byte, error)
 		w.mu.Unlock()
 		return nil, e
 	}
-	timer := time.NewTimer(60 * time.Second)
+	deadline := w.timeout
+	if deadline <= 0 {
+		deadline = 60 * time.Second
+	}
+	timer := time.NewTimer(deadline)
 	defer timer.Stop()
 	select {
 	case reply := <-replies:
@@ -464,6 +485,9 @@ func (w *mediaSpeechWorker) retireLocked() {
 		return
 	}
 	w.input.Close()
+	if w.isolation != nil {
+		w.isolation.kill()
+	}
 	w.cmd.Process.Kill()
 	select {
 	case <-w.exited:
@@ -489,7 +513,11 @@ func (w *mediaSpeechWorker) metrics() M {
 	if w.cmd != nil {
 		pid = w.cmd.Process.Pid
 	}
-	return M{"running": w.cmd != nil, "stopping": false, "pid": pid, "busy": w.busy, "starts": w.starts, "idleStops": w.idleStops, "idleSeconds": w.idle / 1000}
+	cpu := M{"enabled": w.cpuPercent > 0, "percentOfHost": w.cpuPercent}
+	if w.isolation != nil {
+		cpu = w.isolation.metrics()
+	}
+	return M{"running": w.cmd != nil, "stopping": false, "pid": pid, "busy": w.busy, "starts": w.starts, "idleStops": w.idleStops, "idleSeconds": w.idle / 1000, "timeoutSeconds": int64(w.timeout / time.Second), "cpu": cpu}
 }
 func (w *mediaSpeechWorker) close() {
 	w.mu.Lock()

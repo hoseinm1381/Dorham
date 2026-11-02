@@ -1,0 +1,8 @@
+# systemd >=254, Linux cgroup v2. Install as a Dorham service drop-in.
+# DelegateSubgroup keeps the Go API outside the TTS-only cpu.max parent.
+# Existing parent memory limits still cover the API plus speech descendants.
+[Service]
+Delegate=cpu
+DelegateSubgroup=app
+Environment=TTS_CPU_PERCENT=30
+Environment=TTS_TIMEOUT_SECONDS=300

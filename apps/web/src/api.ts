@@ -6,9 +6,11 @@ const store = registerPlugin<any>('DorhamSecrets');
 const files = registerPlugin<any>('DorhamFiles');
 export const native = Capacitor.isNativePlatform() || Boolean(window.desktop);
 let base = '', csrf = '', access = '', accessExpires = 0, refreshPromise: Promise<boolean> | null = null;
+let webSessionUserId: string | null = null;
+let webProofPromise: Promise<{ csrf: string; user: { id: string } }> | null = null;
 export async function initialize() { const defaultServer = import.meta.env.VITE_DEFAULT_SERVER_URL || instance.defaultServerUrl; if (window.desktop) base = await window.desktop.getServer() || defaultServer; else if (native) base = localStorage.getItem('dorham.server') || defaultServer; }
 export const serverUrl = () => base;
-export async function setServer(value: string) { const url = new URL(value); if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '10.0.2.2'].includes(url.hostname))) throw new Error('Use HTTPS for your server address.'); if (base !== url.origin) { access = ''; csrf = ''; await setSecret(null); } base = url.origin; if (window.desktop) await window.desktop.setServer(base); else localStorage.setItem('dorham.server', base); }
+export async function setServer(value: string) { const url = new URL(value); if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '10.0.2.2'].includes(url.hostname))) throw new Error('Use HTTPS for your server address.'); if (base !== url.origin) { access = ''; csrf = ''; webSessionUserId = null; await setSecret(null); } base = url.origin; if (window.desktop) await window.desktop.setServer(base); else localStorage.setItem('dorham.server', base); }
 export const assetUrl = (value: string | null) => value ? `${base}${value}` : undefined;
 async function getSecret() { if (window.desktop) return window.desktop.getSecret(); if (native) return (await store.get()).value as string | null; return null; }
 async function setSecret(value: string | null) { if (window.desktop) await window.desktop.setSecret(value); else if (native) await store.set({ value }); }
@@ -24,6 +26,23 @@ async function refreshSession(): Promise<boolean> {
   try { return await refreshPromise; } finally { refreshPromise = null; }
 }
 let lastWebRenewal = 0, webCredentialGeneration = 0, webRenewal: Promise<void> | null = null;
+// Browser tabs share the HttpOnly session cookie, but keep their proof in memory.
+// Recover only for the same account; never resend an action as a different user.
+async function synchronizeWebProof(expectedUser: string) {
+  webProofPromise ||= (async () => {
+    const response = await fetch(`${base}/api/v1/auth/me`, { credentials: 'include', signal: AbortSignal.timeout(15000) });
+    const data = await response.json();
+    if (!response.ok || !data.csrf || !data.user?.id) throw Object.assign(new Error(data.error?.message || 'Session expired. Sign in again.'), { status: response.status, code: data.error?.code });
+    return data as { csrf: string; user: { id: string } };
+  })().finally(() => { webProofPromise = null; });
+  const proof = await webProofPromise;
+  if (proof.user.id !== expectedUser || webSessionUserId !== expectedUser) {
+    if (webSessionUserId === expectedUser) window.dispatchEvent(new Event('dorham-session-revoked'));
+    throw Object.assign(new Error('Your account changed in another tab. Reload Dorham to continue.'), { code: 'SESSION_CHANGED' });
+  }
+  csrf = proof.csrf;
+  webCredentialGeneration++;
+}
 export async function maintainSession() { if (native) { if (Date.now() >= accessExpires - 120000 && !await refreshSession()) throw new Error('Session expired. Sign in again.'); } else if (Date.now() - lastWebRenewal >= 12 * 3600000) { webRenewal ||= request('/auth/renew', {}).then(() => { lastWebRenewal = Date.now(); webCredentialGeneration++; }).finally(() => { webRenewal = null; }); await webRenewal; } }
 export async function request<T = any>(route: string, body?: unknown, method = body === undefined ? 'GET' : 'POST', retry = true, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
   if (native && !base) throw new Error('Enter your server address to connect.');
@@ -44,15 +63,20 @@ export async function request<T = any>(route: string, body?: unknown, method = b
   }
   if (response.status === 401 && retry && !route.startsWith('/auth/login') && !route.startsWith('/auth/register') && await refreshSession()) return request<T>(route, payload, method, false, options);
   const data = await response.json().catch(e => { if (timeout.aborted) throw Object.assign(new Error('Connection timed out. Your message was not automatically resent.'), { code: 'TIMEOUT' }); if (options.signal?.aborted) throw e; return { error: { message: 'The server returned an invalid response.' } }; });
+  if (!native && response.status === 403 && data.error?.code === 'CSRF' && retry && webSessionUserId) {
+    await synchronizeWebProof(webSessionUserId);
+    if (options.signal?.aborted) throw options.signal.reason;
+    return request<T>(route, payload, method, false, options);
+  }
   if (response.status === 401 && !['/auth/login', '/auth/register', '/auth/guest', '/auth/recover'].some(path => route.startsWith(path))) window.dispatchEvent(new Event('dorham-session-revoked'));
   if (!response.ok) { const error = new Error(data.error?.message || 'Request failed.'); Object.assign(error, { status: response.status, code: data.error?.code }); throw error; }
-  if (data.csrf) csrf = data.csrf;
+  if (data.csrf) { csrf = data.csrf; if (!native && data.user?.id) webSessionUserId = data.user.id; }
   if (data.accessToken) { access = data.accessToken; accessExpires = Date.now() + 15 * 60000; await setSecret(data.refreshToken); }
   return data;
 }
-export async function signOut() { try { await request('/auth/logout', {}); } catch (e: any) { if (e.status !== 401) throw e; } finally { access = ''; csrf = ''; await setSecret(null); if ('caches' in window) { for (const key of await caches.keys()) await caches.delete(key); } } }
-export async function forgetSession() { access = ''; csrf = ''; await setSecret(null); }
-export function connectSocket(): Socket { return io(base || window.location.origin, { withCredentials: true, auth: callback => callback({ token: access || undefined, csrf }), reconnectionDelay: 500, reconnectionDelayMax: 5000, transports: ['websocket', 'polling'], tryAllTransports: true }); }
+export async function signOut() { try { await request('/auth/logout', {}); } catch (e: any) { if (e.status !== 401) throw e; } finally { access = ''; csrf = ''; webSessionUserId = null; await setSecret(null); if ('caches' in window) { for (const key of await caches.keys()) await caches.delete(key); } } }
+export async function forgetSession() { access = ''; csrf = ''; webSessionUserId = null; await setSecret(null); }
+export function connectSocket(): Socket { return io(base || window.location.origin, { withCredentials: true, auth: callback => { if (native || !webSessionUserId) callback({ token: access || undefined, csrf }); else void synchronizeWebProof(webSessionUserId).then(() => callback({ csrf })).catch(() => callback({ csrf: '' })); }, reconnectionDelay: 500, reconnectionDelayMax: 5000, transports: ['websocket', 'polling'], tryAllTransports: true }); }
 
 export async function uploadAttachment(file: File, conversationId: string, signal?: AbortSignal) {
   const reserved = await request('/attachments', { name: file.name, size: file.size, conversationId });

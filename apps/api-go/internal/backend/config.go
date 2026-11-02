@@ -19,7 +19,7 @@ type Config struct {
 	AttachmentDir                                                                                                            string
 	AttachmentBudgetMiB, UploadReserveMiB, UploadConcurrency, UploadSoftMiB, UploadHardMiB, UploadSmallMiB                   int
 	MediaAdmissionSecret                                                                                                     string
-	TTSIdleSeconds, TTSAudioCacheMiB                                                                                         int
+	TTSIdleSeconds, TTSAudioCacheMiB, TTSCPUPercent, TTSTimeoutSeconds                                                       int
 	// Test overrides are accepted only by explicitly enabled, loopback-only fixtures.
 	RateLimit bool
 }
@@ -78,7 +78,19 @@ func LoadConfig() Config {
 		MediaTransport: env("MEDIA_TRANSPORT", "mesh"), LivekitURL: env("LIVEKIT_URL", ""), LivekitAPIURL: env("LIVEKIT_API_URL", ""), LivekitKey: env("LIVEKIT_API_KEY", ""), LivekitSecret: env("LIVEKIT_API_SECRET", ""),
 		ScreenMaxBitrate: envInt("SCREEN_MAX_BITRATE", 1500000), ScreenMaxFrameRate: envInt("SCREEN_MAX_FRAME_RATE", 30), StandardShareSlots: envInt("STANDARD_SHARE_SLOTS", 3), TrustedProxies: envList("TRUSTED_PROXIES", ""), GuestsEnabled: env("GUESTS_ENABLED", "") != "false", MaxGuests: envInt("MAX_GUESTS", 100),
 		AttachmentDir: absolute(envDefault("ATTACHMENT_DIR", filepath.Join(data, "attachments"))), AttachmentBudgetMiB: envInt("ATTACHMENT_BUDGET_MIB", 2048), UploadReserveMiB: envInt("UPLOAD_FREE_RESERVE_MIB", 2048), UploadConcurrency: envInt("UPLOAD_CONCURRENCY", 2), UploadSoftMiB: envInt("UPLOAD_DAILY_SOFT_MIB", 512), UploadHardMiB: envInt("UPLOAD_DAILY_HARD_MIB", 1024), UploadSmallMiB: envInt("UPLOAD_SMALL_FILE_MIB", 2),
-		MediaAdmissionSecret: env("MEDIA_ADMISSION_SECRET", ""), TTSIdleSeconds: envInt("TTS_IDLE_SECONDS", 180), TTSAudioCacheMiB: envInt("TTS_AUDIO_CACHE_MIB", 8)}
+		MediaAdmissionSecret: env("MEDIA_ADMISSION_SECRET", ""), TTSIdleSeconds: envInt("TTS_IDLE_SECONDS", 180), TTSAudioCacheMiB: envInt("TTS_AUDIO_CACHE_MIB", 8), TTSCPUPercent: envInt("TTS_CPU_PERCENT", 0, true), TTSTimeoutSeconds: envInt("TTS_TIMEOUT_SECONDS", 0, true)}
+	if c.TTSCPUPercent > 100 {
+		panic("TTS_CPU_PERCENT must be between 0 and 100")
+	}
+	if c.TTSTimeoutSeconds == 0 {
+		c.TTSTimeoutSeconds = 60
+		if c.TTSCPUPercent > 0 {
+			c.TTSTimeoutSeconds = 300
+		}
+	}
+	if c.TTSTimeoutSeconds > 3600 {
+		panic("TTS_TIMEOUT_SECONDS must be at most 3600")
+	}
 	Check((c.CloudflareTurnKeyID == "") == (c.CloudflareTurnAPIToken == ""), 500, "CONFIG", "Both Cloudflare TURN credentials required")
 	Check(c.MediaTransport == "mesh" || c.MediaTransport == "livekit", 500, "CONFIG", "Invalid MEDIA_TRANSPORT")
 	Check(c.MediaTransport != "livekit" || (c.LivekitURL != "" && c.LivekitKey != "" && c.LivekitSecret != ""), 500, "CONFIG", "LiveKit credentials required")
