@@ -1,3 +1,5 @@
+**Released web/backend 1.1.0:** Dorham now runs a standalone Go backend, preserving accounts, sessions, history and schema 11. Public HTTPS/WSS, English/Farsi TTS, database/file preservation and rollback checks pass. The published Windows 1.0.7 app passes chat, listen-only voice and real native sharing against Go; Android stays 1.0.6. Native download manifests and both 1024 MiB service limits are unchanged. See [release verification](docs/RELEASE-1.1.0.md).
+
 **Released web 1.0.8:** switching chats keeps one message composer. The compact voice view uses the sidebar for participants and keeps active screen shares visible without expandable participant cards. Personal voice volume and Mute/Unmute for me are now in the participant right-click menu. Right-click your own user for 0–200% microphone gain; higher gain stays in Advanced audio. Backend and Windows stay 1.0.7; Android stays 1.0.6. No native builds or service restarts were performed. All 202 tests, lint, typechecking, web build and composer/decoded-audio browser checks pass; all 135 public web files match. The deployment preserves both 1024 MiB memory limits and all four native download manifests. See [1.0.8 verification](docs/RELEASE-1.0.8.md).
 
 **Current Android release: 1.0.6** — louder mute/unmute cues and Copy message text, with the existing signing identity. See [Android release checks](docs/RELEASE-1.0.6-ANDROID.md).
@@ -46,7 +48,7 @@ Earlier audio-controls update: **0.4.3**. See [audio fixes](docs/AUDIO-FIX-0.4.3
 
 # Dorham
 
-A small Discord-style application for a community of up to 100 accounts and 20 online users. React/PWA, Windows/Electron, Android/Capacitor, Fastify, Socket.IO, SQLite/Drizzle, and WebRTC. All branding and application artwork in this repository are original.
+A small Discord-style application for a community of up to 100 accounts and 20 online users. React/PWA, Windows/Electron, Android/Capacitor, Go HTTP/Socket.IO, SQLite/PostgreSQL, and WebRTC. The previous Node backend remains available for rollback and legacy offline tooling. All branding and application artwork in this repository are original.
 
 The Iranian SFU pilot is running at **https://dorhamapp.ir/**. The previous nip.io address remains available; see [domain operations](docs/DOMAIN.md). Its Windows pilot installer defaults to this address; saved custom server addresses remain available. Public API/socket checks, decoded SFU audio/video in Chrome and installed Windows, and separately forced local TURN/TLS pass with synthetic sources. The older Botkeep instance and its production data remain separate. See [pilot operations, packages and limitations](docs/NINECRAFT.md) and [verification status](docs/STATUS.md). Physical calls, domestic-only outage behavior and Android device tests remain open.
 

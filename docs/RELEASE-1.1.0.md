@@ -1,6 +1,6 @@
 # Backend migration 1.1.0
 
-Candidate prepared; production promotion and publication are pending. This
+Deployed and verified at https://dorhamapp.ir/ on 2026-11-02. This
 release replaces the Node HTTP/Socket.IO backend with Go. Existing accounts,
 password hashes, sessions, refresh tokens, message history, receipts, media,
 moderation and games use the same schema 11 and wire protocol. LiveKit and the
@@ -69,11 +69,25 @@ the application does not import; positive controls confirmed detection works.
 
 ## Promotion and rollback
 
-Promotion must verify the fresh coordinated private backup and final Go/web
-artifact hashes first. Preserve Node and its compiled API/dependencies as the
-rollback runtime, all private configuration, Piper models, proxies, LiveKit and
-the four native download manifests. Switch only the Dorham ExecStart to the Go
-binary and deploy the matching web payload, retaining prior hashed assets.
+The final coordinated private backup was downloaded and independently verified:
+5,959,666 bytes, 41 tables, schema 11 and 430 file hashes. Node and its compiled
+API/dependencies remain for rollback. Production runs Go directly under systemd;
+private configuration, Piper models, proxies, LiveKit, both 1024 MiB limits and
+all four native download manifests are unchanged. All 135 public HTTPS web files
+match the build hashes; prior hashed assets remain available.
+
+Public native-origin authentication, English/Farsi chat, authenticated WSS,
+listen-only voice membership, production SFU credentials, actual English/Farsi
+speech and recipient privacy pass. The automatic rollback timer was stopped
+after successful checks. The three temporary test accounts and their private
+server/messages were removed, with database integrity verified afterward.
+
+Implementation source: `3d0d2a2ae94e5abcf64bb583c7f65e8997363f43`.
+Deployed Linux executable SHA-256:
+`b363c00fddab8395d9b5ed92ff09f107411a4aa7514d263a0f921cb6b5db79c6`.
+Deployment and public checks: `v110-production-promotion.json`,
+`v110-public-verification.json`, `v110-public-web-files.json` and
+`v110-public-fixture-cleanup.json` under `artifacts/evidence`.
 
 Revert binary regressions to Node against current data, preserving accepted
 writes. Restore database/uploads only when recovery requires it, after saving

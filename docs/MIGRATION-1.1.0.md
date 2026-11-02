@@ -1,7 +1,7 @@
 # Backend 1.1.0 migration gates
 
-Status: implementation, security, core/media and existing Windows compatibility
-checks pass. Final artifact/backup verification and production promotion pending.
+Status: Go 1.1.0 is deployed and verified on 2026-11-02. See
+[release verification](RELEASE-1.1.0.md).
 
 The replacement is a Go HTTP/Socket.IO application. LiveKit and the isolated
 Python/Piper speech worker remain separate services. The TypeScript backend is
@@ -67,12 +67,14 @@ native application identity is changed by this migration.
 - Read-only SSH reaches the existing Linux x86-64 VPS; service is active and
   both 1024 MiB limits remain unchanged. No production changes performed.
 
-## Open release gates
+## Completed promotion gates
 
-- Verify final current-source Linux binary, Go/web deployment inventory and the
-  fresh coordinated private rollback backup before switching production.
-- After promotion verify public HTTP/socket/native contracts, data/configuration
-  preservation, service memory limits and native download manifests.
+- Final current-source Linux executable and Go/web inventory verified; a fresh
+  coordinated private rollback backup is independently verified off-host.
+- Public HTTPS/authenticated WSS, native origins, chat, voice membership, SFU
+  credentials and real English/Farsi TTS pass. All 135 public web files match.
+- Core data, private configuration, old hashed assets, both 1024 MiB service
+  limits, LiveKit/proxies and all four native manifests are preserved.
 
 ## Resolved Linux gates
 
@@ -95,5 +97,5 @@ origins, CSRF/cookies, fixture exclusion, pgx TCP/PGlite migrations, rollback an
 concurrent writes. See `v110-independent-production-pg-review.json` and the
 reusable `tests/go-production-compat.mjs`.
 
-The candidate is prepared for source preservation and production promotion.
-Windows remains 1.0.7 and Android remains 1.0.6; neither was rebuilt.
+Windows remains 1.0.7 and Android remains 1.0.6; neither was rebuilt. Physical
+Android acceptance and new full media-capacity certification are not claimed.
