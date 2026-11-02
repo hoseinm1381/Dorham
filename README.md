@@ -1,4 +1,4 @@
-**Android and Windows 1.1.0:** native packages now include the current interface and retain their existing update identities. No new feature is added; additional work is reserved for 1.1.1. The Go backend remains 1.1.0. See [native release verification](docs/RELEASE-1.1.0-NATIVE.md).
+**Released Android and Windows 1.1.0:** native packages now include the current interface and retain their existing update identities. No new feature is added; additional work is reserved for 1.1.1. The Go backend remains 1.1.0. See [native release verification](docs/RELEASE-1.1.0-NATIVE.md).
 
 **Released web/backend 1.1.0:** Dorham now runs a standalone Go backend, preserving accounts, sessions, history and schema 11. Public HTTPS/WSS, English/Farsi TTS, database/file preservation and rollback checks pass. At the backend switch, the published Windows 1.0.7 app passed chat, listen-only voice and real native sharing against Go; Android stayed 1.0.6. That switch preserved native manifests and both 1024 MiB service limits. See [release verification](docs/RELEASE-1.1.0.md).
 

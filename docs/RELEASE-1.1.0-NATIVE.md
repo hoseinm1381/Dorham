@@ -1,6 +1,7 @@
 # Android and Windows 1.1.0
 
-Rebuilds the current Dorham application for both platforms against the released
+Published at https://dorhamapp.ir/ on 2026-11-02. Rebuilds the current Dorham
+application for both platforms against the released
 Go 1.1.0 backend. No new feature is added. Additional work is reserved for 1.1.1.
 The compact voice view, participant context-menu volume controls, self microphone
 gain, chat-composer correction and other existing web changes are included.
@@ -48,6 +49,19 @@ before the operator closed unused browser windows.
 Public HTTPS installer hashes/ranges, download-menu links and actual native
 online updater checks are recorded separately under
 `artifacts/evidence/v110-native-*`.
+
+All four public manifests now advertise 1.1.0. Full installer bytes fetched
+through public HTTPS match the release hashes; separate laptop HEAD/range,
+cache-control and CORS checks pass. The real public web and Windows menus
+show both 1.1.0 downloads. Native 1.1.0 suppresses the update notice, while
+the unchanged 1.0.7 application offers 1.1.0. These probes create no production
+accounts and do not execute an installer.
+
+The superseded public 1.0.6/1.0.7 installers and release staging uploads were
+removed, reclaiming 525,834,465 bytes. Independently hash-verified local
+historical installers, private backups, runtime rollback files and historical
+hashed web assets are retained. The public release metadata has a private
+rollback copy at `/var/lib/dorham-ops/backups/native-1.1.0-before`.
 
 Download publication replaces the four public release manifests only after
 installer verification and a private metadata backup. It does not restart the

@@ -1,4 +1,4 @@
-import { chromium, _electron as electron, expect } from '@playwright/test';
+import { chromium, _electron as electron, expect as baseExpect } from '@playwright/test';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +6,7 @@ import path from 'node:path';
 // Read-only public verification. Run through the guarded launcher only after
 // publication. It never installs an update or creates a production account.
 const executablePath = process.argv[2];
+const expect = baseExpect.configure({ timeout: 30000 });
 if (!executablePath) throw Error('Pass the current packaged Dorham.exe path.');
 const version = process.env.DORHAM_NATIVE_RELEASE_VERSION || '1.1.0';
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Invalid expected native version.');
@@ -19,6 +20,13 @@ const prefix = `artifacts/evidence/v${version.replaceAll('.','')}-native-public`
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 let desktop: Awaited<ReturnType<typeof electron.launch>> | undefined;
 const report: Record<string, unknown> = { version, checkedAtUTC: new Date().toISOString(), productionAccountsCreated: 0, installerExecuted: false, actualPublicMetadata: true, physicalAndroidAcceptance: false };
+const network: unknown[] = [];
+let activePage: import('@playwright/test').Page | undefined;
+function diagnose(page: import('@playwright/test').Page) {
+  activePage = page;
+  page.on('requestfailed', request => network.push({ path: new URL(request.url()).pathname, failed: request.failure()?.errorText }));
+  page.on('response', response => { if (response.url().includes('/downloads/')) network.push({ path: new URL(response.url()).pathname, status: response.status() }); });
+}
 async function downloadLinks(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Download apps', exact: true }).click();
   for (const platform of ['Windows','Android']) {
@@ -32,13 +40,13 @@ async function native(exe: string, profile: string) {
   desktop = await electron.launch({ executablePath: path.resolve(exe), args: [`--user-data-dir=${path.join(temporary, profile)}`], env, timeout: 45000 });
   const identity = await desktop.evaluate(({ app }) => ({ version: app.getVersion(), userData: app.getPath('userData') }));
   expect(path.resolve(identity.userData).toLowerCase()).toBe(path.resolve(temporary, profile).toLowerCase());
-  const page = await desktop.firstWindow(); page.setDefaultTimeout(20000);
+  const page = await desktop.firstWindow(); page.setDefaultTimeout(30000); diagnose(page);
   return { page, identity };
 }
 try {
   await mkdir('artifacts/evidence', { recursive: true });
   browser = await chromium.launch({ channel: 'chrome', headless: true, timeout: 30000 });
-  const page = await browser.newPage(); page.setDefaultTimeout(20000);
+  const page = await browser.newPage(); page.setDefaultTimeout(30000); diagnose(page);
   await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await downloadLinks(page); report.publicWebDownloadLinks = true;
   await page.screenshot({ path: prefix + '-web.png' });
@@ -60,9 +68,9 @@ try {
   await previous.page.screenshot({ path: prefix + '-windows-previous.png' });
   report.status = 'passed';
   console.log('Public web/native download links and real current/previous Windows online updater passed; no installer executed.');
-} catch (error) { report.status = 'failed'; report.error = String(error); throw error; }
+} catch (error) { report.status = 'failed'; report.error = String(error); await activePage?.screenshot({ path: prefix + '-failure.png', timeout: 5000 }).catch(() => {}); report.failureBody = await activePage?.locator('body').innerText({ timeout: 5000 }).catch(() => 'Window unavailable'); throw error; }
 finally {
   await browser?.close(); await desktop?.close();
-  await writeFile(prefix + '.json', JSON.stringify(report, null, 2));
+  report.network = network; await writeFile(prefix + '.json', JSON.stringify(report, null, 2));
   await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 }
