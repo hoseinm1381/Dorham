@@ -1,6 +1,6 @@
 {
   "name": "dorham",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "private": true,
   "overrides": {
     "xcode": {
@@ -17,9 +17,14 @@
   },
   "scripts": {
     "dev": "node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && node scripts/emoji-assets.mjs && concurrently -k -n api,web \"tsx watch apps/api/src/index.ts\" \"vite --config apps/web/vite.config.ts\"",
-    "start": "node --env-file-if-exists=.env deployment/start.mjs",
+    "start": "node scripts/go-backend.mjs start",
+    "start:legacy": "node --env-file-if-exists=.env deployment/start.mjs",
     "build": "npm run build:api && npm run build:web && npm run build:desktop",
     "build:api": "tsup --config tsup.config.ts",
+    "build:api:go": "node scripts/go-backend.mjs build",
+    "test:api:go": "node scripts/go-backend.mjs test",
+    "test:api:compat": "node tests/go-production-compat.mjs",
+    "build:server": "npm run build:api:go -- --linux && npm run build:web",
     "build:web": "node scripts/icons.mjs && node scripts/audio-assets.mjs && node scripts/default-avatars.mjs && node scripts/emoji-assets.mjs && vite build --config apps/web/vite.config.ts && node scripts/pwa-build.mjs",
     "build:desktop": "node scripts/desktop-build.mjs",
     "package:windows": "npm run build && node scripts/windows-package.mjs",
@@ -34,7 +39,9 @@
     "db:migrate": "tsx scripts/database.ts migrate",
     "db:backup": "tsx scripts/database.ts backup",
     "db:restore": "tsx scripts/database.ts restore",
-    "deploy:bundle": "node scripts/deploy-bundle.mjs",
+    "deploy:bundle": "node scripts/deploy-go-bundle.mjs",
+    "deploy:bundle:legacy": "node scripts/deploy-bundle.mjs",
+    "deploy:go": "node scripts/deploy-go-bundle.mjs",
     "deploy:branch": "node scripts/deploy-branch.mjs",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build",
     "admin": "tsx scripts/admin.ts",

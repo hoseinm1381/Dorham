@@ -2,8 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
-const root = process.cwd(), bundle = path.resolve(`artifacts/server-${version}`);
-if (!existsSync(path.join(bundle, 'apps/api/dist/index.js'))) throw new Error('Run npm run deploy:bundle first.');
+const root = process.cwd(), legacy = process.argv.includes('--legacy');
+const bundle = path.resolve(`artifacts/server-${version}${legacy ? '' : '-go'}`);
+if (!existsSync(path.join(bundle, legacy ? 'apps/api/dist/index.js' : 'GO_RELEASE.json'))) throw new Error('Run npm run deploy:bundle first (or deploy:bundle:legacy for --legacy).');
 function git(args, env = process.env, cwd = root) {
   const result = spawnSync('git', args, { env, cwd, encoding: 'utf8', windowsHide: true });
   if (result.status !== 0) throw new Error(result.stderr || `git ${args[0]} failed`);

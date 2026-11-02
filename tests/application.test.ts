@@ -138,7 +138,10 @@ describe('real-time voice control', () => {
     const extra = [second.id]; for (let i = 0; i < 2; i++) extra.push((await h.api(users[0], `/servers/${server.id}/channels`, { name: `Fallback ${i}`, kind: 'voice' })).json().id);
     const sockets = [];
     for (let i = 0; i < users.length; i++) { const socket = await h.connect(users[i]); sockets.push(socket); await event(socket, 'voice:join', { channelId: i < 3 ? first.id : extra[i - 3], eligible: true }); }
-    const publications = await Promise.all(sockets.map(socket => event(socket, 'share:start', { requestId: randomUUID() })));
+    // Establish the three standard slots before testing first-share fallback in
+    // other rooms. Simultaneous cross-room requests can validly claim standard
+    // slots in another order, leaving no fallback for this room's second share.
+    const publications = [...await Promise.all(sockets.slice(0, 3).map(socket => event(socket, 'share:start', { requestId: randomUUID() }))), ...await Promise.all(sockets.slice(3).map(socket => event(socket, 'share:start', { requestId: randomUUID() })))];
     expect(new Set(publications.map(p => p.lease.id)).size).toBe(6);
     expect((await h.service.room(users[0].id, first.id)).shares).toHaveLength(3);
     expect((await h.service.room(users[0].id, second.id)).shares).toHaveLength(1);
@@ -159,10 +162,12 @@ describe('real-time voice control', () => {
     expect((await h.api(observer, '/bootstrap')).json().voicePresence[0].members[0].user.id).toBe(owner.id);
     const changed = new Promise<any>(resolve => watcher.once('voice:directory', resolve));
     await event(speaker, 'voice:state', { muted: true, deafened: false, requestId: randomUUID() }); expect((await changed)[0].members[0].muted).toBe(true);
-    await h.api(owner, `/channels/${channel.id}`, { role: 'member', permissions: { view: false } }, 'PATCH');
-    expect((await h.api(observer, '/bootstrap')).json().voicePresence).toEqual([]);
     const empty = new Promise<any>(resolve => watcher.once('voice:directory', resolve));
-    await event(speaker, 'voice:leave', { requestId: randomUUID() }); expect(await empty).toEqual([]);
+    await h.api(owner, `/channels/${channel.id}`, { role: 'member', permissions: { view: false } }, 'PATCH');
+    expect(await empty).toEqual([]);
+    expect((await h.api(observer, '/bootstrap')).json().voicePresence).toEqual([]);
+    await event(speaker, 'voice:leave', { requestId: randomUUID() });
+    expect((await h.api(observer, '/bootstrap')).json().voicePresence).toEqual([]);
   });
   it('revokes live speaking and sharing when a role loses channel privileges', async () => {
     h = await harness(); const owner = await h.register('owner'), member = await h.register('member');

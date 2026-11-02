@@ -5,9 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 import { createApp } from '../apps/api/src/app';
 import { config } from '../apps/api/src/config';
+import { bindGoFixtureSocket, createGoApp, syncGoFixtureSocket } from './go-harness';
 export async function harness(overrides: Parameters<typeof config>[0] = {}, options: Parameters<typeof createApp>[1] = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'dorham-test-'));
-  const h = await createApp(config({ dataDir, databaseUrl: '', port: 3001, maxUsers: 100, roomShares: 0, globalShares: 0, bootstrapSecret: 'test-bootstrap-secret', stunUrls: [], ...overrides }), { logger: false, rateLimit: false, ...options });
+  const settings = config({ dataDir, databaseUrl: '', port: 3001, maxUsers: 100, roomShares: 0, globalShares: 0, bootstrapSecret: 'test-bootstrap-secret', stunUrls: [], ...overrides });
+  const h = process.env.DORHAM_BACKEND_ENGINE === 'go'
+    ? await createGoApp(settings) as unknown as Awaited<ReturnType<typeof createApp>>
+    : await createApp(settings, { logger: false, rateLimit: false, ...options });
   await h.app.listen({ port: 0, host: '127.0.0.1' }); const url = `http://127.0.0.1:${(h.app.server.address() as any).port}`;
   const sockets: Socket[] = [];
   async function register(n: string) {
@@ -23,8 +27,9 @@ export async function harness(overrides: Parameters<typeof config>[0] = {}, opti
   }
   async function connect(user: { token: string }): Promise<Socket> {
     const socket = io(url, { transports: ['websocket'], auth: { token: user.token }, reconnection: false }); sockets.push(socket);
-    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('connect_error', reject); }); return socket;
+    bindGoFixtureSocket(socket,url);
+    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('connect_error', reject); }); await syncGoFixtureSocket(socket); return socket;
   }
   return { ...h, url, dataDir, register, api, connect, close: async () => { sockets.forEach(s => s.disconnect()); await new Promise(r => setTimeout(r, 30)); await h.app.close(); await rm(dataDir, { recursive: true, force: true }); } };
 }
-export function event<T = any>(socket: Socket, name: string, body: any = {}): Promise<T> { if (name === 'share:start') body = { protocolVersion: 2, ...body }; return new Promise((resolve, reject) => socket.timeout(5000).emit(name, body, (err: any, response: any) => { if (err) reject(err); else if (!response.ok) reject(new Error(response.error.code)); else resolve(response.data); })); }
+export async function event<T = any>(socket: Socket, name: string, body: any = {}): Promise<T> { await syncGoFixtureSocket(socket); if (name === 'share:start') body = { protocolVersion: 2, ...body }; return new Promise((resolve, reject) => socket.timeout(5000).emit(name, body, (err: any, response: any) => { if (err) reject(err); else if (!response.ok) reject(new Error(response.error.code)); else resolve(response.data); })); }

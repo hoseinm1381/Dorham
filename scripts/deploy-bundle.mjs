@@ -2,6 +2,8 @@ import { mkdir, cp, readFile, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 const root = process.cwd(), source = JSON.parse(await readFile('package.json', 'utf8'));
+// Explicit legacy package; the default deployment command now packages Go.
+source.scripts.start = source.scripts['start:legacy'] || source.scripts.start;
 if (!/^\d+\.\d+\.\d+$/.test(source.version)) throw new Error('Use a numeric build version.');
 const output = `artifacts/server-${source.version}`, destination = path.resolve(output);
 await mkdir(destination, { recursive: true });

@@ -1,5 +1,51 @@
 # Deployment
 
+## Go backend 1.1.0
+
+The replacement uses a standalone Go HTTP/Socket.IO process, preserving SQLite
+schema 11, native protocols, LiveKit and Python/Piper. Node instructions below
+are retained for historical provisioning and rollback. See the [migration
+checks and current promotion status](MIGRATION-1.1.0.md).
+
+With the verified Go 1.27.3 toolchain (or newer patched compatible release):
+
+```sh
+npm run build:server
+npm run deploy:bundle
+```
+
+These prepare `artifacts/Dorham-1.1.0-Go-Server.zip` and
+`artifacts/server-1.1.0-go`, with a Linux x86-64 executable, web payload,
+deployment examples and SHA-256 inventory. Node modules, compiler, speech
+models, private data and native installers are excluded. Initial compilation
+needs the pinned Go modules; startup never downloads dependencies. `DORHAM_GO`
+selects an installed compiler. Workspace `npm start` is a development launcher;
+execute `apps/api-go/dist/dorham` directly in production to avoid a Node parent.
+`npm run start:legacy` retains the Node launcher.
+
+On the VPS, stage and verify the payload first. Preserve the Node executable,
+compiled API, node_modules and private environment. Independently verify a
+coordinated stopped-service database/uploads/config backup. Install only the
+ExecStart override in `deployment/dorham-go.conf.example`, preserving the
+existing user, working directory, environment, security settings and both
+1024 MiB limits. Keep proxies, LiveKit, Piper models and native manifests
+unchanged. Publish hashed web assets before HTML and the service worker, retain
+older hashed assets, then verify readiness and client behavior.
+
+The ZIP records Linux executable permissions, but verify them after extraction:
+`chmod 0755 apps/api-go/dist/dorham`. Set files to the existing service owner and
+verify the executable SHA-256 against `GO_RELEASE.json` before changing ExecStart.
+
+For containers use `deployment/Dockerfile.go` against the Go bundle. Provision
+the Python speech environment and English/Farsi models separately as before.
+The container build is not certified by the VPS runtime checks.
+
+For a binary rollback, stop Go, remove only its ExecStart drop-in, restore prior
+web entry files, daemon-reload and start Node against current data. Tests verify
+Node-Go-Node write compatibility; preserve accepted writes. Restore the private
+database/uploads snapshot only if needed for recovery, after preserving the
+post-upgrade data. Git history does not back up private data or credentials.
+
 For the current Iranian VPS see [Ninecraft operations](NINECRAFT.md) and [v0.2 upgrade status](UPGRADE-STATUS.md). Historical Botkeep results are in [hosted verification](HOSTED-VERIFICATION.md). The procedure below is the reproducible setup, not a claim that all live gates passed.
 
 ## Botkeep preparation
