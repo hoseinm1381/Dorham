@@ -1,5 +1,32 @@
 # Operations and recovery
 
+## Go 1.1.0 runtime
+
+Production runs `apps/api-go/dist/dorham` directly. Node source and compiled
+runtime remain available for rollback and legacy offline administrator tools;
+do not run a Node and Go backend simultaneously against the same data. Go keeps
+the historical schema and uses transaction-local permission snapshots. It does
+not force garbage collection or flush the operating-system cache.
+
+The Go SQLite backup command requires the backend to be stopped and refuses a
+live instance lock. It opens the existing database read-only, exports to a new
+private destination and performs no startup migration or voice/game cleanup:
+
+```sh
+sudo systemctl stop dorham
+sudo env DATA_DIR=/var/lib/dorham /opt/dorham/apps/api-go/dist/dorham backup /private/new-backup.sqlite
+```
+
+Copy matching avatars, attachments and configuration for a coordinated backup;
+then restart the selected runtime. The Node online backup and restore tools
+below remain available in the retained legacy source/runtime. PostgreSQL still
+uses operator-managed pg_dump/restore.
+
+Administrator metrics keep the RSS and cumulative CPU fields, adding Go runtime
+details. Node event-loop fields are marked inapplicable rather than presented as
+Go event-loop latency. Compare process RSS separately from whole-service memory
+including Piper; compare CPU counter deltas over the same workload/interval.
+
 ## Storage and retention
 
 Default limits: 100 users, 20 online users and 16 voice members per channel. The 0.5.0 candidate allocates three standard shares globally and one room-first fallback when standard slots fill, retaining one publication per account and expiring leases. Set legacy MAX_ROOM_SHARES/MAX_GLOBAL_SHARES to zero and STANDARD_SHARE_SLOTS to three together; see GAMING-0.5.0.md. The pilot is now 0.5.0 after explicit operator authorization despite the failed media capacity tests; see RELEASE-0.5.0.md. Retention defaults to 90 days and 50,000 stored messages; reaching the message ceiling prunes a bounded batch of the oldest messages. Replay events retain seven days with a global 50,000-event ceiling; mutation receipts retain one day. Pruning runs in bounded maintenance transactions. Deletion leaves replayable tombstones until normal retention removes them. The [Iranian pilot](NINECRAFT.md) also has incoming-traffic monitoring and reduced publishing settings.

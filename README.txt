@@ -1,5 +1,6 @@
-Dorham compiled server bundle
-Requires patched Node 24.22.1 or newer within Node 24.
-Run npm ci --omit=dev --ignore-scripts, configure environment, then npm start.
-See docs/DEPLOYMENT.md and docs/STATUS.md before exposing registration.
-Source, Windows and Android applications are separate deliverables.
+Dorham Go server for Linux x86-64.
+Run ./apps/api-go/dist/dorham directly; Node and a Go compiler are not required.
+Configure the existing environment and persistent DATA_DIR first.
+Piper speech requires the separately installed Python environment and model files.
+See docs/MIGRATION-1.1.0.md and docs/DEPLOYMENT.md.
+No database, credentials, signing keys or native client installers are included.
