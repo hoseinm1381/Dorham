@@ -5,7 +5,9 @@ release replaces the Node HTTP/Socket.IO backend with Go. Existing accounts,
 password hashes, sessions, refresh tokens, message history, receipts, media,
 moderation and games use the same schema 11 and wire protocol. LiveKit and the
 separate Python/Piper speech worker remain. Windows stays 1.0.7 and Android
-stays 1.0.6; no native installer rebuild is required.
+stays 1.0.6 at the backend switch; no native installer rebuild is required for
+compatibility. The subsequent [Android and Windows 1.1.0 release](RELEASE-1.1.0-NATIVE.md)
+rebuilds the current clients with their existing update identities.
 
 ## Verification
 

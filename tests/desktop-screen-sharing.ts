@@ -18,12 +18,15 @@ const temp = await mkdtemp(path.join(os.tmpdir(), 'dorham-browser-native-share-'
 if (path.dirname(temp) !== os.tmpdir() || !path.basename(temp).startsWith('dorham-browser-native-share-')) throw Error('Unexpected owned fixture path');
 if (process.env.DORHAM_FIXTURE_MANIFEST) await writeFile(process.env.DORHAM_FIXTURE_MANIFEST, JSON.stringify({ nonce: process.env.DORHAM_FIXTURE_NONCE, dataDir: temp, pid: process.pid }));
 const goBackend = process.env.DORHAM_GO_BACKEND === '1';
-const evidencePrefix = goBackend ? 'v110-legacy-windows107' : 'v107-native-screen';
+const expectedNativeVersion = process.env.DORHAM_NATIVE_EXPECTED_VERSION || (goBackend ? '1.0.7' : '');
+const evidencePrefix = process.env.DORHAM_NATIVE_EVIDENCE_PREFIX || (goBackend ? 'v110-legacy-windows107' : 'v107-native-screen');
+if (!/^[a-z0-9-]+$/.test(evidencePrefix)) throw Error('Invalid native evidence prefix');
+const publishedVersionPayload = process.env.DORHAM_NATIVE_EXPECTED_PAYLOAD || 'artifacts/v1.0.7/windows-avatars/win-unpacked';
 async function nativeHash(file: string) { const digest = createHash('sha256'); for await (const bytes of createReadStream(file)) digest.update(bytes); return digest.digest('hex'); }
 const nativeExecutableSha256 = goBackend ? await nativeHash(path.resolve(executablePath)) : undefined;
 const nativeApplicationSha256 = goBackend ? await nativeHash(path.join(path.dirname(path.resolve(executablePath)), 'resources', 'app.asar')) : undefined;
 if (goBackend) {
-  const publicRuntime = path.resolve('artifacts/v1.0.7/windows-avatars/win-unpacked');
+  const publicRuntime = path.resolve(publishedVersionPayload);
   expect(nativeExecutableSha256).toBe(await nativeHash(path.join(publicRuntime, 'Dorham.exe')));
   expect(nativeApplicationSha256).toBe(await nativeHash(path.join(publicRuntime, 'resources', 'app.asar')));
 }
@@ -47,7 +50,7 @@ try {
   const nativeIdentity = await desktop.evaluate(({ app }) => ({ version: app.getVersion(), userData: app.getPath('userData') }));
   const nativeVersion = nativeIdentity.version;
   expect(path.resolve(nativeIdentity.userData).toLowerCase()).toBe(path.resolve(temp, 'profile').toLowerCase());
-  if (goBackend) expect(nativeVersion).toBe('1.0.7');
+  if (expectedNativeVersion) expect(nativeVersion).toBe(expectedNativeVersion);
   console.log(`Packaged Windows ${nativeVersion}; isolated profile confirmed; backend ${goBackend ? 'Go 1.1.0' : 'Node reference'}.`);
   const suffix = Date.now().toString(36), password = 'Native-share-isolated-fixture';
   async function api(route: string, token?: string, body?: any) {
@@ -103,11 +106,11 @@ try {
   console.log('Legacy native and browser clients signed in to the isolated backend.');
   let decodedVoiceRms: number | undefined;
   if (goBackend) {
-    const outgoing = `Legacy Windows 1.0.7 → Go 1.1.0 ${suffix}`;
+    const outgoing = `Windows ${nativeVersion} → Go 1.1.0 ${suffix}`;
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill(outgoing);
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(receiver.getByTestId('message').filter({ hasText: outgoing })).toBeVisible();
-    const incoming = `Go web → legacy Windows سلام ${suffix}`;
+    const incoming = `Go web → Windows ${nativeVersion} سلام ${suffix}`;
     await receiver.getByRole('textbox', { name: 'Message', exact: true }).fill(incoming);
     await receiver.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(page.getByTestId('message').filter({ hasText: incoming })).toBeVisible();
@@ -185,7 +188,7 @@ try {
   await page.getByRole('button', { name: 'Stop sharing', exact: true }).click(); await expect(video).toHaveCount(0);
   const picker = await desktop.evaluate(() => (globalThis as any).__nativeShare);
   expect(picker.pickerCalls).toBe(3); expect(picker.selectedOwnedWindow).toBe(2);
-  await writeFile(`artifacts/evidence/${evidencePrefix}-sharing.json`, JSON.stringify({ version: nativeVersion, backendVersion: goBackend ? '1.1.0' : 'Node reference', backendRuntime: goBackend ? 'Go' : 'Node', executablePath, transport: 'local mesh', realGetDisplayMedia: true, realNativeWindowCapture: true, physicalMicrophoneAccess: false, pickerChoiceAutomated: true, capturedOnlyOwnedFixture: true, cancellationReleasedLease: true, retryAfterCancellation: true, stopRemovedReceiverVideoAndLease: true, restartDecodedVideo: true, ...(goBackend ? { legacyExecutableUnmodified: true, nativeExecutableSha256, nativeApplicationSha256, publishedVersionPayload: 'artifacts/v1.0.7/windows-avatars/win-unpacked', isolatedUserProfile: true, nativeLogin: true, nativeLoginSurvivedReload: true, bidirectionalEnglishPersianChat: true, nativeListenOnlyDecodedVoice: true, nativeDeafenSilencedVoice: true, decodedVoiceRms } : {}), decoded, picker, productionOrSfuTest: false }, null, 2));
+  await writeFile(`artifacts/evidence/${evidencePrefix}-sharing.json`, JSON.stringify({ version: nativeVersion, backendVersion: goBackend ? '1.1.0' : 'Node reference', backendRuntime: goBackend ? 'Go' : 'Node', executablePath, transport: 'local mesh', realGetDisplayMedia: true, realNativeWindowCapture: true, physicalMicrophoneAccess: false, pickerChoiceAutomated: true, capturedOnlyOwnedFixture: true, cancellationReleasedLease: true, retryAfterCancellation: true, stopRemovedReceiverVideoAndLease: true, restartDecodedVideo: true, ...(goBackend ? { nativeExecutableUnmodified: true, ...(nativeVersion === '1.0.7' ? { legacyExecutableUnmodified: true } : {}), nativeExecutableSha256, nativeApplicationSha256, publishedVersionPayload, isolatedUserProfile: true, nativeLogin: true, nativeLoginSurvivedReload: true, bidirectionalEnglishPersianChat: true, nativeListenOnlyDecodedVoice: true, nativeDeafenSilencedVoice: true, decodedVoiceRms } : {}), decoded, picker, productionOrSfuTest: false }, null, 2));
   console.log('Packaged Windows native window sharing decoded in a second client; cancel, retry, stop and restart passed.');
 } catch (error) {
   const failedPage = cleanupDesktop?.windows()[0];

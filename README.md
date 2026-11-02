@@ -1,10 +1,12 @@
-**Released web/backend 1.1.0:** Dorham now runs a standalone Go backend, preserving accounts, sessions, history and schema 11. Public HTTPS/WSS, English/Farsi TTS, database/file preservation and rollback checks pass. The published Windows 1.0.7 app passes chat, listen-only voice and real native sharing against Go; Android stays 1.0.6. Native download manifests and both 1024 MiB service limits are unchanged. See [release verification](docs/RELEASE-1.1.0.md).
+**Android and Windows 1.1.0:** native packages now include the current interface and retain their existing update identities. No new feature is added; additional work is reserved for 1.1.1. The Go backend remains 1.1.0. See [native release verification](docs/RELEASE-1.1.0-NATIVE.md).
+
+**Released web/backend 1.1.0:** Dorham now runs a standalone Go backend, preserving accounts, sessions, history and schema 11. Public HTTPS/WSS, English/Farsi TTS, database/file preservation and rollback checks pass. At the backend switch, the published Windows 1.0.7 app passed chat, listen-only voice and real native sharing against Go; Android stayed 1.0.6. That switch preserved native manifests and both 1024 MiB service limits. See [release verification](docs/RELEASE-1.1.0.md).
 
 **Released web 1.0.8:** switching chats keeps one message composer. The compact voice view uses the sidebar for participants and keeps active screen shares visible without expandable participant cards. Personal voice volume and Mute/Unmute for me are now in the participant right-click menu. Right-click your own user for 0–200% microphone gain; higher gain stays in Advanced audio. Backend and Windows stay 1.0.7; Android stays 1.0.6. No native builds or service restarts were performed. All 202 tests, lint, typechecking, web build and composer/decoded-audio browser checks pass; all 135 public web files match. The deployment preserves both 1024 MiB memory limits and all four native download manifests. See [1.0.8 verification](docs/RELEASE-1.0.8.md).
 
-**Current Android release: 1.0.6** — louder mute/unmute cues and Copy message text, with the existing signing identity. See [Android release checks](docs/RELEASE-1.0.6-ANDROID.md).
+**Previous Android release: 1.0.6** — louder mute/unmute cues and Copy message text, with the existing signing identity. See [Android release checks](docs/RELEASE-1.0.6-ANDROID.md).
 
-**Current Windows release: 1.0.6** — more transparent voice overlay, microphone/headphone status icons and a dedicated Settings → Game overlay tab. Web remains 1.0.5; backend remains 1.0.4. See [release details](docs/RELEASE-1.0.6-WINDOWS.md).
+**Previous Windows release: 1.0.6** — more transparent voice overlay, microphone/headphone status icons and a dedicated Settings → Game overlay tab. Web remains 1.0.5; backend remains 1.0.4. See [release details](docs/RELEASE-1.0.6-WINDOWS.md).
 
 **Previous release: web and Windows 1.0.5** — louder mute/unmute feedback and an optional native Windows voice overlay for windowed/borderless games. Android remains 1.0.4. See [release verification](docs/RELEASE-1.0.5.md).
 
