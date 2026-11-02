@@ -85,6 +85,7 @@ func newCoreFixture(t *testing.T) *coreFixture {
 	t.Helper()
 	c := Config{DataDir: t.TempDir(), PublicURL: "https://dorham.example", MaxDatabaseMiB: 32, MaxUsers: 100, MaxOnline: 20, MaxVoice: 16, StandardShareSlots: 3, ScreenMaxFrameRate: 30, ScreenMaxBitrate: 1500000, RetentionDays: 90, MaxMessages: 50000, MediaTransport: "mesh", RegistrationOpen: true, GuestsEnabled: true}
 	db := OpenDB(c)
+	db.EnableRuntimeStorage()
 	t.Cleanup(db.Close)
 	s := NewService(db, c)
 	f := &coreFixture{s: s, db: db, users: map[string]string{}}

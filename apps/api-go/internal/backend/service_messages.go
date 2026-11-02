@@ -133,9 +133,18 @@ func (s *Service) ReplaceMentions(tx *DB, id, conversation, author, content stri
 func (s *Service) MessageView(tx *DB, id string) M {
 	m := tx.One("SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id=?", id)
 	Check(m != nil, 404, "NOT_FOUND", "Message not found.")
+	mentions, attachments := []M{}, []M{}
+	if !B(m["deleted"]) {
+		mentions = tx.All("SELECT mm.user_id,mm.username,u.display_name FROM message_mentions mm JOIN users u ON u.id=mm.user_id WHERE mm.message_id=?", id)
+		attachments = tx.All("SELECT * FROM attachments WHERE message_id=?", id)
+	}
+	return messageViewRows(m, tx.All("SELECT emoji,user_id FROM reactions WHERE message_id=?", id), mentions, attachments)
+}
+
+func messageViewRows(m M, reactionRows, mentionRows, attachmentRows []M) M {
 	reactions := []M{}
 	indices := map[string]int{}
-	for _, r := range tx.All("SELECT emoji,user_id FROM reactions WHERE message_id=?", id) {
+	for _, r := range reactionRows {
 		emoji := S(r["emoji"])
 		index, ok := indices[emoji]
 		if !ok {
@@ -152,10 +161,10 @@ func (s *Service) MessageView(tx *DB, id string) M {
 	if deleted {
 		content = ""
 	} else {
-		for _, u := range tx.All("SELECT mm.user_id,mm.username,u.display_name FROM message_mentions mm JOIN users u ON u.id=mm.user_id WHERE mm.message_id=?", id) {
+		for _, u := range mentionRows {
 			mentions = append(mentions, M{"userId": u["user_id"], "username": u["username"], "displayName": u["display_name"]})
 		}
-		for _, a := range tx.All("SELECT * FROM attachments WHERE message_id=?", id) {
+		for _, a := range attachmentRows {
 			attachments = append(attachments, M{"id": a["id"], "name": a["name"], "size": N(a["size"]), "expiresAt": N(a["expires_at"]), "available": S(a["state"]) == "ready" && N(a["expires_at"]) > Now()})
 		}
 	}
@@ -164,6 +173,42 @@ func (s *Service) MessageView(tx *DB, id string) M {
 		edited = N(m["edited_at"])
 	}
 	return M{"id": m["id"], "conversationId": m["conversation_id"], "sequence": N(m["sequence"]), "author": PublicUser(Merge(m, M{"id": m["user_id"]})), "content": content, "replyTo": m["reply_to"], "createdAt": N(m["created_at"]), "editedAt": edited, "deleted": deleted, "reactions": reactions, "mentions": mentions, "attachments": attachments}
+}
+
+// Assemble one page using four bounded SELECTs rather than four per message.
+// Authorization and the page itself remain in the caller's transaction.
+func (s *Service) MessageViews(tx *DB, ids []string) []M {
+	if len(ids) == 0 {
+		return []M{}
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	in := servicePlaceholders(len(ids))
+	rows := tx.All("SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id IN ("+in+")", args...)
+	messages := map[string]M{}
+	for _, m := range rows {
+		messages[S(m["id"])] = m
+	}
+	group := func(rows []M) map[string][]M {
+		out := map[string][]M{}
+		for _, r := range rows {
+			id := S(r["message_id"])
+			out[id] = append(out[id], r)
+		}
+		return out
+	}
+	reactions := group(tx.All("SELECT message_id,emoji,user_id FROM reactions WHERE message_id IN ("+in+") ORDER BY message_id,user_id,emoji", args...))
+	mentions := group(tx.All("SELECT mm.message_id,mm.user_id,mm.username,u.display_name FROM message_mentions mm JOIN users u ON u.id=mm.user_id WHERE mm.message_id IN ("+in+") ORDER BY mm.message_id,mm.user_id", args...))
+	attachments := group(tx.All("SELECT * FROM attachments WHERE message_id IN ("+in+")", args...))
+	out := make([]M, 0, len(ids))
+	for _, id := range ids {
+		m := messages[id]
+		Check(m != nil, 404, "NOT_FOUND", "Message not found.")
+		out = append(out, messageViewRows(m, reactions[id], mentions[id], attachments[id]))
+	}
+	return out
 }
 func (s *Service) Event(tx *DB, conversation, kind string, payload any) M {
 	tx.Run("UPDATE conversations SET sequence=sequence+1 WHERE id=?", conversation)
@@ -298,18 +343,18 @@ func (s *Service) History(uid, conversation string, before, after *int64) M {
 			limit = *before
 		}
 		rows := tx.All("SELECT id FROM messages WHERE conversation_id=? AND sequence<? ORDER BY sequence DESC LIMIT 50", conversation, limit)
-		messages := []M{}
+		ids := []string{}
 		for i := len(rows) - 1; i >= 0; i-- {
-			messages = append(messages, s.MessageView(tx, S(rows[i]["id"])))
+			ids = append(ids, S(rows[i]["id"]))
 		}
+		messages := s.MessageViews(tx, ids)
 		return M{"messages": messages, "sequence": sequence, "hasMore": len(rows) == 50}
 	}))
 }
 func (s *Service) Read(uid, rid, conversation string, sequence int64) M {
 	return serviceResult(s.Mutate(uid, rid, "conversation.read", M{"conversationId": conversation, "sequence": sequence}, func(tx *DB) any {
 		cv := s.Conversation(tx, uid, conversation)
-		old := tx.One("SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?", conversation, uid)
-		tx.Run("INSERT INTO read_cursors(conversation_id,user_id,sequence) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET sequence=excluded.sequence", conversation, uid, max(N(old["sequence"]), min(sequence, N(cv["sequence"]))))
+		tx.Run("INSERT INTO read_cursors(conversation_id,user_id,sequence) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET sequence=excluded.sequence WHERE read_cursors.sequence<excluded.sequence", conversation, uid, min(sequence, N(cv["sequence"])))
 		return M{"success": true}
 	}))
 }

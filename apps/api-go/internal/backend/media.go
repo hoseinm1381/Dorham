@@ -29,6 +29,7 @@ type mediaTicket struct {
 type mediaChecked struct {
 	Key, MIME string
 	Expires   int64
+	Info      os.FileInfo
 }
 type Media struct {
 	a                                  *App
@@ -41,6 +42,9 @@ type Media struct {
 	sweeping                           bool
 	scan                               *os.File
 	scanMu                             sync.Mutex
+	nextScan                           int64
+	verifyMu                           sync.Mutex
+	verifiedReads, verificationHits    int64
 	images                             *mediaImages
 	speech                             *mediaSpeech
 	sfuMu                              sync.Mutex
@@ -89,10 +93,10 @@ func (m *Media) Close() {
 		m.scan = nil
 	}
 }
-func (m *Media) Cleanup() { m.cleanupAttachments(0); m.speech.cleanup() }
+func (m *Media) Cleanup() { m.cleanupAttachments(0, true); m.speech.cleanup() }
 func (m *Media) Metrics() M {
 	s := M{"passes": atomic.LoadInt64(&m.sfuPasses), "permissionUpdates": atomic.LoadInt64(&m.sfuUpdates), "removals": atomic.LoadInt64(&m.sfuRemovals)}
-	return M{"tts": m.speech.metrics(), "images": m.images.metrics(), "sfuControl": s}
+	return M{"tts": m.speech.metrics(), "images": m.images.metrics(), "sfuControl": s,"attachmentIO":M{"fullVerifications":atomic.LoadInt64(&m.verifiedReads),"verificationCacheHits":atomic.LoadInt64(&m.verificationHits)}}
 }
 func mediaID(v string) string {
 	Check(mediaUUID.MatchString(v), 400, "VALIDATION", "Invalid identifier.")
@@ -121,6 +125,9 @@ func mediaHashFile(name string) (string, []byte, error) {
 		return "", nil, e
 	}
 	defer f.Close()
+	return mediaHashReader(f)
+}
+func mediaHashReader(f *os.File) (string, []byte, error) {
 	h := sha256.New()
 	prefix := make([]byte, 512)
 	n, e := io.ReadFull(f, prefix)

@@ -54,9 +54,20 @@ func (s *Service) Bootstrap(uid string) M {
 		}
 		unread := M{}
 		for _, id := range conversations {
-			cv := tx.One("SELECT MAX(sequence) AS sequence FROM messages WHERE conversation_id=? AND deleted=0", id)
-			read := tx.One("SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?", id, uid)
-			unread[id] = M{"sequence": N(cv["sequence"]), "readSequence": N(read["sequence"])}
+			unread[id] = M{"sequence": int64(0), "readSequence": int64(0)}
+		}
+		if len(conversations) > 0 {
+			args := make([]any, len(conversations))
+			for i, id := range conversations {
+				args[i] = id
+			}
+			in := servicePlaceholders(len(args))
+			for _, row := range tx.All("SELECT conversation_id,MAX(sequence) AS sequence FROM messages WHERE deleted=0 AND conversation_id IN ("+in+") GROUP BY conversation_id", args...) {
+				Obj(unread[S(row["conversation_id"])])["sequence"] = N(row["sequence"])
+			}
+			for _, row := range tx.All("SELECT conversation_id,sequence FROM read_cursors WHERE conversation_id IN ("+in+") AND user_id=?", append(args, uid)...) {
+				Obj(unread[S(row["conversation_id"])])["readSequence"] = N(row["sequence"])
+			}
 		}
 		users := []M{}
 		for _, u := range tx.All("SELECT * FROM users ORDER BY username LIMIT 250") {

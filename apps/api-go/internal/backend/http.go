@@ -76,6 +76,7 @@ func NewApp(c Config) *App {
 		tx.Run("UPDATE coordinators SET user_id=NULL,epoch=epoch+1,expires_at=0")
 		return nil
 	})
+	a.DB.EnableRuntimeStorage()
 	a.Media = NewMedia(a)
 	a.Games = NewGames(a)
 	a.Service.Notify = a.Hub.Notify
@@ -269,13 +270,19 @@ func (a *App) resolveSession(raw string) (M, M) {
 	if raw == "" || len(raw) > 512 {
 		return nil, nil
 	}
-	s := a.DB.One("SELECT * FROM sessions WHERE access_hash=? AND access_expires>=? AND expires_at>=?", Hash(raw), Now(), Now())
-	if s == nil {
-		return nil, nil
+	columns := []string{"id", "user_id", "access_hash", "refresh_hash", "csrf", "native", "access_expires", "expires_at", "created_at", "device_name", "last_seen"}
+	selects := []string{"u.*"}
+	for _, col := range columns {
+		selects = append(selects, "s."+col+" AS session_"+col)
 	}
-	u := a.DB.One("SELECT * FROM users WHERE id=? AND banned=0", s["user_id"])
+	u := a.DB.One("SELECT "+strings.Join(selects, ",")+" FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.access_hash=? AND s.access_expires>=? AND s.expires_at>=? AND u.banned=0", Hash(raw), Now(), Now())
 	if u == nil {
 		return nil, nil
+	}
+	s := M{}
+	for _, col := range columns {
+		s[col] = u["session_"+col]
+		delete(u, "session_"+col)
 	}
 	return u, s
 }
@@ -358,6 +365,7 @@ func (a *App) maintenance() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	next := time.Now().Add(5 * time.Second)
+	nextRetention := time.Time{}
 	for {
 		select {
 		case <-a.stop:
@@ -373,8 +381,16 @@ func (a *App) maintenance() {
 						log.Printf("maintenance failed: %T", v)
 					}
 				}()
-				a.Media.Cleanup()
-				a.Service.Cleanup()
+				retention := !started.Before(nextRetention)
+				a.DB.TunePageCache()
+				a.Media.speech.cleanup()
+				if retention {
+					a.Media.cleanupAttachments(0)
+				}
+				a.Service.Cleanup(retention)
+				if retention {
+					nextRetention = started.Add(time.Minute)
+				}
 				a.Hub.DisconnectInvalid()
 				a.Hub.Notify("voice:changed", M{})
 			}()
@@ -392,7 +408,9 @@ func (a *App) metrics() M {
 		}
 	}
 	media := a.Media.Metrics()
-	return M{"uptimeSeconds": time.Since(a.started).Seconds(), "runtime": "go", "version": "1.1.0", "memory": M{"rss": processRSS(), "heapUsed": m.HeapAlloc, "heapTotal": m.HeapSys, "external": m.Sys - m.HeapSys, "arrayBuffers": 0}, "go": M{"goroutines": runtime.NumGoroutine(), "gcCycles": m.NumGC}, "tts": media["tts"], "images": media["images"], "sfuControl": media["sfuControl"], "cpu": processCPU(), "eventLoop": M{"meanMs": 0, "p95Ms": 0, "maxMs": 0, "applicable": false}, "realtime": a.Hub.Metrics(), "dataBytes": disk, "storage": a.storageStatus(), "attachments": a.Media.Storage(), "connectedUsers": len(a.Hub.Users()), "accounts": a.DB.One("SELECT COUNT(*) AS count FROM users")["count"], "messages": a.DB.One("SELECT COUNT(*) AS count FROM messages")["count"], "shares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases")["count"]}
+	mediaStorage := a.Media.Storage()
+	mediaStorage["io"] = media["attachmentIO"]
+	return M{"uptimeSeconds": time.Since(a.started).Seconds(), "runtime": "go", "version": "1.1.0", "databaseIO": a.DB.Metrics(), "memory": M{"rss": processRSS(), "heapUsed": m.HeapAlloc, "heapTotal": m.HeapSys, "external": m.Sys - m.HeapSys, "arrayBuffers": 0}, "go": M{"goroutines": runtime.NumGoroutine(), "gcCycles": m.NumGC}, "tts": media["tts"], "images": media["images"], "sfuControl": media["sfuControl"], "cpu": processCPU(), "eventLoop": M{"meanMs": 0, "p95Ms": 0, "maxMs": 0, "applicable": false}, "realtime": a.Hub.Metrics(), "dataBytes": disk, "storage": a.storageStatus(), "attachments": mediaStorage, "connectedUsers": len(a.Hub.Users()), "accounts": a.DB.One("SELECT COUNT(*) AS count FROM users")["count"], "messages": a.DB.One("SELECT COUNT(*) AS count FROM messages")["count"], "shares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases")["count"]}
 }
 
 var _ = fmt.Sprint

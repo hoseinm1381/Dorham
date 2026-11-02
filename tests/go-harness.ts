@@ -17,7 +17,7 @@ export async function createGoApp(c: ReturnType<typeof config>) {
   const env: NodeJS.ProcessEnv={...process.env,NODE_ENV:'test',DORHAM_FIXTURE_NONCE:nonce};
   for(const [key,value] of Object.entries(c)){ if(keys[key])env[keys[key]]=Array.isArray(value)?value.join(','):String(value); }
   env.SERVER_PORT='3001'; env.DORHAM_FIXTURE_PORT='0';
-  const child=spawn(path.resolve('artifacts/v1.1.0/dorham-fixture.exe'),[],{env,windowsHide:true,stdio:['ignore','pipe','pipe']});
+  const child=spawn(path.resolve(process.env.DORHAM_GO_FIXTURE_BINARY || 'artifacts/v1.1.0/dorham-fixture.exe'),[],{env,windowsHide:true,stdio:['ignore','pipe','pipe']});
   let output='',errors=''; child.stderr.on('data',data=>{errors+=String(data)});
   const url=await new Promise<string>((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('Go fixture startup timeout '+errors)),15000);child.once('exit',code=>{clearTimeout(timeout);reject(Error(`Go fixture exited ${code}: ${errors}`))});child.stdout.on('data',data=>{output+=String(data);const line=output.split('\n').find(line=>line.startsWith('{'));if(line){try{const result=JSON.parse(line);if(result.fixtureURL){clearTimeout(timeout);resolve(result.fixtureURL)}}catch{/* incomplete stdout */}}});});
   const rawRpc=async(op:string,body:Record<string,unknown>={})=>{const response=await fetch(url+'/__fixture/'+nonce,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op,...body})});const result=await response.json();if(!response.ok)throw Error(JSON.stringify(result));return result;};

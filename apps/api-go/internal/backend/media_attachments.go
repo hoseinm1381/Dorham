@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -352,7 +353,14 @@ func (m *Media) serveAttachment(r *Request, preview bool) any {
 	defer release()
 	row := m.available(r.UID(), id)
 	filename := m.file(id, false)
-	info, e := os.Stat(filename)
+	f, e := os.Open(filename)
+	if e == nil {
+		defer f.Close()
+	}
+	var info os.FileInfo
+	if e == nil {
+		info, e = f.Stat()
+	}
 	invalid := func() {
 		if !preview {
 			m.a.DB.Run("UPDATE attachments SET state='unavailable' WHERE id=?", id)
@@ -362,35 +370,51 @@ func (m *Media) serveAttachment(r *Request, preview bool) any {
 	if e != nil || !info.Mode().IsRegular() || info.Size() != Num(row, "size") {
 		invalid()
 	}
-	mime := ""
-	key := fmt.Sprintf("%s/%d/%d", Str(row, "digest"), info.Size(), info.ModTime().UnixNano())
-	if preview {
-		m.mu.Lock()
-		cached := m.checked[id]
-		m.mu.Unlock()
-		if cached.Key == key && cached.Expires > Now() {
-			mime = cached.MIME
+	mime := func() string {
+		mime := ""
+		key := fmt.Sprintf("%s/%d/%d/%s", Str(row, "digest"), info.Size(), info.ModTime().UnixNano(), mediaFileVersion(info))
+		m.verifyMu.Lock()
+		defer m.verifyMu.Unlock()
+		{
+			m.mu.Lock()
+			cached := m.checked[id]
+			m.mu.Unlock()
+			if cached.Key == key && cached.Expires > Now() && cached.Info != nil && os.SameFile(cached.Info, info) && mediaFileVersion(info) != "" {
+				mime = cached.MIME
+				atomic.AddInt64(&m.verificationHits,1)
+			}
 		}
-	}
-	if mime == "" {
-		digest, prefix, e := mediaHashFile(filename)
-		if e != nil || digest == "" || digest != Str(row, "digest") {
-			invalid()
+		if mime == "" {
+			digest, prefix, e := mediaHashReader(f)
+			atomic.AddInt64(&m.verifiedReads,1)
+			if e != nil || digest == "" || digest != Str(row, "digest") {
+				invalid()
+			}
+			mime = mediaMIME(Str(row, "name"), prefix)
+			if mime == "" {
+				mime = "application/octet-stream"
+			}
+			after, err := f.Stat()
+			if err != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || mediaFileVersion(after) != mediaFileVersion(info) {
+				invalid()
+			}
+			{
+				m.mu.Lock()
+				if len(m.checked) >= 64 {
+					for k := range m.checked {
+						delete(m.checked, k)
+						break
+					}
+				}
+				m.checked[id] = mediaChecked{Key: key, MIME: mime, Expires: Now() + 60000, Info: info}
+				m.mu.Unlock()
+			}
 		}
 		if preview {
-			mime = mediaMIME(Str(row, "name"), prefix)
-			Check(mime != "", 415, "PREVIEW_UNSUPPORTED", "This file cannot be previewed. Download it to view.")
-			m.mu.Lock()
-			if len(m.checked) >= 64 {
-				for k := range m.checked {
-					delete(m.checked, k)
-					break
-				}
-			}
-			m.checked[id] = mediaChecked{key, mime, Now() + 60000}
-			m.mu.Unlock()
+			Check(mime != "application/octet-stream", 415, "PREVIEW_UNSUPPORTED", "This file cannot be previewed. Download it to view.")
 		}
-	}
+		return mime
+	}()
 	r.Header("X-Content-Type-Options", "nosniff")
 	r.Header("Content-Security-Policy", "sandbox; default-src 'none'")
 	start, end, present := int64(0), info.Size()-1, false
@@ -415,9 +439,6 @@ func (m *Media) serveAttachment(r *Request, preview bool) any {
 		encoded = strings.ReplaceAll(encoded, ")", "%29")
 		r.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"download%s\"; filename*=UTF-8''%s", filepath.Ext(Str(row, "name")), encoded))
 	}
-	f, e := os.Open(filename)
-	mediaMust(e)
-	defer f.Close()
 	r.Header("Content-Length", strconv.FormatInt(end-start+1, 10))
 	if present {
 		r.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, info.Size()))
@@ -430,7 +451,7 @@ func (m *Media) serveAttachment(r *Request, preview bool) any {
 	}
 	return nil
 }
-func (m *Media) cleanupAttachments(required int64) {
+func (m *Media) cleanupAttachments(required int64, forceScan ...bool) {
 	m.mu.Lock()
 	if m.sweeping {
 		m.mu.Unlock()
@@ -475,8 +496,12 @@ func (m *Media) cleanupAttachments(required int64) {
 		}
 	}
 	// A bounded cursor prevents directory reconciliation from retaining all names.
+	a.DB.Run("DELETE FROM attachment_usage WHERE id IN (SELECT id FROM attachment_usage WHERE created_at<? LIMIT 1000)", Now()-86400000)
 	m.scanMu.Lock()
 	defer m.scanMu.Unlock()
+	if Now() < m.nextScan && (len(forceScan)==0 || !forceScan[0]) {
+		return
+	}
 	if m.scan == nil {
 		m.scan, _ = os.Open(a.C.AttachmentDir)
 	}
@@ -502,7 +527,7 @@ func (m *Media) cleanupAttachments(required int64) {
 		if e == io.EOF || len(entries) < 100 {
 			m.scan.Close()
 			m.scan = nil
+			m.nextScan = Now() + 5*60000
 		}
 	}
-	a.DB.Run("DELETE FROM attachment_usage WHERE id IN (SELECT id FROM attachment_usage WHERE created_at<? LIMIT 1000)", Now()-86400000)
 }

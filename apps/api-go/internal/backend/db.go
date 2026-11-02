@@ -16,6 +16,8 @@ import (
 
 type DB struct {
 	raw            *sql.DB
+	conn           *sql.Conn
+	stats          *dbStats
 	tx             *sql.Tx
 	mu             *sync.Mutex
 	Dialect        string
@@ -49,7 +51,7 @@ func (d *DB) checkTransaction() {
 func (d *DB) Snapshot() *DB {
 	Check(d.tx != nil, 500, "INTERNAL", "Read snapshots require a transaction")
 	d.checkTransaction()
-	return &DB{raw: d.raw, tx: d.tx, mu: d.mu, Dialect: d.Dialect, memo: map[string][]M{}, txState: d.txState, memoGeneration: d.txState.generation.Load()}
+	return &DB{raw: d.raw, tx: d.tx, mu: d.mu, stats: d.stats, Dialect: d.Dialect, memo: map[string][]M{}, txState: d.txState, memoGeneration: d.txState.generation.Load()}
 }
 func copyRows(rows []M) []M {
 	out := make([]M, len(rows))
@@ -86,7 +88,7 @@ func OpenDB(c Config) *DB {
 	}
 	raw.SetMaxOpenConns(1)
 	raw.SetMaxIdleConns(1)
-	d := &DB{raw: raw, mu: &sync.Mutex{}, Dialect: dialect}
+	d := &DB{raw: raw, mu: &sync.Mutex{}, stats: &dbStats{}, Dialect: dialect}
 	if dialect == "sqlite" {
 		for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON", "PRAGMA busy_timeout=5000", "PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_size_limit=16777216", "PRAGMA wal_autocheckpoint=1000"} {
 			d.Run(q)
@@ -141,7 +143,11 @@ func (d *DB) lock() func() {
 	if d.tx != nil {
 		return func() {}
 	}
+	started := time.Now()
 	d.mu.Lock()
+	if d.stats != nil {
+		d.stats.waitNanos.Add(uint64(time.Since(started)))
+	}
 	return d.mu.Unlock
 }
 func (d *DB) All(q string, args ...any) []M {
@@ -162,10 +168,19 @@ func (d *DB) All(q string, args ...any) []M {
 		}
 	}
 	q = d.query(q)
+	started := time.Now()
+	defer func() {
+		if d.stats != nil {
+			d.stats.reads.Add(1)
+			d.stats.queryNanos.Add(uint64(time.Since(started)))
+		}
+	}()
 	var rows *sql.Rows
 	var e error
 	if d.tx != nil {
 		rows, e = d.tx.Query(q, args...)
+	} else if d.conn != nil {
+		rows, e = d.conn.QueryContext(context.Background(), q, args...)
 	} else {
 		rows, e = d.raw.Query(q, args...)
 	}
@@ -218,12 +233,21 @@ func (d *DB) Run(q string, args ...any) {
 	unlock := d.lock()
 	defer unlock()
 	d.checkTransaction()
+	started := time.Now()
+	defer func() {
+		if d.stats != nil {
+			d.stats.writes.Add(1)
+			d.stats.queryNanos.Add(uint64(time.Since(started)))
+		}
+	}()
 	if d.txState != nil {
 		d.txState.generation.Add(1)
 	}
 	var e error
 	if d.tx != nil {
 		_, e = d.tx.Exec(d.query(q), args...)
+	} else if d.conn != nil {
+		_, e = d.conn.ExecContext(context.Background(), d.query(q), args...)
 	} else {
 		_, e = d.raw.Exec(d.query(q), args...)
 	}
@@ -249,22 +273,33 @@ func (d *DB) Tx(fn func(*DB) any) (result any) {
 		d.checkTransaction()
 		return fn(d)
 	}
+	queued := time.Now()
 	d.mu.Lock()
+	if d.stats != nil {
+		d.stats.waitNanos.Add(uint64(time.Since(queued)))
+	}
 	defer d.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	tx, e := d.raw.BeginTx(ctx, nil)
+	tx, e := d.beginTx(ctx)
 	if e != nil {
 		panic(e)
 	}
 	defer tx.Rollback()
 	state := &transactionState{ctx: ctx}
 	defer state.done.Store(true)
-	child := &DB{raw: d.raw, tx: tx, mu: d.mu, Dialect: d.Dialect, txState: state}
+	child := &DB{raw: d.raw, tx: tx, mu: d.mu, stats: d.stats, Dialect: d.Dialect, txState: state}
 	if d.Dialect == "postgres" {
 		child.One("SELECT id FROM global_locks WHERE id=1 FOR UPDATE")
 	}
 	result = fn(child)
+	started := time.Now()
+	defer func() {
+		if d.stats != nil {
+			d.stats.commits.Add(1)
+			d.stats.commitNanos.Add(uint64(time.Since(started)))
+		}
+	}()
 	if e = tx.Commit(); e != nil {
 		panic(e)
 	}
@@ -274,9 +309,21 @@ func (d *DB) Close() {
 	if d.Dialect == "sqlite" {
 		d.Run("PRAGMA wal_checkpoint(TRUNCATE)")
 	}
+	if d.conn != nil {
+		if e := d.conn.Close(); e != nil {
+			panic(e)
+		}
+	}
 	if e := d.raw.Close(); e != nil {
 		panic(e)
 	}
+}
+
+func (d *DB) beginTx(ctx context.Context) (*sql.Tx, error) {
+	if d.conn != nil {
+		return d.conn.BeginTx(ctx, nil)
+	}
+	return d.raw.BeginTx(ctx, nil)
 }
 func (d *DB) Backup(destination string) {
 	Check(d.Dialect == "sqlite", 400, "BACKUP", "PostgreSQL backups require pg_dump")

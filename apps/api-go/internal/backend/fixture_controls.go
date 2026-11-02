@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -125,7 +126,7 @@ func (c *FixtureControls) Handle(b M) any {
 		defer c.mu.Unlock()
 		Check(c.tx == nil, 409, "FIXTURE_TX", "Fixture transaction already open")
 		c.a.DB.mu.Lock()
-		tx, e := c.a.DB.raw.Begin()
+		tx, e := c.a.DB.beginTx(context.Background())
 		if e != nil {
 			c.a.DB.mu.Unlock()
 			panic(e)

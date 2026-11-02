@@ -364,7 +364,9 @@ func TestIntegrationOfflineBackupPreservesRowsAndHistoricalSchema(t *testing.T) 
 	tables := []string{"schema_migrations", "users", "sessions", "voice_members", "coordinators", "share_leases", "game_sessions"}
 	want := map[string]string{}
 	for _, table := range tables {
-		want[table] = JSON(a.DB.All("SELECT * FROM " + table))
+		// Runtime voice rows are intentionally TEMP-only; offline backup must
+		// preserve the durable main schema, without synthesizing runtime rows.
+		want[table] = JSON(a.DB.All("SELECT * FROM main." + table))
 	}
 	c := a.C
 	activeDest := filepath.Join(t.TempDir(), "must-not-run-while-active.sqlite")

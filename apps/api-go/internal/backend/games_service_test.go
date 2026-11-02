@@ -9,6 +9,7 @@ func gamesTestFixture(t *testing.T) (*Games, *int64, map[string]bool) {
 	t.Helper()
 	c := Config{DataDir: t.TempDir(), MaxDatabaseMiB: 32, MaxUsers: 100, MaxOnline: 20, MaxVoice: 16, GuestsEnabled: true}
 	db := OpenDB(c)
+	db.EnableRuntimeStorage()
 	a := &App{C: c, DB: db}
 	a.Service = NewService(db, c)
 	a.Hub = &Hub{a: a, peers: map[string]*peer{}}

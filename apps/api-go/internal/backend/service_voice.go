@@ -389,7 +389,7 @@ func (s *Service) MoveVoice(uid, rid, from, targetID, to string) M {
 	s.Notify("voice:changed", M{})
 	return M{"success": true}
 }
-func (s *Service) Cleanup() {
+func (s *Service) Cleanup(retention ...bool) {
 	expired := false
 	s.DB.Tx(func(tx *DB) any {
 		now := Now()
@@ -397,13 +397,15 @@ func (s *Service) Cleanup() {
 			tx.Run("DELETE FROM server_timeouts WHERE expires_at<=?", now)
 			expired = true
 		}
-		tx.Run("DELETE FROM recovery_attempts WHERE expires_at<?", now)
-		tx.Run("DELETE FROM sessions WHERE expires_at<?", now)
-		tx.Run("DELETE FROM used_refresh WHERE expires_at<?", now)
-		tx.Run("DELETE FROM invites WHERE expires_at<? OR remaining<1", now)
-		tx.Run("DELETE FROM mutations WHERE created_at<?", now-86400000)
-		tx.Run("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE created_at<? ORDER BY created_at LIMIT 1000)", now-7*86400000)
-		tx.Run("DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE created_at<? ORDER BY created_at LIMIT 500)", now-int64(s.C.RetentionDays)*86400000)
+		if len(retention) == 0 || retention[0] {
+			tx.Run("DELETE FROM recovery_attempts WHERE expires_at<?", now)
+			tx.Run("DELETE FROM sessions WHERE expires_at<?", now)
+			tx.Run("DELETE FROM used_refresh WHERE expires_at<?", now)
+			tx.Run("DELETE FROM invites WHERE expires_at<? OR remaining<1", now)
+			tx.Run("DELETE FROM mutations WHERE created_at<?", now-86400000)
+			tx.Run("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE created_at<? ORDER BY created_at LIMIT 1000)", now-7*86400000)
+			tx.Run("DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE created_at<? ORDER BY created_at LIMIT 500)", now-int64(s.C.RetentionDays)*86400000)
+		}
 		s.ExpireVoice(tx, now)
 		for _, ch := range tx.All("SELECT channel_id AS id FROM voice_members UNION SELECT channel_id AS id FROM coordinators WHERE user_id IS NOT NULL") {
 			s.MaintainRoom(tx, S(ch["id"]), false)

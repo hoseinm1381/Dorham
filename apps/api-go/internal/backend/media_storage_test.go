@@ -15,6 +15,7 @@ func mediaTestStore(t *testing.T) (*Media, string, []byte) {
 	dir := t.TempDir()
 	c := Config{DataDir: dir, AttachmentDir: filepath.Join(dir, "attachments"), MaxDatabaseMiB: 16, MaxAvatarsMiB: 2, AttachmentBudgetMiB: 4, UploadReserveMiB: 0, UploadConcurrency: 2, TTSIdleSeconds: 180, TTSAudioCacheMiB: 1}
 	db := OpenDB(c)
+	db.EnableRuntimeStorage()
 	a := &App{C: c, DB: db}
 	a.Service = NewService(db, c)
 	m := NewMedia(a)
