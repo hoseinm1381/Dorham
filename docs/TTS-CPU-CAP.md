@@ -1,6 +1,6 @@
 # TTS CPU cap operations
 
-Status: isolated Linux quota, bilingual worker, retirement and routing checks passed; production deployment is pending. The production service is not yet capped. The host also has a separate intermittent storage/readiness incident documented in SERVER-IO-2026-11-02.md.
+Status: deployed on 2026-11-02 and verified in production. TTS, its descendants and cold starts share the 30% total-host CPU cap; the API and other services are uncapped. Both existing 1024 MiB application memory limits are preserved. The host also has a separate intermittent storage/readiness incident documented in SERVER-IO-2026-11-02.md.
 
 ## Scope and accounting
 
@@ -47,3 +47,5 @@ The five-process stress test averaged 29.87% of one host CPU over 18.42 seconds.
 Real Socket.IO routing checks verified English cold/warm and Farsi under the default 180-second idle setting, same-room delivery, outsider denial and epoch invalidation. An intermittent host-storage episode disrupted a later combined-run phase; it is preserved as failed evidence rather than hidden. A focused clean retry of the accelerated idle/restart phase passed both languages, both loading events, all audience checks, all 34 heartbeats (maximum 131.7 ms) and all eight public readiness probes. No production accounts or configuration were modified by those isolated tests.
 
 Local regression checks passed 104 Go tests and 211 Vitest tests, TypeScript checking, focused lint, the web build, and a real two-tab browser check against Go. Native installers were not rebuilt.
+
+Production verification used a temporary private room and two temporary test accounts, all removed afterward. Real English and Farsi speech measured 29.75% and 29.86% total-host CPU. All 30 voice heartbeats succeeded, with a maximum of 37.8 ms. The actual service ran with `Delegate=cpu`, `DelegateSubgroup=app`, `TTS_CPU_PERCENT=30`, a 300-second synthesis deadline, parent/API `cpu.max=max`, and TTS `cpu.max=3000 10000` with burst zero. Public HTML matched the tested payload. Database integrity, original account preservation, other service identities/resource settings and all four native manifest hashes passed. The automatic rollback timer was stopped after these checks; private rollback artifacts remain available. No native installers were rebuilt or republished.
