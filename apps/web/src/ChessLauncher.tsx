@@ -13,7 +13,7 @@ class GameLoadBoundary extends Component<{ children: ReactNode; close: () => voi
   static getDerivedStateFromError() { return { failed: true }; }
   render() { return this.state.failed ? <div role="alert" className="games-load-error"><p>{tr('Games could not load. Close this window and try again, or reload Dorham.')}</p><button onClick={this.props.close}>{tr('Back to chat')}</button><button onClick={() => location.reload()}>{tr('Reload Dorham')}</button></div> : this.props.children; }
 }
-export function GamesProvider({ me, room, serverId, socket, children }: { me: PublicUser; room: VoiceRoom | null; serverId: string | null; socket: Socket | null; children: ReactNode }) {
+export function GamesProvider({ me, room, serverId, socket, gameAudioSilenced, children }: { me: PublicUser; room: VoiceRoom | null; serverId: string | null; socket: Socket | null; gameAudioSilenced: boolean; children: ReactNode }) {
   const [games, setGames] = useState<VoiceGame[]>([]), [arcade,setArcade]=useState<GameSummary[]>([]), [error, setError] = useState(false), [opened, setOpened] = useState<{ id?: string;kind?:GameKind|'chess' } | null>(null), [connected, setConnected] = useState(Boolean(socket?.connected));
   const returnFocus=useRef<HTMLElement|null>(null);
   const close=()=>{setOpened(null);requestAnimationFrame(()=>returnFocus.current?.focus());};
@@ -30,7 +30,7 @@ export function GamesProvider({ me, room, serverId, socket, children }: { me: Pu
     setConnected(Boolean(socket?.connected)); socket?.on('chess:changed', change); socket?.on('game:changed',change); socket?.on('connect', connect); socket?.on('disconnect', disconnect);
     return () => { socket?.off('chess:changed', change);socket?.off('game:changed',change); socket?.off('connect', connect); socket?.off('disconnect', disconnect); };
   }, [socket, channelId, refresh]);
-  return <Games.Provider value={{ room, games, arcade, error, connected, launch: (id,kind) => {returnFocus.current=document.activeElement as HTMLElement;setOpened(id ? { id,kind:kind||'chess' } : {});}, refresh: () => { void refresh(); } }}>{children}{opened && <GameLoadBoundary close={close}><Suspense fallback={<div className="games-load-error" role="status">{tr('Loading games…')}<button onClick={close}>{tr('Back to chat')}</button></div>}><GamesHub me={me} room={room} serverId={serverId} initialGameId={opened.id || null} initialKind={opened.kind||null} arcade={arcade} socket={socket} connected={connected} games={games} close={close}/></Suspense></GameLoadBoundary>}</Games.Provider>;
+  return <Games.Provider value={{ room, games, arcade, error, connected, launch: (id,kind) => {returnFocus.current=document.activeElement as HTMLElement;setOpened(id ? { id,kind:kind||'chess' } : {});}, refresh: () => { void refresh(); } }}>{children}{opened && <GameLoadBoundary close={close}><Suspense fallback={<div className="games-load-error" role="status">{tr('Loading games…')}<button onClick={close}>{tr('Back to chat')}</button></div>}><GamesHub gameAudioSilenced={gameAudioSilenced} me={me} room={room} serverId={serverId} initialGameId={opened.id || null} initialKind={opened.kind||null} arcade={arcade} socket={socket} connected={connected} games={games} close={close}/></Suspense></GameLoadBoundary>}</Games.Provider>;
 }
 export function GamesButton() {
   const g = useContext(Games); if (!g) return null;

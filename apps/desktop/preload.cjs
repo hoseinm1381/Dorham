@@ -14,5 +14,7 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   stopCaptureAudio: id => ipcRenderer.send('capture:audio-stop', id),
   acknowledgeCaptureAudio: id => ipcRenderer.send('capture:audio-ack', id),
   onCaptureAudio: listener => { const handler = (_event, value) => listener(value); ipcRenderer.on('capture:audio', handler); return () => ipcRenderer.removeListener('capture:audio', handler); },
-  setInCall: value => ipcRenderer.send('call:set', value === true), getAppInfo: () => ipcRenderer.invoke('app:info'), checkUpdate: () => ipcRenderer.invoke('update:check'), installUpdate: () => ipcRenderer.invoke('update:install')
+  setInCall: value => ipcRenderer.send('call:set', value === true), getAppInfo: () => ipcRenderer.invoke('app:info'), checkUpdate: () => ipcRenderer.invoke('update:check'), installUpdate: () => ipcRenderer.invoke('update:install'),
+  getUpdateState: () => ipcRenderer.invoke('update:state'), prepareUpdate: () => ipcRenderer.invoke('update:prepare'),
+  onUpdateState: listener => { const handler = (_event, value) => listener(value); ipcRenderer.on('update:state', handler); return () => ipcRenderer.removeListener('update:state', handler); }
 }));

@@ -1,0 +1,6 @@
+Poker card SVGs are by Adrian Kennard and distributed under CC0 by letele/playing-cards.
+https://github.com/letele/playing-cards/tree/865a78eb940c1232e4b21523577c8fca52f694fe/assets
+https://www.me.uk/cards/
+
+The card slide and dice throw recordings are from Kenney's CC0 Casino Audio pack.
+https://opengameart.org/content/54-casino-sound-effects-cards-dice-chips

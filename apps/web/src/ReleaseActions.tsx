@@ -6,7 +6,8 @@ import { t } from './i18n';
 import './releases.css';
 export function ReleaseActions({ inCall = false }: { inCall?: boolean }) {
   const { info, status, refresh, install, prepare, cancel } = useRelease();
-  const downloading = releasePlatform === 'android' && ['downloading','verifying'].includes(status.state);
+  const windows = releasePlatform === 'windows';
+  const downloading = ['downloading','verifying'].includes(status.state);
   const [open, setOpen] = useState(false), [manifest, setManifest] = useState<Pick<ReleaseManifest, 'windows' | 'android'> | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -26,14 +27,25 @@ export function ReleaseActions({ inCall = false }: { inCall?: boolean }) {
     } catch { setError('Downloads are temporarily unavailable.'); } finally { setBusy(false); }
   }
   async function update() {
-    setOpen(true); setError(''); setBusy(true);
+    setOpen(true); setError('');
+    if (windows && status.state !== 'ready' && window.desktop?.prepareUpdate) {
+      void prepare().catch(() => {});
+      return;
+    }
+    setBusy(true);
     try { await install(); } catch (e) { const message = e instanceof Error ? e.message : ''; setError(message.includes('Allow Dorham to install updates') ? 'Allow Dorham to install updates, then tap Update again.' : 'The update could not be started. Try again later.'); } finally { setBusy(false); }
   }
   return <div className="release-actions" ref={container}>
-    {info?.available && <button type="button" className="release-update" disabled={busy || inCall || downloading} title={t(inCall ? 'Disconnect voice before installing an update.' : 'Install update')} onClick={() => { void update(); }}><ArrowUpCircle size={14}/>{t(downloading ? 'Downloading update' : status.state === 'ready' ? 'Install update' : 'Update')} <b>{downloading ? `${status.progress}%` : info.latest}</b></button>}
+    {info?.available && <button type="button" className="release-update" disabled={busy || inCall || status.state === 'installing' || (downloading && !windows)} title={t(inCall ? 'Disconnect voice before installing an update.' : 'Install update')} onClick={() => { if (downloading) setOpen(true); else void update(); }}><ArrowUpCircle size={14}/>{t(downloading ? 'Downloading update' : status.state === 'ready' ? 'Install update' : 'Update')} <b>{downloading ? `${status.progress}%` : info.latest}</b></button>}
     <button type="button" className="release-trigger" aria-label={t('Download apps')} aria-expanded={open} onClick={() => { if (open) setOpen(false); else void load(); }}><Download size={14}/><span>{t('Get apps')}</span></button>
     {open && <section className="release-menu" role="dialog" aria-label={t('Download apps')}><header><strong>{t('Dorham apps')}</strong><button type="button" aria-label={t('Close downloads')} onClick={() => setOpen(false)}><X size={14}/></button></header>
       {busy && <p role="status">{t('Please wait…')}</p>}
+      {windows && info?.available && <div className="android-update-status">
+        {downloading && <><progress aria-label={t('Update download progress')} max={100} value={status.progress}/><span>{status.progress}%</span></>}
+        {status.state === 'error' && <p role="status">{t('Update download failed. Retry when connected.')}</p>}
+        {status.state === 'ready' && <p role="status">{t('Update verified and ready to install.')}</p>}
+        {!downloading && status.state !== 'installing' && <button disabled={busy || inCall} onClick={() => { void update(); }}>{t(status.state === 'ready' ? 'Install update' : status.state === 'error' ? 'Try again' : 'Download update')}</button>}
+      </div>}
       {releasePlatform === 'android' && info?.available && <div className="android-update-status"><p role="status">{t(status.state === 'ready' ? 'Update verified and ready to install.' : status.state === 'waiting-wifi' ? 'Waiting for Wi-Fi to download the update.' : status.state === 'paused' ? 'Update download paused.' : status.state === 'error' ? 'Update download failed. Retry when connected.' : downloading ? 'Downloading update' : 'An update is available.')}</p>{downloading && <><progress aria-label={t('Update download progress')} max={100} value={status.progress}/><span>{status.progress}%</span><button onClick={() => { void cancel(); }}>{t('Cancel download')}</button></>}{!downloading && status.state !== 'ready' && <button disabled={inCall} onClick={() => { void prepare().catch(() => setError('The update could not be started. Try again later.')); }}>{t('Download update')}</button>}</div>}
       {manifest && !busy && <><a href={manifest.windows.url} target="_blank" rel="noopener noreferrer">Windows <small>{manifest.windows.version}</small></a><a href={manifest.android.url} target="_blank" rel="noopener noreferrer">Android <small>{manifest.android.version}</small></a></>}
       {releasePlatform && !busy && <button type="button" className="release-check" onClick={() => { void refresh(); }}>{t('Check for updates')}</button>}

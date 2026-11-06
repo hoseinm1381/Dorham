@@ -27,7 +27,8 @@ __pycache__/
 apps/desktop/native/*.exe
 apps/desktop/voice-keys.json
 
-apps/web/public/audio/
+apps/web/public/audio/*
+!apps/web/public/audio/share-audio-worklet.js
 
 apps/desktop/release-contract.cjs
 *.pfx

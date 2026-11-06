@@ -18,7 +18,10 @@ const readSettings = () => { if (!settingsCache) { try { settingsCache = JSON.pa
 const saveSettings = settings => { const temporary = settingsFile() + '.tmp'; fs.writeFileSync(temporary, JSON.stringify(settings), { mode: 0o600 }); fs.renameSync(temporary, settingsFile()); settingsCache = settings; };
 const voiceOverlay = createVoiceOverlay(readSettings, saveSettings);
 const trusted = event => { if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || !event.senderFrame?.url.startsWith('dorham://app/')) throw new Error('Untrusted sender'); };
-const updater = createUpdater(app, net, { canInstall: () => !inCall, canDownload: () => !inCall, autoDownload: app.isPackaged, onState: () => renderTray() });
+const updater = createUpdater(app, net, { canInstall: () => !inCall, canDownload: () => !inCall, autoDownload: app.isPackaged, onState: state => {
+  if (win && !win.isDestroyed()) win.webContents.send('update:state', state);
+  renderTray();
+} });
 function renderTray() {
   if (!tray) return;
   const state = updater.state(), fa = interfaceLanguage === 'fa-IR';
@@ -48,6 +51,8 @@ app.whenReady().then(() => {
   ipcMain.on('overlay:update', (event, value) => { trusted(event); voiceOverlay.update(value); });
   ipcMain.handle('app:info', event => { trusted(event); return { version: app.getVersion(), platform: 'windows' }; });
   ipcMain.handle('update:check', event => { trusted(event); return updater.check(); });
+  ipcMain.handle('update:state', event => { trusted(event); return updater.state(); });
+  ipcMain.handle('update:prepare', async event => { trusted(event); await updater.prepare(); });
   ipcMain.handle('update:install', event => { trusted(event); if (inCall) throw Error('Disconnect voice before installing an update.'); return updater.install(); });
   protocol.handle('dorham', async request => {
     const url = new URL(request.url);

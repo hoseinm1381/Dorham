@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Lock } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { VoiceRoom } from '@dorham/contracts';
 import type { Socket } from 'socket.io-client';
@@ -111,8 +112,12 @@ export function useSoundboard(socket: RefObject<Socket | null>, room: VoiceRoom 
   return { volume, change, mutedSenders, toggleSender };
 }
 
+function isRoomSound(item: ReturnType<typeof useFeatures>['catalog'][number], serverId: string | undefined) {
+  return item.kind === 'sound' && item.active && (!item.serverId || item.serverId === serverId);
+}
+
 export function showSoundboard(catalog: ReturnType<typeof useFeatures>['catalog'], serverId: string | undefined, moderate: boolean, plus: boolean) {
-  return moderate || plus || catalog.some(item => item.kind === 'sound' && item.active && item.usable && (!item.serverId || item.serverId === serverId));
+  return moderate || plus || catalog.some(item => isRoomSound(item, serverId));
 }
 
 export function Soundboard({ socket, channelId, serverId, moderate, canSpeak, volume, change, error }: {
@@ -133,7 +138,7 @@ export function Soundboard({ socket, channelId, serverId, moderate, canSpeak, vo
     void request<{ enabled: boolean }>(`/features/soundboard/${channelId}`, undefined, 'GET', true, { signal: controller.signal }).then(value => setRoomEnabled(value.enabled)).catch(() => {});
     return () => { controller.abort(); instance?.off('soundboard:changed', update); };
   }, [socket, channelId]);
-  const clips = catalog.filter(item => item.kind === 'sound' && item.active && item.usable && (!item.serverId || item.serverId === serverId));
+  const clips = catalog.filter(item => isRoomSound(item, serverId));
   const groups = new Map<string, typeof clips>();
   for (const clip of clips.sort((a, b) => (a.freeSlot ?? 99) - (b.freeSlot ?? 99))) {
     const name = clip.pack || 'Other sounds';
@@ -142,11 +147,11 @@ export function Soundboard({ socket, channelId, serverId, moderate, canSpeak, vo
   }
   return <div className="soundboard-panel">
     <div className="soundboard-actions">
-      {Array.from(groups, ([pack, items]) => <section className="soundboard-pack" key={pack}><strong>{t(pack)}</strong><div className="soundboard-actions">{items.map(clip => <button className="secondary" key={clip.id} disabled={!roomEnabled || !canSpeak || pending} onClick={() => {
-        if (!socket.current?.connected) return;
+      {Array.from(groups, ([pack, items]) => <section className="soundboard-pack" key={pack}><strong>{t(pack)}</strong><div className="soundboard-actions">{items.map(clip => <button className="secondary" key={clip.id} disabled={!clip.usable || !roomEnabled || !canSpeak || pending} aria-label={clip.usable ? undefined : `${t(clip.label)} · ${t('Locked')}`} onClick={() => {
+        if (!clip.usable || !socket.current?.connected) return;
         setPending(true);
         void ack(socket.current, 'soundboard:play', { id: clip.id }).catch(error).finally(() => setPending(false));
-      }}>{t(clip.label)}</button>)}</div></section>) }
+      }}>{!clip.usable && <Lock size={13} aria-hidden="true"/>}{t(clip.label)}</button>)}</div></section>) }
       {!clips.length && <small>{t('No sounds have been published yet.')}</small>}
     </div>
     <div className="soundboard-actions"><label>{t('Soundboard volume')} <input type="range" min="0" max="100" value={volume} onChange={e => change(Number(e.target.value))}/></label>

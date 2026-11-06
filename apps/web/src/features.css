@@ -11,6 +11,12 @@
 .feature-assets { display: flex; flex-wrap: wrap; gap: .35rem; margin: .45rem 0; }
 .feature-assets img { object-fit: contain; }
 .feature-profile label { margin-block: .6rem; }
+.avatar-pack { margin-block-start: 1.1rem; }
+.avatar-pack h4 { margin-block-end: .45rem; font-size: .86rem; }
+.avatar-grid button[aria-disabled=true] { position: relative; cursor: not-allowed; }
+.avatar-grid button[aria-disabled=true] img { opacity: .5; }
+.avatar-grid .avatar-lock { position: absolute; inset-block-start: 7px; inset-inline-end: 7px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #30294b; color: #e3d7ff; }
+.avatar-previous { margin-block-start: .65rem; }
 .voice-panel .voice-panel-actions > .icon-button { width: 34px; height: 34px; flex: none; border: 1px solid #ffffff14; background: #8274e014; color: #cbc5ed; }
 .voice-panel .voice-panel-actions > .icon-button:hover { background: #8274e02e; }
 .voice-panel .voice-panel-actions > .icon-button.active { color: #9bdbc4; border-color: #83daba66; background: #83daba17; }

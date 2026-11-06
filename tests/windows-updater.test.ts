@@ -82,7 +82,7 @@ it('rehashes the cached installer after app restart and rejects later disk tampe
   } finally { second?.stop(); await f.clean(); }
 });
 
-it('cancels an in-progress background payload for a call, cleans it, and retries after the call', async () => {
+it('pauses a background download for a call and resumes the saved bytes', async () => {
   let inCall = false;
   const f = await fixture(false, false, { autoDownload: true, canDownload: () => !inCall });
   try {
@@ -98,7 +98,11 @@ it('cancels an in-progress background payload for a call, cleans it, and retries
     const aborted = expect(task).rejects.toThrow('Aborted');
     await vi.waitFor(() => expect(f.updater.state()).toMatchObject({ phase: 'downloading', progress: 25 }));
     inCall = true; f.updater.pauseDownload(); await aborted;
-    expect(await readdir(path.join(f.directory, 'updates'))).toEqual([]); expect(f.updater.state().phase).toBe('available');
+    expect(await readdir(path.join(f.directory, 'updates'))).toEqual([expect.stringMatching(/\.download$/)]); expect(f.updater.state().phase).toBe('available');
+    f.fetch.mockImplementationOnce(async (_url, init) => {
+      expect(new Headers(init?.headers).get('range')).toBe('bytes=1024-');
+      return new Response(f.binary.subarray(1024), { status: 206, headers: { 'content-range': 'bytes 1024-4095/4096' } });
+    });
     inCall = false; f.updater.wake(); await f.updater.prepare(); expect(f.updater.state().phase).toBe('ready'); expect(f.spawn).not.toHaveBeenCalled();
   } finally { await f.clean(); }
 });
@@ -134,15 +138,20 @@ it('does not quit if Windows cannot launch the installer and allows a cached ret
   } finally { await f.clean(); }
 });
 
-it('retries a failed payload without launching it and blocks malformed/oversized manifests', async () => {
+it('automatically resumes an interrupted payload and blocks oversized manifests', async () => {
   const f = await fixture();
   try {
     f.fetch.mockImplementationOnce(async () => new Response('x'.repeat(16385)));
     await expect(f.updater.check()).rejects.toThrow('Invalid update response'); expect(f.spawn).not.toHaveBeenCalled();
     await f.updater.check();
     f.fetch.mockImplementationOnce(async () => new Response(f.binary.subarray(0, 1000), { headers: { 'content-length': String(f.binary.length) } }));
-    await expect(f.updater.prepare()).rejects.toThrow('verification'); expect(await readdir(path.join(f.directory, 'updates'))).toEqual([]);
+    f.fetch.mockImplementationOnce(async (_url, init) => {
+      expect(new Headers(init?.headers).get('range')).toBe('bytes=1000-');
+      return new Response(f.binary.subarray(1000), { status: 206, headers: { 'content-range': 'bytes 1000-4095/4096' } });
+    });
     await f.updater.prepare(); expect(f.updater.state().phase).toBe('ready');
+    expect(f.fetch).toHaveBeenCalledTimes(4);
+    expect(f.spawn).not.toHaveBeenCalled();
   } finally { await f.clean(); }
 });
 

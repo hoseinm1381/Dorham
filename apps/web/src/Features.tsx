@@ -116,7 +116,7 @@ export function ProfileCatalog({ me, error }: { me: PublicUser; error: (err: unk
   const { catalog, grants, voices, plusSelected, refresh } = useFeatures();
   const [busy, setBusy] = useState(false);
   const [accent, setAccent] = useState(me.profileAccent || '#86e5bd');
-  const visible = catalog.filter(item => item.active && item.usable && ['avatar', 'badge', 'banner', 'frame'].includes(item.kind));
+  const visible = catalog.filter(item => item.active && item.usable && ['badge', 'banner', 'frame'].includes(item.kind));
   const change = async (route: string, body: unknown) => {
     setBusy(true);
     try { await request(route, body, 'PUT'); refresh(); }
@@ -125,7 +125,7 @@ export function ProfileCatalog({ me, error }: { me: PublicUser; error: (err: unk
   };
   if (!visible.length && grants.profilePlus === undefined && !voices.length) return null;
   return <section className="feature-profile" aria-label={t('Profile catalog')}>
-    {visible.length > 0 && <><h3>{t('Profile catalog')}</h3>{(['avatar', 'badge', 'banner', 'frame'] as const).map(kind => {
+    {visible.length > 0 && <><h3>{t('Profile catalog')}</h3>{(['badge', 'banner', 'frame'] as const).map(kind => {
       const items = visible.filter(item => item.kind === kind);
       return items.length > 0 && <div key={kind}><strong>{t(kind)}</strong><div className="feature-assets">
         {items.map(item => <button type="button" className="secondary" key={item.id} title={item.label} disabled={busy} onClick={() => void change('/features/profile', { kind, value: item.id })}>

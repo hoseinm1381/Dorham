@@ -10,3 +10,56 @@
 .game-nav{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.game-playing-dialog>header{margin-bottom:10px;padding-bottom:10px}.game-playing-dialog>header .eyebrow{display:none}.game-playing-dialog h2{font-size:23px;margin:0 0 5px}.game-playing-dialog .game-status{margin:10px 0;padding:9px 12px}.game-playing-dialog .game-seats{display:flex;flex-wrap:wrap;margin:10px 0 14px}.game-playing-dialog .game-seats li{padding:7px 10px}.game-playing-dialog .game-turn-prompt{padding:9px 12px;margin:9px 0}.game-playing-dialog .poker-table{padding:17px 12px}.game-playing-dialog .poker-controls{position:static}.game-playing-dialog .game-notice{margin:10px 0;padding:9px 12px}.game-playing-dialog .game-guide{margin-top:12px}
 .words-panel .game-scores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.words-panel .team-label{overflow-wrap:anywhere;font-size:12px}.words-panel .word-role{margin:10px 0}
 @media(max-width:480px){.game-playing-dialog .game-status strong{width:auto;font-size:13px}.game-playing-dialog .game-status>span{font-size:11px}.game-playing-dialog .game-seats{gap:5px}.game-playing-dialog .game-seats li{padding:6px 8px;font-size:10px;flex:1 1 40%}.game-playing-dialog>header{gap:7px}.game-playing-dialog h2{font-size:21px}.game-nav{max-width:135px}.game-nav button{font-size:11px;padding:6px 9px;min-height:36px}.game-playing-dialog .game-turn-prompt{font-size:12px}.game-playing-dialog .game-player-badge{font-size:11px;padding:3px 8px}.game-playing-dialog .poker-controls form{width:auto}.game-playing-dialog .poker-controls{margin:10px 0}.game-playing-dialog .game-notice{font-size:11px}}
+.game-live-list { margin: 16px 0 22px; }
+.game-live-list h3 { margin: 0; }
+.game-sound-toggle[aria-pressed=true] { border-color: #80ccb4; color: #b5f0d9; }
+.game-sound-icon { display: none; }
+@media (max-width: 480px) {
+  .game-sound-icon { display: inline; font-size: 15px; }
+  .game-sound-label { display: none; }
+}
+.game-countdown {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 5px 14px;
+  padding: 8px 12px;
+  border: 1px solid #48465e;
+  border-radius: 9px;
+  background: #202433;
+  color: #d5d9eb;
+  font-size: 12px;
+}
+.game-countdown strong { color: #f4dda2; font-size: 16px; font-variant-numeric: tabular-nums; }
+.game-countdown progress, .game-round-progress progress { width: 100%; height: 6px; accent-color: #a99bf2; }
+.game-countdown progress { grid-column: 1 / -1; }
+.game-countdown.low-time { border-color: #d89069; }
+.game-countdown.low-time strong { color: #ffb997; }
+.game-countdown.low-time progress { accent-color: #ffac82; }
+.game-round-progress { display: grid; gap: 6px; color: #d2d6eb; font-size: 13px; }
+.domino-chain .domino-tile, .poker-card:not(.empty), .poker-result, .word-reveal,
+.word-clue, .phone-task, .phone-reveal > ol { animation: game-arrive 220ms ease-out; }
+.poker-card.face, .poker-card.back { overflow: hidden; border: 0; }
+.poker-card img { display: block; width: 100%; height: 100%; }
+@keyframes game-arrive { from { opacity: .35; transform: translateY(7px); } }
+.word-card.revealed { animation: word-reveal 220ms ease-out; }
+@keyframes word-reveal { from { transform: scale(.91); } }
+.four-cell { position: relative; }
+.four-cell.counter-0, .four-cell.counter-1 { background: #141b30; border-color: #1d2544; }
+.four-counter { position: absolute; inset: 0; border: 2px solid; border-radius: 50%; }
+.counter-0 > .four-counter { background: #e36370; border-color: #ffa2a9; }
+.counter-1 > .four-counter { background: #e7c84e; border-color: #ffed9a; }
+.four-cell.winning > .four-counter { box-shadow: inset 0 0 0 3px #fff0b8; }
+.four-counter.just-dropped { animation: four-drop 320ms cubic-bezier(.48, .04, .76, .73); }
+@keyframes four-drop { from { transform: translateY(calc(-110% * var(--drop-rows))); opacity: .3; } }
+.ludo-board { position: relative; }
+.arcade-dialog .ludo-token { position: absolute; width: calc(100% / 15 - 2px); height: calc(100% / 15 - 2px); transition: top 240ms ease-out, left 240ms ease-out; }
+.ludo-die { display: inline-block; }
+.ludo-die.rolled { animation: dice-land 260ms ease-out; }
+@keyframes dice-land { from { transform: rotate(-30deg) scale(.72); } }
+@media (prefers-reduced-motion: reduce) {
+  .domino-chain .domino-tile, .poker-card:not(.empty), .poker-result, .word-reveal,
+  .word-clue, .phone-task, .phone-reveal > ol, .word-card.revealed,
+  .four-counter.just-dropped, .ludo-die.rolled { animation: none; }
+  .arcade-dialog .ludo-token { transition: none; }
+}

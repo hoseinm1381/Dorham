@@ -2,3 +2,11 @@
 
 .games-dialog{width:min(760px,96vw)}.games-dialog.games-setup{width:min(560px,94vw)}.games-catalog{display:grid;gap:20px;padding:10px 0 20px}.games-catalog>p,.games-settings>p{color:#b6bfb9;font-size:14px;line-height:1.6}.game-catalog-card{display:grid;justify-items:center;gap:10px;padding:30px;background:#242b31;color:#eee9d9;border:1px solid #a78c5a66;border-radius:14px}.game-catalog-card:hover{background:#30373a}.game-catalog-card>span{font-size:70px;line-height:1;color:#dcc38e}.game-catalog-card strong{font-size:22px}.game-catalog-card small{color:#b6bfb9}.games-settings{display:grid;gap:18px}.games-settings>label{display:grid;gap:8px;font-size:13px}.games-settings select{width:100%;background:#242a31;color:#eef1ed;border:1px solid #40474e;padding:11px;border-radius:8px}.games-settings .chess-time-options label{display:grid;gap:8px;min-width:0;font-size:13px}.games-dialog .chess-score{max-width:620px}.games-dialog .chess-log{max-width:560px}.games-dialog .chess-board{width:min(100%,clamp(280px,calc(94dvh - 330px),560px))}
 .chess-square.in-check{background:radial-gradient(circle,#f66964,#973d35)!important}.chess-guidance{margin:0;color:#c3d8cc;font-size:13px;text-align:center}.chess-play>.game-guide{max-width:560px}.chess-play>.game-guide summary{cursor:pointer}.chess-play>.game-guide li{margin-top:5px}.chess-promotion{position:sticky;bottom:0;z-index:5;border:1px solid #c8ad75}.chess-promotion button{min-height:44px;min-width:70px}
+.chess-clock.low-time { color: #ffb997; outline: 1px solid #d89069; }
+.chess-square img.piece-slide { position: relative; z-index: 1; animation: chess-slide 180ms ease-out; }
+.chess-square img.piece-arrival { animation: chess-arrival 200ms ease-out; }
+@keyframes chess-slide { from { transform: translate(var(--chess-x), var(--chess-y)); } }
+@keyframes chess-arrival { from { transform: scale(.65); opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .chess-square img.piece-slide, .chess-square img.piece-arrival { animation: none; }
+}

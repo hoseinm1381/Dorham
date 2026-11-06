@@ -1,5 +1,5 @@
 import { _electron, test, expect, type Page } from '@playwright/test';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { completeRecovery } from './recovery-helper';
@@ -7,6 +7,7 @@ import { completeRecovery } from './recovery-helper';
 test.use({ trace: 'off', launchOptions: { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--mute-audio', '--autoplay-policy=no-user-gesture-required'] } });
 
 const fixturePassword = 'Dorham-test-feature-72';
+const appVersion: string = JSON.parse(readFileSync('package.json', 'utf8')).version;
 async function register(page: Page, username: string, navigate = true) {
   if (navigate) await page.goto('/');
   await page.getByRole('button', { name: 'Create an account', exact: true }).click();
@@ -27,6 +28,58 @@ async function api(page: Page, path: string, data?: Record<string, unknown>, met
   }, { path, data, method });
 }
 
+test('Profile Plus avatars appear locked beside built-in pictures and can switch back', async ({ browser }) => {
+  const admin = await browser.newPage(), user = await browser.newPage();
+  try {
+    const suffix = Date.now().toString().slice(-8);
+    await register(admin, 'AvatarAdmin' + suffix);
+    await api(admin, '/admin/claim', { secret: 'browser-fixture-bootstrap-not-for-deployment' });
+    await register(user, 'AvatarUser' + suffix);
+    const identity = await api(user, '/auth/me');
+    const avatar = await admin.evaluate(async () => {
+      const me = await (await fetch('/api/v1/auth/me')).json();
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 64;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = '#a892d9';
+      context.fillRect(0, 0, 64, 64);
+      const png = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'));
+      const data = new FormData();
+      for (const [key, value] of Object.entries({ kind: 'avatar', access: 'profilePlus', label: 'Sheep Scout', pack: 'Age of Empires IV Avatars' })) data.set(key, value);
+      data.set('file', png, 'sheep.png');
+      const response = await fetch('/api/v1/admin/features/catalog', { method: 'POST', headers: { 'X-CSRF-Token': me.csrf }, body: data });
+      if (!response.ok) throw Error(await response.text());
+      return response.json();
+    });
+    await api(admin, '/admin/features/catalog/' + avatar.id, { active: true }, 'PUT');
+    await user.getByRole('button', { name: 'Account settings', exact: true }).click();
+    await user.locator('.avatar-options summary').click();
+    const picker = user.getByRole('group', { name: 'Choose your profile picture' });
+    const fox = picker.getByRole('button', { name: 'Fox', exact: true });
+    const locked = picker.getByRole('button', { name: 'Sheep Scout · Locked', exact: true });
+    await expect(fox).toBeEnabled();
+    await expect(locked).toBeDisabled();
+    await expect(locked.locator('.avatar-lock')).toBeVisible();
+    await locked.dispatchEvent('click');
+    await expect(locked).toHaveAttribute('aria-pressed', 'false');
+    await expect(user.getByRole('region', { name: 'Profile catalog' }).getByRole('button', { name: /Sheep Scout/ })).toHaveCount(0);
+
+    await api(admin, '/admin/features/users/' + identity.user.id, { feature: 'profilePlus', enabled: true }, 'PUT');
+    const sheep = picker.getByRole('button', { name: 'Sheep Scout', exact: true });
+    await expect(sheep).toBeEnabled();
+    await sheep.click();
+    await expect(sheep).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(async () => (await api(user, '/auth/me')).user.avatar).toContain('/catalog/' + avatar.id);
+    await fox.click();
+    await expect(fox).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(async () => (await api(user, '/auth/me')).user.avatar).toMatch(/^\/avatars\//);
+    await api(admin, '/admin/features/users/' + identity.user.id, { feature: 'profilePlus', enabled: false }, 'PUT');
+    await expect(locked).toBeDisabled();
+  } finally {
+    await Promise.all([admin.context().close(), user.context().close()]);
+  }
+});
+
 test('Emoji Plus previews stay locked until granted and single custom emoji render large', async ({ browser, baseURL }, testInfo) => {
   const admin = await browser.newPage();
   const windows = process.env.DORHAM_EMOJI_WINDOWS_EXE;
@@ -37,7 +90,7 @@ test('Emoji Plus previews stay locked until granted and single custom emoji rend
   if (desktop) {
     await user.evaluate(async origin => { await window.desktop!.setServer(origin!); }, baseURL);
     await user.reload();
-    expect(await user.evaluate(async () => (await window.desktop?.getAppInfo?.())?.version)).toBe('1.2.2');
+    expect(await user.evaluate(async () => (await window.desktop?.getAppInfo?.())?.version)).toBe(appVersion);
   } else if (android) {
     const root = resolve(android);
     await user.route(`${baseURL}/**`, route => {
@@ -45,7 +98,7 @@ test('Emoji Plus previews stay locked until granted and single custom emoji rend
       const file = join(root, pathname === '/' ? 'index.html' : pathname.slice(1));
       return resolve(file).startsWith(root + sep) && existsSync(file) ? route.fulfill({ path: file }) : route.continue();
     });
-    await user.addInitScript(origin => {
+    await user.addInitScript(({ origin, version }) => {
       localStorage.setItem('dorham.server', origin!);
       let secret: string | null = null;
       const plugins = {
@@ -59,13 +112,13 @@ test('Emoji Plus previews stay locked until granted and single custom emoji rend
           PluginHeaders: Object.entries(plugins).map(([name, methods]) => ({ name, methods: methods.map(name => ({ name, rtype: name === 'addListener' ? 'callback' : 'promise' })) })),
           nativePromise: async (plugin: string, method: string, options: { value: string | null }) => {
             if (plugin === 'DorhamSecrets') { if (method === 'set') secret = options.value; return { value: secret }; }
-            if (plugin === 'DorhamUpdates') return { current: '1.2.2', latest: '1.2.2', available: false };
+            if (plugin === 'DorhamUpdates') return { current: version, latest: version, available: false };
             return {};
           },
           nativeCallback: async () => 'fixture-listener',
         },
       });
-    }, baseURL);
+    }, { origin: baseURL, version: appVersion });
   }
   try {
     const suffix = Date.now().toString().slice(-8);
@@ -171,6 +224,13 @@ test('Emoji Plus previews stay locked until granted and single custom emoji rend
       await api(admin, '/admin/features/catalog/' + added.id, { active: true }, 'PUT');
       await expect.poll(() => receivedCatalog.some(item => item.label === asset.label && item.kind === asset.kind && item.usable)).toBe(true);
     }
+    await picker.getByRole('button', { name: 'Close emoji picker' }).click();
+    if (android) await user.getByRole('button', { name: 'Toggle navigation', exact: true }).click();
+    await user.getByRole('button', { name: 'Account settings', exact: true }).click();
+    await user.locator('.avatar-options summary').click();
+    const avatars = user.getByRole('group', { name: 'Choose your profile picture' });
+    await expect(avatars.getByRole('button', { name: 'Fox', exact: true })).toBeEnabled();
+    await expect(avatars.getByRole('button', { name: 'Live profile fixture', exact: true })).toBeEnabled();
   } finally {
     await Promise.all([admin.context().close(), desktop ? desktop.close() : user.context().close()]);
   }
@@ -230,13 +290,21 @@ test('signed-in clients pick up rank, 1080p permissions, and server soundboard w
       if (!response.ok) throw Error(await response.text());
       return response.json();
     }, available.find((item: { label: string }) => item.label === 'Quack').url);
+    const lockedClip = user.getByRole('button', { name: 'Private fixture clip · Locked', exact: true });
+    const unlockedClip = user.getByRole('button', { name: 'Private fixture clip', exact: true });
     await api(admin, '/admin/features/catalog/' + premium.id, { active: true }, 'PUT');
-    await expect(user.getByRole('button', { name: 'Private fixture clip', exact: true })).toHaveCount(0);
+    await expect(lockedClip).toBeDisabled();
     const sound = user.waitForResponse(response => response.url().endsWith(available.find((item: { label: string }) => item.label === 'Quack').url));
     await quack.click();
     expect((await sound).headers()['content-type']).toContain('audio/wav');
     await api(admin, '/admin/features/users/' + identity.user.id, { feature: 'soundboardPlus', enabled: true }, 'PUT');
-    await expect(user.getByRole('button', { name: 'Private fixture clip', exact: true })).toBeVisible();
+    await expect(unlockedClip).toBeEnabled();
+    await user.waitForTimeout(5100); // The sender cooldown is five seconds.
+    const premiumSound = user.waitForResponse(response => response.url().includes('/catalog/' + premium.id + '/'), { timeout: 10000 });
+    await unlockedClip.click();
+    expect((await premiumSound).headers()['content-type']).toContain('audio/wav');
+    await api(admin, '/admin/features/users/' + identity.user.id, { feature: 'soundboardPlus', enabled: false }, 'PUT');
+    await expect(lockedClip).toBeDisabled();
     await user.getByRole('dialog', { name: 'Soundboard' }).getByRole('button', { name: 'Close dialog' }).click();
     await expect(launcher).toBeFocused();
 
