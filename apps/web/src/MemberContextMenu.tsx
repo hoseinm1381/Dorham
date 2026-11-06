@@ -10,7 +10,7 @@ import './member-moderation.css';
 
 type Target = { user: PublicUser; serverId: string | null; x: number; y: number; trigger: HTMLElement };
 type LocalAudio = { level: number; restore: number; change: (level: number) => void };
-type Options = { me?: PublicUser; serverId: string | null; servers: Server[]; channels: Channel[]; members: ServerMember[]; presence: VoicePresence[]; room: VoiceRoom | null; transport: MediaTransport | null; volumes: Record<string, number>; setVolume: (id: string, level: number) => void; profile: (user: PublicUser) => void; error: (error: unknown) => void; changed: () => Promise<void> };
+type Options = { me?: PublicUser; serverId: string | null; servers: Server[]; channels: Channel[]; members: ServerMember[]; presence: VoicePresence[]; room: VoiceRoom | null; transport: MediaTransport | null; volumes: Record<string, number>; setVolume: (id: string, level: number) => void; profile: (user: PublicUser) => void; soundboard?: { mutedSenders: ReadonlySet<string>; toggleSender: (id: string) => void }; error: (error: unknown) => void; changed: () => Promise<void> };
 export function useMemberModeration(o: Options) {
  const [target, setTarget] = useState<Target | null>(null), [drag, setDrag] = useState<{ userId: string; channelId: string; serverId: string } | null>(null), [over, setOver] = useState('');
  const audible = useRef<Record<string, number>>({});
@@ -55,10 +55,14 @@ export function useMemberModeration(o: Options) {
    o.setVolume(audioId, level);
   }
  } : undefined;
- return { bind, drop, menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}`} target={target} channels={o.channels} audio={audio} microphone={target.user.id === o.me?.id ? { transport: o.transport, error: o.error } : undefined} close={() => setTarget(null)} profile={o.profile} changed={o.changed}/> };
+ const soundboard = audioId && audioId !== o.me?.id && o.soundboard ? {
+  muted: o.soundboard.mutedSenders.has(audioId),
+  toggle: () => o.soundboard?.toggleSender(audioId)
+ } : undefined;
+ return { bind, drop, menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}`} target={target} channels={o.channels} audio={audio} soundboard={soundboard} microphone={target.user.id === o.me?.id ? { transport: o.transport, error: o.error } : undefined} close={() => setTarget(null)} profile={o.profile} changed={o.changed}/> };
 }
 
-function MemberContextMenu({ target, channels, audio, microphone, close, profile, changed }: { target: Target; channels: Channel[]; audio?: LocalAudio; microphone?: { transport: MediaTransport | null; error: (error: unknown) => void }; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
+function MemberContextMenu({ target, channels, audio, soundboard, microphone, close, profile, changed }: { target: Target; channels: Channel[]; audio?: LocalAudio; soundboard?: { muted: boolean; toggle: () => void }; microphone?: { transport: MediaTransport | null; error: (error: unknown) => void }; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
  const ref = useRef<HTMLDivElement>(null), [info, setInfo] = useState<MemberModerationInfo | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [moving, setMoving] = useState(false), [confirm, setConfirm] = useState<'kick' | 'ban' | 'timeout' | null>(null), [seconds, setSeconds] = useState(600), [reason, setReason] = useState('');
  const [position, setPosition] = useState({ left: target.x, top: target.y });
  useEffect(() => { if (microphone || !target.serverId) return; let active = true; void request<MemberModerationInfo>(`/servers/${target.serverId}/members/${target.user.id}/moderation`).then(value => { if (active) setInfo(value); }).catch(() => { if (active) setError('Member controls are unavailable.'); }); return () => { active = false; }; }, []);
@@ -93,6 +97,7 @@ function MemberContextMenu({ target, channels, audio, microphone, close, profile
     <small>{t('Only changes what you hear.')}</small>
     <button type="button" role="menuitemcheckbox" aria-checked={audio.level === 0} onClick={() => audio.change(audio.level === 0 ? audio.restore : 0)}>{t(audio.level === 0 ? 'Unmute for me' : 'Mute for me')}</button>
    </div>}
+   {soundboard && <button type="button" role="menuitemcheckbox" aria-checked={soundboard.muted} onClick={soundboard.toggle}>{t(soundboard.muted ? 'Unmute their soundboard' : 'Mute their soundboard')}</button>}
    {!microphone && !info && !error && <p role="status">{t('Please wait…')}</p>}
    {info?.voice && <>
     {info.actions.move && destinations.length > 0 && <><button role="menuitem" disabled={busy} aria-expanded={moving} onClick={() => setMoving(!moving)}>{t('Move to voice channel')} <span aria-hidden="true">▸</span></button>{moving && <div className="context-destinations">{destinations.map(c => <button role="menuitem" key={c.id} disabled={busy} onClick={() => { void action(`/voice/${info.voice!.channelId}/move`, { userId: target.user.id, channelId: c.id }); }}>{c.name}</button>)}</div>}</>}

@@ -1,0 +1,91 @@
+<Window x:Class="Dorham.Monitor.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Dorham.Monitor"
+        Title="Dorham Monitor" Style="{StaticResource {x:Type Window}}" Width="1240" Height="900" MinWidth="1040" MinHeight="720" WindowStartupLocation="CenterScreen" Loaded="OnLoaded" Closing="OnClosing" UseLayoutRounding="True">
+  <Grid Background="{StaticResource Background}">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="194" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Border Background="#141821" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0" Padding="18,28,18,20">
+      <DockPanel LastChildFill="True">
+        <StackPanel DockPanel.Dock="Top">
+          <StackPanel Orientation="Horizontal" Margin="5,0,0,30">
+            <Border Background="#85E6BE" Width="34" Height="34" CornerRadius="10" Margin="0,0,11,0"><TextBlock Text="∿" FontSize="29" FontWeight="Bold" Foreground="#10251F" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-5,0,0" /></Border>
+            <StackPanel><TextBlock Text="dorham" FontSize="20" FontWeight="SemiBold" /><TextBlock Text="SERVER MONITOR" FontSize="9" Foreground="{StaticResource Muted}" /></StackPanel>
+          </StackPanel>
+          <TextBlock Text="MONITOR" FontSize="10" Foreground="{StaticResource Muted}" Margin="11,0,0,12" />
+          <Button x:Name="OverviewNav" Click="ShowOverview" Background="#22372F" BorderBrush="Transparent" HorizontalContentAlignment="Left" Padding="15,11" Margin="0,0,0,8"><TextBlock Text="▦    Overview" /></Button>
+          <Button x:Name="UsersNav" Click="ShowUsers" Background="Transparent" BorderBrush="Transparent" HorizontalContentAlignment="Left" Padding="15,11" Margin="0,0,0,8"><TextBlock Text="♙    People" /></Button>
+          <Button x:Name="ConnectionNav" Click="ShowConnection" Background="Transparent" BorderBrush="Transparent" HorizontalContentAlignment="Left" Padding="15,11"><TextBlock Text="⚙    SSH settings" /></Button>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom">
+          <TextBlock x:Name="VersionLabel" Foreground="#69748A" FontSize="10" Margin="8,0,0,0" />
+        </StackPanel>
+        <Grid />
+      </DockPanel>
+    </Border>
+    <Grid Grid.Column="1" Margin="28,24,28,18">
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+      <Grid Margin="0,0,0,12">
+        <StackPanel><TextBlock Text="Server overview" x:Name="PageTitle" FontSize="27" FontWeight="SemiBold" /><TextBlock x:Name="PageSubtitle" Text="Live health, resource usage and network activity" Foreground="{StaticResource Muted}" Margin="0,7,0,0" /></StackPanel>
+        <StackPanel x:Name="ConnectionActions" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Border Background="#1D2D28" CornerRadius="15" Padding="13,7" Margin="0,0,12,0"><StackPanel Orientation="Horizontal"><Ellipse x:Name="StatusDot" Fill="#929BAD" Width="6" Height="6" Margin="0,0,7,0" /><TextBlock x:Name="ConnectionStatus" Text="DISCONNECTED" FontSize="10" Foreground="{StaticResource Accent}" /></StackPanel></Border>
+          <Button x:Name="ConnectButton" Content="Connect" Click="ToggleConnection" />
+        </StackPanel>
+      </Grid>
+      <ScrollViewer x:Name="DashboardScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <StackPanel x:Name="Dashboard">
+          <Border Background="#192D27" BorderBrush="#2C4A3E" BorderThickness="1" CornerRadius="12" Padding="18,12" Margin="0,0,0,12">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock x:Name="HealthHeading" Text="SSH disconnected" Foreground="{StaticResource Accent}" FontWeight="SemiBold" FontSize="14" /><TextBlock x:Name="HealthDetail" Text="Connect to see live readings from your Dorham server." Foreground="#9ABCAE" FontSize="12" Margin="0,5,0,0" TextWrapping="Wrap" /></StackPanel>
+              <StackPanel Grid.Column="1" Margin="20,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="ServerName" Text="DORHAM VPS" FontSize="10" Foreground="#9ABCAE" HorizontalAlignment="Right" /><TextBlock x:Name="ServerAddress" Text="45.135.242.146" FontSize="12" Margin="0,4,0,0" /></StackPanel>
+            </Grid>
+          </Border>
+          <UniformGrid Columns="3" Margin="0,0,-12,12">
+            <local:MetricCard x:Name="CpuCard" Heading="CPU" Tint="#85E6BE" />
+            <local:MetricCard x:Name="MemoryCard" Heading="MEMORY" Tint="#B6A0FF" />
+            <local:MetricCard x:Name="DiskCard" Heading="DISK" Tint="#83BDF9" />
+          </UniformGrid>
+          <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,16">
+            <StackPanel>
+              <Grid Margin="0,0,0,12"><StackPanel VerticalAlignment="Center"><TextBlock Text="Resource activity" FontSize="15" FontWeight="SemiBold" ToolTip="Recent readings · up to 5 minutes · this session" /></StackPanel><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><Button x:Name="ResourcesTab" Content="CPU + RAM" Click="SelectResources" Padding="12,7" Background="#2A3933" Margin="0,0,6,0" /><Button x:Name="NetworkTab" Content="Network" Click="SelectNetwork" Padding="12,7" /></StackPanel></Grid>
+              <StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Ellipse x:Name="LegendDotA" Fill="{StaticResource Accent}" Width="6" Height="6" Margin="0,0,7,0" /><TextBlock x:Name="LegendA" Text="CPU" FontSize="11" Foreground="{StaticResource Muted}" /><Ellipse x:Name="LegendDotB" Fill="#B6A0FF" Width="6" Height="6" Margin="20,0,7,0" /><TextBlock x:Name="LegendB" Text="Memory" FontSize="11" Foreground="{StaticResource Muted}" /></StackPanel>
+              <local:HistoryChart x:Name="Chart" Height="88" />
+              <Grid Margin="0,6,45,0"><TextBlock x:Name="ChartStart" Text="Waiting for samples" FontSize="10" Foreground="#69748A" /><TextBlock Text="Now" HorizontalAlignment="Right" FontSize="10" Foreground="#69748A" /></Grid>
+            </StackPanel>
+          </Border>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="1.15*" /></Grid.ColumnDefinitions>
+            <Border Style="{StaticResource Card}" Padding="18">
+              <StackPanel><Grid><TextBlock Text="Services" FontSize="15" FontWeight="SemiBold" /><TextBlock Text="LIVE STATUS" FontSize="9" Foreground="{StaticResource Muted}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid><StackPanel x:Name="ServicesPanel" Margin="0,14,0,0"><TextBlock Text="Waiting for service status…" Style="{StaticResource MutedText}" /></StackPanel></StackPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="18">
+              <StackPanel>
+                <TextBlock Text="Network &amp; uptime" FontSize="15" FontWeight="SemiBold" />
+                <Grid Margin="0,13,0,11"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="↓  RECEIVING" FontSize="10" Foreground="{StaticResource Muted}" /><TextBlock x:Name="ReceiveValue" Text="—" FontSize="21" FontWeight="SemiBold" Margin="0,4,0,0" Foreground="{StaticResource Accent}" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="↑  SENDING" FontSize="10" Foreground="{StaticResource Muted}" /><TextBlock x:Name="SendValue" Text="—" FontSize="21" FontWeight="SemiBold" Margin="0,4,0,0" Foreground="#83BDF9" /></StackPanel></Grid>
+                <Grid><TextBlock Text="Server uptime" Style="{StaticResource MutedText}" /><TextBlock x:Name="UptimeValue" Text="—" HorizontalAlignment="Right" FontSize="12" /></Grid>
+                <Grid Margin="0,6,0,12"><TextBlock x:Name="InterfaceName" Text="Network interface" Style="{StaticResource MutedText}" /><TextBlock x:Name="LatencyValue" Text="—" HorizontalAlignment="Right" FontSize="10" Foreground="{StaticResource Muted}" /></Grid>
+                <Border Height="1" Background="{StaticResource Border}" Margin="0,0,0,12" />
+                <Grid><TextBlock Text="Incoming allowance" FontSize="12" FontWeight="SemiBold" /><TextBlock x:Name="TrafficValue" Text="—" HorizontalAlignment="Right" FontSize="12" Foreground="{StaticResource Accent}" /></Grid>
+                <ProgressBar x:Name="TrafficBar" Margin="0,10,0,8" Maximum="100" />
+                <TextBlock x:Name="TrafficDetail" Text="Estimate from the existing traffic counter. Provider billing is authoritative." Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" LineHeight="15" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
+      <local:AdminPanel x:Name="Admin" Grid.Row="1" Visibility="Collapsed" />
+      <Grid Grid.Row="2" Margin="0,16,0,0"><TextBlock x:Name="LastUpdated" Text="No readings yet" FontSize="10" Foreground="#7C879B" /><TextBlock x:Name="Footer" Text="READ-ONLY SSH   ·   ENCRYPTED CONNECTION" HorizontalAlignment="Right" FontSize="9" Foreground="#7C879B" /></Grid>
+    </Grid>
+    <Border x:Name="SettingsOverlay" Grid.Column="1" Background="#10131A" Margin="28,110,28,43" Visibility="Collapsed">
+      <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="610" HorizontalAlignment="Left">
+        <TextBlock Text="A direct connection to your server" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" /><TextBlock Text="Readings travel over SSH. Your password is encrypted for your Windows account. No server agent is installed." Foreground="{StaticResource Muted}" TextWrapping="Wrap" LineHeight="20" Margin="0,0,0,24" />
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="15" /><ColumnDefinition Width="85" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Server address" /><TextBox x:Name="HostInput" AutomationProperties.Name="Server address" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="SSH port" /><TextBox x:Name="PortInput" AutomationProperties.Name="SSH port" /></StackPanel></Grid>
+        <TextBlock Text="SSH username" /><TextBox x:Name="UserInput" AutomationProperties.Name="SSH username" />
+        <TextBlock Text="SSH password" /><PasswordBox x:Name="PasswordInput" AutomationProperties.Name="SSH password" />
+        <TextBlock Text="Server host-key fingerprint (SHA256)" /><TextBox x:Name="FingerprintInput" AutomationProperties.Name="Host-key fingerprint" FontSize="11" /><TextBlock Text="Use the fingerprint verified through your server console or existing trusted SSH connection. A changed key blocks the connection." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,-7,0,17" />
+        <StackPanel Orientation="Horizontal"><TextBlock Text="Refresh every" VerticalAlignment="Center" /><TextBox x:Name="IntervalInput" Width="55" Margin="12,0" AutomationProperties.Name="Refresh interval seconds" /><TextBlock Text="seconds (2–60)" VerticalAlignment="Center" Foreground="{StaticResource Muted}" /></StackPanel>
+        <CheckBox x:Name="AlertsInput" Content="Show high-usage and service alerts in this window" Margin="0,20,0,8" /><CheckBox x:Name="AutoConnectInput" Content="Connect automatically when the app opens" />
+        <TextBlock x:Name="SettingsError" Foreground="#F28C98" TextWrapping="Wrap" Margin="0,10,0,8" />
+        <StackPanel Orientation="Horizontal" Margin="0,10,0,20"><Button Content="Save &amp; connect" Click="SaveConnection" Background="#85E6BE" Foreground="#11251D" BorderThickness="0" Margin="0,0,10,0" /><Button Content="Back to overview" Click="ShowOverview" /></StackPanel>
+        <TextBlock Text="Alerts: CPU ≥ 90%, RAM ≥ 85%, drive ≥ 85%, incoming allowance ≥ 80%, or a monitored service not active. Charts are kept in memory for this session." Style="{StaticResource MutedText}" TextWrapping="Wrap" LineHeight="19" />
+      </StackPanel></ScrollViewer>
+    </Border>
+  </Grid>
+</Window>

@@ -12,10 +12,15 @@ func ShareView(row M, c Config) M {
 	if S(row["tier"]) == "standard" {
 		fps = 30
 	}
-	return M{"id": row["id"], "channelId": row["channel_id"], "userId": row["user_id"], "expiresAt": N(row["expires_at"]), "tier": row["tier"], "startedAt": N(row["started_at"]), "requestedFrameRate": N(row["requested_fps"]), "maxFrameRate": min(fps, int64(c.ScreenMaxFrameRate)), "includeAudio": B(row["include_audio"]), "policyRevision": N(row["policy_revision"])}
+	result := M{"id": row["id"], "channelId": row["channel_id"], "userId": row["user_id"], "expiresAt": N(row["expires_at"]), "tier": row["tier"], "startedAt": N(row["started_at"]), "requestedFrameRate": N(row["requested_fps"]), "maxFrameRate": min(fps, int64(c.ScreenMaxFrameRate)), "includeAudio": B(row["include_audio"]), "policyRevision": N(row["policy_revision"])}
+	if N(row["quality_height"]) == 1080 {
+		result["maxHeight"], result["maxBitrate"], result["maxFrameRate"] = 1080, N(row["quality_bitrate"]), 15
+	}
+	return result
 }
 func ReconcileShares(tx *DB, c Config) {
 	tx.Run("DELETE FROM share_leases WHERE expires_at<?", Now())
+	reconcileHD(tx, c)
 	available := max(0, int64(c.StandardShareSlots)-N(tx.One("SELECT COUNT(*) AS count FROM share_leases WHERE tier='standard'")["count"]))
 	if available == 0 {
 		return
@@ -66,7 +71,7 @@ func (s *Service) voiceDirectoryAt(uid string, tx *DB, now int64) []M {
 			continue
 		}
 		members := []M{}
-		for _, vm := range tx.All("SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? AND v.heartbeat>=? ORDER BY v.joined_at", id, now-30000) {
+		for _, vm := range tx.All("SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.rank_badge,u.profile_frame,u.profile_badge,u.profile_badge_award,u.catalog_avatar FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? AND v.heartbeat>=? ORDER BY v.joined_at", id, now-30000) {
 			members = append(members, M{"user": PublicUser(Merge(vm, M{"id": vm["user_id"]})), "muted": B(vm["muted"]), "deafened": B(vm["deafened"]), "serverMuted": B(vm["server_muted"])})
 		}
 		shares := tx.One("SELECT COUNT(*) AS count FROM share_leases WHERE channel_id=? AND expires_at>=?", id, now)
@@ -86,7 +91,7 @@ func (s *Service) Room(uid, id string) M {
 }
 func (s *Service) RoomView(tx *DB, id string) M {
 	members := []M{}
-	for _, vm := range tx.All("SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? ORDER BY v.joined_at", id) {
+	for _, vm := range tx.All("SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.rank_badge,u.profile_frame,u.profile_badge,u.profile_badge_award,u.catalog_avatar FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? ORDER BY v.joined_at", id) {
 		canShare := serviceAttempt(func() { s.Channel(tx, S(vm["user_id"]), id, "share") }) == nil
 		members = append(members, M{"user": PublicUser(Merge(vm, M{"id": vm["user_id"]})), "muted": B(vm["muted"]), "deafened": B(vm["deafened"]), "serverMuted": B(vm["server_muted"]), "serverDeafened": B(vm["server_deafened"]), "canShare": canShare, "epoch": vm["epoch"], "eligible": B(vm["eligible"]), "joinedAt": N(vm["joined_at"])})
 	}
@@ -108,6 +113,8 @@ func (s *Service) VoiceSnapshot(viewers []M) []M {
 			uid := S(v["userId"])
 			entry := M{"socketId": v["socketId"], "directory": s.voiceDirectoryAt(uid, tx, now)}
 			if S(v["channelId"]) != "" {
+				entry["channelId"] = v["channelId"]
+				entry["voiceEpoch"] = v["voiceEpoch"]
 				entry["room"] = nil
 				vm := tx.One("SELECT channel_id FROM voice_members WHERE user_id=? AND socket_id=?", uid, v["socketId"])
 				if vm != nil {
@@ -143,7 +150,7 @@ func (s *Service) IceServers(uid string) []M {
 	}
 	return out
 }
-func (s *Service) JoinVoice(uid, socket, id string, eligible bool) M {
+func (s *Service) JoinVoice(uid, socket, id string, eligible bool, session ...string) M {
 	access := s.Channel(s.DB, uid, id)
 	Check(S(access["kind"]) == "voice", 400, "NOT_VOICE", "Select a voice channel.")
 	ice := s.IceServers(uid)
@@ -151,6 +158,9 @@ func (s *Service) JoinVoice(uid, socket, id string, eligible bool) M {
 		ice = s.cloudflareTurn.ForUser(uid)
 	}
 	result := serviceResult(s.DB.Tx(func(tx *DB) any {
+		if len(session) > 0 {
+			Check(voiceSessionActive(tx, session[0], Now()), 401, "UNAUTHENTICATED", "Session expired.")
+		}
 		ch := s.Channel(tx, uid, id)
 		Check(S(ch["kind"]) == "voice", 400, "NOT_VOICE", "Select a voice channel.")
 		Check(N(ch["timeoutUntil"]) <= Now(), 403, "TIMED_OUT", "You are timed out in this server.")
@@ -190,6 +200,9 @@ func (s *Service) VoiceAction(uid, socket, action string, body ...M) M {
 	result := serviceResult(s.DB.Tx(func(tx *DB) any {
 		vm := tx.One("SELECT * FROM voice_members WHERE user_id=? AND socket_id=?", uid, socket)
 		Check(vm != nil, 409, "NOT_IN_VOICE", "Voice session is no longer active.")
+		if b["epoch"] != nil {
+			Check(S(vm["epoch"]) == S(b["epoch"]), 409, "NOT_IN_VOICE", "Voice session is no longer active.")
+		}
 		id := S(vm["channel_id"])
 		if action == "leave" {
 			tx.Run("DELETE FROM voice_members WHERE user_id=?", uid)
@@ -226,13 +239,19 @@ func (s *Service) VoiceAction(uid, socket, action string, body ...M) M {
 	}
 	return result
 }
-func (s *Service) Share(uid, socket, rid string, stop, includeAudio bool) M {
+func (s *Service) Share(uid, socket, rid string, stop, includeAudio bool, requestedHeight ...int64) M {
 	operation := "share.start"
 	if stop {
 		operation = "share.stop"
 	}
 	audio := includeAudio && !stop
-	result := s.Mutate(uid, rid, operation, M{"includeAudio": audio}, func(tx *DB) any {
+	height := int64(720)
+	payload := M{"includeAudio": audio}
+	if !stop && len(requestedHeight) > 0 && requestedHeight[0] == 1080 {
+		height = 1080
+		payload["height"] = height
+	}
+	result := s.Mutate(uid, rid, operation, payload, func(tx *DB) any {
 		vm := tx.One("SELECT * FROM voice_members WHERE user_id=? AND socket_id=?", uid, socket)
 		Check(vm != nil, 409, "NOT_IN_VOICE", "Join voice before sharing.")
 		id := S(vm["channel_id"])
@@ -256,7 +275,11 @@ func (s *Service) Share(uid, socket, rid string, stop, includeAudio bool) M {
 		Check(tier != "fallback" || room == 0, 409, "SHARE_LIMIT", "All three 30fps slots are occupied. This room already has a screen.")
 		now := Now()
 		lease := ID()
-		tx.Run("INSERT INTO share_leases(id,user_id,channel_id,expires_at,tier,started_at,requested_fps,include_audio,policy_revision) VALUES(?,?,?,?,?,?,15,?,1)", lease, uid, id, now+30000, tier, now, serviceBoolInt(includeAudio))
+		bitrate := int64(0)
+		if height == 1080 {
+			bitrate = screenHDAdmission(tx, uid, s.C)
+		}
+		tx.Run("INSERT INTO share_leases(id,user_id,channel_id,expires_at,tier,started_at,requested_fps,include_audio,policy_revision,quality_height,quality_bitrate) VALUES(?,?,?,?,?,?,15,?,1,?,?)", lease, uid, id, now+30000, tier, now, serviceBoolInt(includeAudio), height, bitrate)
 		return M{"lease": ShareView(tx.One("SELECT * FROM share_leases WHERE id=?", lease), s.C)}
 	})
 	s.Notify("voice:changed", M{})
@@ -269,18 +292,28 @@ func (s *Service) UpdateShare(uid, socket, rid string, body M) M {
 		Check(row != nil, 409, "SHARE_EXPIRED", "Screen sharing has stopped.")
 		s.Channel(tx, uid, S(row["channel_id"]), "share")
 		Check(N(row["policy_revision"]) == N(body["expectedRevision"]), 409, "STALE_SHARE", "Sharing limits changed. Try again.")
-		if N(body["frameRate"]) > 0 {
-			Check(N(body["frameRate"]) <= N(ShareView(row, s.C)["maxFrameRate"]), 409, "SHARE_TIER", "30fps is not available for this share yet.")
+		height, bitrate := N(row["quality_height"]), N(row["quality_bitrate"])
+		if requested := N(body["height"]); requested != 0 && requested != height {
+			height, bitrate = requested, 0
+			if height == 1080 {
+				bitrate = screenHDAdmission(tx, uid, s.C)
+			}
+		}
+		if N(body["frameRate"]) > 0 && height < 1080 {
+			Check(N(body["frameRate"]) <= N(ShareView(Merge(row, M{"quality_height": height}), s.C)["maxFrameRate"]), 409, "SHARE_TIER", "30fps is not available for this share yet.")
 		}
 		fps := row["requested_fps"]
 		if body["frameRate"] != nil {
 			fps = body["frameRate"]
 		}
+		if height == 1080 {
+			fps = 15
+		}
 		audio := row["include_audio"]
 		if v, ok := body["includeAudio"]; ok && !B(v) {
 			audio = 0
 		}
-		tx.Run("UPDATE share_leases SET requested_fps=?,include_audio=?,policy_revision=policy_revision+1 WHERE id=?", fps, audio, row["id"])
+		tx.Run("UPDATE share_leases SET requested_fps=?,include_audio=?,quality_height=?,quality_bitrate=?,policy_revision=policy_revision+1 WHERE id=?", fps, audio, height, bitrate, row["id"])
 		return M{"lease": ShareView(tx.One("SELECT * FROM share_leases WHERE id=?", row["id"]), s.C)}
 	})
 	s.Notify("voice:changed", M{})

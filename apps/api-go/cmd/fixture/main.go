@@ -68,9 +68,13 @@ func main() {
 	controls := backend.NewFixtureControls(a)
 	defer controls.Close()
 	if os.Getenv("DORHAM_TTS_FIXTURE") == "1" {
-		a.Media.SetSpeechSynthesizer(func(text string, cold func()) ([]byte, error) {
+		a.Media.SetSpeechProgressSynthesizer(func(text string, cold func(), progress func(int)) ([]byte, error) {
 			if os.Getenv("DORHAM_TTS_LOADING_FIXTURE") == "1" {
 				cold()
+			}
+			for _, value := range []int{5, 35, 70, 95} {
+				progress(value)
+				time.Sleep(200 * time.Millisecond)
 			}
 			return fixtureWAV(), nil
 		})

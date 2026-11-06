@@ -1,0 +1,10 @@
+# Import inside the existing app handle, before its reverse_proxy. Native
+# downloads and the voice/SFU handle keep their existing independent policies.
+(dorham_web_performance) {
+    @hashedWeb path_regexp hashedWeb ^/assets/[^/]+-[A-Za-z0-9_-]{8}\.(js|css|woff2|wav)$
+    header @hashedWeb Cache-Control "public, max-age=31536000, immutable"
+    @webShell path / /index.html /sw.js /manifest.webmanifest
+    header @webShell Cache-Control "no-cache"
+    @webCompress path / /index.html /sw.js /manifest.webmanifest /assets/* /emojis/* /profile-pictures/* /audio/*
+    encode @webCompress zstd gzip
+}

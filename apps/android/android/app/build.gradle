@@ -1,6 +1,6 @@
 import groovy.json.JsonSlurper
 
-def dorhamVersion = new JsonSlurper().parse(file('../../../../package.json')).version
+def dorhamVersion = new JsonSlurper().parse(file('../../package.json')).version
 def dorhamParts = dorhamVersion.tokenize('.').collect { it.toInteger() }
 def dorhamCode = dorhamParts[0] * 1000000 + dorhamParts[1] * 1000 + dorhamParts[2]
 
@@ -14,6 +14,11 @@ android {
         applicationId "com.dorham.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        if (System.getenv('DORHAM_ANDROID_ABI')) {
+            def requestedAbi = System.getenv('DORHAM_ANDROID_ABI')
+            if (!(requestedAbi in ['arm64-v8a', 'armeabi-v7a', 'x86_64'])) throw new GradleException('Unsupported Android ABI')
+            ndk { abiFilters.add(requestedAbi) }
+        }
         versionCode dorhamCode
         versionName dorhamVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"

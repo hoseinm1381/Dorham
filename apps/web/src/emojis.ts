@@ -8,11 +8,12 @@ export const emojiCategories = [
 ] as const;
 const byId = new Map(emojis.map(e => [e.id, e]));
 export const findEmoji = (value: string) => byId.get(reactionEmojiId(value) || value);
+export const catalogEmojiToken = /^:dx-([a-f0-9-]{36}):$/;
 export const emojiCode = (id: string) => `:${id}:`;
-export function emojiParts(text: string): { text: string; emoji?: Emoji }[] {
+export function emojiParts(text: string, find: (id: string) => Emoji | undefined = id => byId.get(id)): { text: string; emoji?: Emoji }[] {
   const parts: { text: string; emoji?: Emoji }[] = []; let start = 0;
-  for (const match of text.matchAll(/:((?:emoji|dorham)-[a-z0-9-]{1,60}):/g)) {
-    const emoji = byId.get(match[1]); if (!emoji) continue;
+  for (const match of text.matchAll(/:((?:emoji|dorham|dx)-[a-z0-9-]{1,60}):/g)) {
+    const emoji = find(match[1]); if (!emoji) continue;
     if (match.index! > start) parts.push({ text: text.slice(start, match.index) });
     parts.push({ text: match[0], emoji }); start = match.index! + match[0].length;
   }
@@ -25,13 +26,17 @@ export function searchEmojis(query: string, category: string, label: (text: stri
   return emojis.filter(e => (category === 'all' || e.category === category) && words.every(word => normalized([e.id, e.label, label(e.label), ...e.tags].join(' ')).includes(word)));
 }
 export function insertEmoji(text: string, id: string, start: number, end: number) {
-  if (!byId.has(id)) return null;
+  if (!byId.has(id) && !catalogEmojiToken.test(emojiCode(id))) return null;
   start = Math.max(0, Math.min(start, text.length)); end = Math.max(start, Math.min(end, text.length));
   const code = emojiCode(id), next = text.slice(0, start) + code + text.slice(end);
   return next.length <= 4000 ? { text: next, cursor: start + code.length } : null;
 }
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const pictograph = /[\p{Extended_Pictographic}\p{Emoji_Presentation}]|\u20e3/u;
 export function isSingleEmoji(content: string) {
   const text = content.trim(), parts = emojiParts(text);
   if (parts.length === 1 && parts[0].emoji) return true;
-  return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].length === 1 && /[\p{Extended_Pictographic}\p{Emoji_Presentation}]|\u20e3/u.test(text);
+  if (!pictograph.test(text)) return false;
+  const iterator = segmenter.segment(text)[Symbol.iterator]();
+  return !iterator.next().done && iterator.next().done === true;
 }

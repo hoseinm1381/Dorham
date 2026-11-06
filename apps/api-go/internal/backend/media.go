@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,7 +97,7 @@ func (m *Media) Close() {
 func (m *Media) Cleanup() { m.cleanupAttachments(0, true); m.speech.cleanup() }
 func (m *Media) Metrics() M {
 	s := M{"passes": atomic.LoadInt64(&m.sfuPasses), "permissionUpdates": atomic.LoadInt64(&m.sfuUpdates), "removals": atomic.LoadInt64(&m.sfuRemovals)}
-	return M{"tts": m.speech.metrics(), "images": m.images.metrics(), "sfuControl": s,"attachmentIO":M{"fullVerifications":atomic.LoadInt64(&m.verifiedReads),"verificationCacheHits":atomic.LoadInt64(&m.verificationHits)}}
+	return M{"tts": m.speech.metrics(), "images": m.images.metrics(), "sfuControl": s, "attachmentIO": M{"fullVerifications": atomic.LoadInt64(&m.verifiedReads), "verificationCacheHits": atomic.LoadInt64(&m.verificationHits)}}
 }
 func mediaID(v string) string {
 	Check(mediaUUID.MatchString(v), 400, "VALIDATION", "Invalid identifier.")
@@ -206,6 +207,17 @@ func mediaVerifyJWT(raw, key, secret string) M {
 	return body
 }
 func (m *Media) twirp(method string, body M, grant M) (M, error) {
+	out, err := m.twirpOnce(method, body, grant)
+	// Room-control mutations are idempotent. A stale LiveKit participant can
+	// briefly return unavailable during removal; retry once, then fail closed.
+	if failure, ok := err.(*mediaSFUError); ok && failure.code == "unavailable" {
+		log.Printf("SFU control retry: method=%s code=unavailable", method)
+		time.Sleep(100 * time.Millisecond)
+		return m.twirpOnce(method, body, grant)
+	}
+	return out, err
+}
+func (m *Media) twirpOnce(method string, body M, grant M) (M, error) {
 	base := m.a.C.LivekitAPIURL
 	if base == "" {
 		base = m.a.C.LivekitURL

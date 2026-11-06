@@ -78,8 +78,9 @@ All unsafe JSON requests carry `requestId`; cookie requests also require allowed
 | GET / POST | `/auth/sessions`, `/auth/sessions/revoke` | own device list; revoke sessionId or all |
 | GET / POST | `/auth/recovery`, `/auth/recovery-codes`, `/auth/recovery-question` | settings, one-time code issuance, optional supporting question |
 | POST | `/auth/recover` | username, code, password; no question-only recovery |
-| GET | `/admin/users`, `/admin/audit` | global administrator only |
-| POST | `/admin/users/:id` | ban/unban/revoke/resetPassword; hierarchy/audit |
+| GET | `/admin/users`, `/admin/audit` | global administrator only. Go user list accepts `offset` in pages of 250 |
+| GET | `/admin/capabilities` | Go API advertises available account actions, pagination and deletion behavior |
+| POST | `/admin/users/:id` | ban, unban, revoke or resetPassword. Go also supports setPassword with `password` and delete with `confirmUsername` |
 | GET | `/channels/:id` | authorized internal link resolution |
 | POST / PATCH | `/servers/:id/tags`, `/voice/:id/policy` | scoped tags and ANY/ALL gates, lock and limit |
 | POST | `/voice/:id/moderate`, `/voice/:id/move` | persistent mute/deafen/sharing restriction, kick/stopShare, room move |

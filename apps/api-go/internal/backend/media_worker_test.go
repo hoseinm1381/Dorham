@@ -18,11 +18,20 @@ func TestMediaWorkerSubprocess(t *testing.T) {
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		var request map[string]string
+		var request map[string]any
 		if json.Unmarshal(scanner.Bytes(), &request) != nil {
 			os.Exit(2)
 		}
+		if request["warmup"] == true {
+			fmt.Println(`{"ready":true}`)
+			continue
+		}
 		switch request["text"] {
+		case "progress":
+			for i := 5; i < 100; i += 5 {
+				fmt.Printf("{\"progress\":%d}\n", i)
+				time.Sleep(time.Millisecond)
+			}
 		case "slow":
 			time.Sleep(150 * time.Millisecond)
 		case "invalid":
@@ -35,6 +44,23 @@ func TestMediaWorkerSubprocess(t *testing.T) {
 		fmt.Println(`{"audio":"` + base64.StdEncoding.EncodeToString([]byte("RIFFfixture-wave-data")) + `"}`)
 	}
 	os.Exit(0)
+}
+func TestSpeechWorkerProgressCannotDisplaceTerminalAudio(t *testing.T) {
+	w := mediaFixtureWorker()
+	defer w.close()
+	seen := []int{}
+	data, err := w.synthesizeProgress("progress", nil, func(value int) { seen = append(seen, value) })
+	if err != nil || string(data) != "RIFFfixture-wave-data" || len(seen) == 0 {
+		t.Fatal("progress lost final audio", seen, err)
+	}
+	for i, value := range seen {
+		if value < 0 || value >= 100 || (i > 0 && value <= seen[i-1]) {
+			t.Fatal("invalid progress", seen)
+		}
+	}
+	if _, err = w.synthesize("hello", nil); err != nil {
+		t.Fatal("progress contaminated next request", err)
+	}
 }
 func mediaFixtureWorker() *mediaSpeechWorker {
 	return &mediaSpeechWorker{idle: 1, lastUsed: Now(), start: func() *exec.Cmd {

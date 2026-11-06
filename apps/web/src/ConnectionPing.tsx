@@ -1,8 +1,10 @@
 import { Activity } from 'lucide-react';
 import type { ConnectionLatency } from '../../../packages/contracts/src/connection';
 import { formatNumber, t } from './i18n';
+import { useConnectionLatency } from './LiveStatus';
 
-export function ConnectionPing({ name, sample, online }: { name: string; sample?: ConnectionLatency; online: boolean }) {
+export function ConnectionPing({ name, userId = '', sample, online }: { name: string; userId?: string; sample?: ConnectionLatency; online: boolean }) {
+  const live = useConnectionLatency(userId); sample = sample ?? live;
   if (!online) return null;
   const ms = sample?.milliseconds ?? null;
   const label = ms === null ? t('Ping unavailable') : t('{value} ms', { value: formatNumber(ms) });

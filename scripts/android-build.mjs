@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, cp, readFile } from 'node:fs/promises';
 import path from 'node:path';
-const root = process.cwd(), version = JSON.parse(await readFile('package.json', 'utf8')).version, output = process.env.DORHAM_ANDROID_OUTPUT || `artifacts/android-${version}`;
+const root = process.cwd(), version = JSON.parse(await readFile('apps/android/package.json', 'utf8')).version, output = process.env.DORHAM_ANDROID_OUTPUT || `artifacts/android-${version}`;
 if (!existsSync('apps/web/dist/index.html')) throw new Error('Run npm run build:web first.');
 const env = { ...process.env };
 const debug = process.argv.includes('--debug');

@@ -193,13 +193,15 @@ it('resets an isolated fixture only, retaining server/channel configuration and 
   expect(await h.db.all('PRAGMA foreign_key_check')).toHaveLength(0);
   await expect(initializeAdministrator(h.db, { username: 'another_admin', displayName: 'Other', password: 'freshpass88' })).rejects.toThrow('already exists');
 });
-it('parses safe links without HTML and clamps all four screen modes to server policy', () => {
+it('parses safe links without HTML and clamps every screen mode to server policy and requires an HD lease', () => {
   const origin = 'https://dorhamapp.ir', link = channelLink(origin, 'server-1', 'channel-2'); expect(channelTarget(link, origin)).toEqual({ serverId: 'server-1', channelId: 'channel-2' });
   expect(channelTarget(link.replace('dorhamapp.ir', 'attacker.example'), origin)).toBeUndefined();
   const parts = messageParts(`سلام <script>alert(1)</script> javascript:bad https://example.com/x). ${link}`, origin);
   expect(parts.filter(p => p.url)).toHaveLength(2); expect(parts.find(p => p.url?.startsWith('https://example.com'))!.text).toBe('https://example.com/x');
   expect(messageParts('https://name:pass@example.com http://outside.example', origin).some(p => p.url)).toBe(false);
   for (const q of screenQualities) { const s = screenSettings(q, { maxBitrate: 450000, maxFrameRate: 12 }); expect(s.height).toBeLessThanOrEqual(720); expect(s.fps).toBe(12); expect(s.bitrate).toBeLessThanOrEqual(450000); }
+  const hd = screenSettings('1080p15', { maxBitrate: 1500000, maxFrameRate: 30 }, { maxHeight: 1080, maxBitrate: 1300000 }, 1500000);
+  expect(hd).toMatchObject({ width: 1920, height: 1080, fps: 15, bitrate: 1300000 });
 });
 
 it('shares the account cap with guests while permitting conversion at capacity', async () => {

@@ -1,0 +1,7 @@
+{
+  "name": "@dorham/windows-rust-installer",
+  "private": true,
+  "version": "1.1.1",
+  "description": "Dorham Windows Rust installer tooling",
+  "author": "Dorham contributors"
+}

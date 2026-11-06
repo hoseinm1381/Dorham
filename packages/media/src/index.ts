@@ -8,10 +8,10 @@ export { screenQualities, screenSettings } from './screen-quality';
 export type { ScreenQuality };
 export { defaultAudioProcessing, browserAudioProcessing } from './audio-processing';
 export type { AudioProcessing, AudioProcessingState };
-export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream; attach?: (element: HTMLVideoElement) => () => void };
+export type RemoteScreen = { userId: string; leaseId: string; stream: MediaStream; native?: { local: boolean }; sourceName?: string; audioScope?: 'none' | 'application' | 'system'; attach?: (element: HTMLVideoElement) => () => void };
 export type MediaEvents = { room: VoiceRoom | null; listenOnly: boolean; localScreen: RemoteScreen | null; screen: RemoteScreen; screenRemoved: string; speaking: { userId: string; speaking: boolean }; error: string; notice: string; status: string; stats: Record<string, any>; nativeVideo: { userId: string } };
 export type ScreenPolicy = { maxBitrate: number; maxFrameRate: number };
-export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; noiseRemoval?: NoiseRemoval; microphoneGain?: number; voiceClarity?: boolean; boostNoise?: { enabled: boolean; threshold: number }; screenPolicy?: ScreenPolicy; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
+export type MediaOptions = { socket: Socket; userId: string; audioProcessing?: AudioProcessing; noiseRemoval?: NoiseRemoval; microphoneGain?: number; voiceClarity?: boolean; boostNoise?: { enabled: boolean; threshold: number }; screenPolicy?: ScreenPolicy; channelName?: (id: string) => string; emit: <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => void };
 export type MediaCapabilities = { audio: boolean; screenCapture: boolean; nativeVideo: boolean; amplification: boolean; microphoneGain?: boolean; sharedAudio?: boolean; outputSelection?: boolean };
 export interface MediaTransport {
   room: VoiceRoom | null;

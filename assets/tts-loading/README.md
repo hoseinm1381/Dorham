@@ -1,6 +1,6 @@
 # Bundled TTS loading announcements
 
-These two short public phrases were rendered once with the existing Piper 1.8.0 engine and pinned models in `deployment/tts-models.json`. They play locally while the server starts a fresh speech worker; producing the announcement never requires the speech worker itself.
+These two short public phrases were rendered once with Piper 1.8.0 and the original Amir/LJSpeech models. They play locally while the server starts a fresh speech worker; producing the announcement never requires the speech worker itself. The temporary server-side switch to Mana was reverted at the operator's request; generated Persian messages and these unchanged recordings use Amir.
 
 - English: “Text to speech is loading.” — en_US-ljspeech-medium, 1.606 seconds.
 - Persian: «سامانهٔ گفتار در حال آماده‌سازی است.» — fa_IR-amir-medium, 2.511 seconds.

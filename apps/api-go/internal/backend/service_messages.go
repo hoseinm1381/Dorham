@@ -131,7 +131,7 @@ func (s *Service) ReplaceMentions(tx *DB, id, conversation, author, content stri
 	}
 }
 func (s *Service) MessageView(tx *DB, id string) M {
-	m := tx.One("SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id=?", id)
+	m := tx.One("SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language,u.deleted_at,u.catalog_avatar,u.rank_badge FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id=?", id)
 	Check(m != nil, 404, "NOT_FOUND", "Message not found.")
 	mentions, attachments := []M{}, []M{}
 	if !B(m["deleted"]) {
@@ -186,7 +186,7 @@ func (s *Service) MessageViews(tx *DB, ids []string) []M {
 		args[i] = id
 	}
 	in := servicePlaceholders(len(ids))
-	rows := tx.All("SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id IN ("+in+")", args...)
+	rows := tx.All("SELECT m.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.guest,u.language,u.deleted_at,u.catalog_avatar,u.rank_badge FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id IN ("+in+")", args...)
 	messages := map[string]M{}
 	for _, m := range rows {
 		messages[S(m["id"])] = m
@@ -241,6 +241,7 @@ func (s *Service) Send(uid, rid, conversation, content string, replyTo any, atta
 	}
 	event := serviceResult(s.Mutate(uid, rid, "message.send", payload, func(tx *DB) any {
 		cv := s.Conversation(tx, uid, conversation, true)
+		validateCustomEmoji(tx, uid, text, cv)
 		guest := B(tx.One("SELECT guest FROM users WHERE id=?", uid)["guest"])
 		if guest {
 			Check(N(tx.One("SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND created_at>?", uid, Now()-60000)["count"]) < 20, 429, "GUEST_RATE", "Guests may send at most 20 messages per minute.")
@@ -270,7 +271,11 @@ func (s *Service) Send(uid, rid, conversation, content string, replyTo any, atta
 			tx.Run("UPDATE dm_members SET hidden=0 WHERE conversation_id=?", conversation)
 		}
 		posted = true
-		return s.Event(tx, conversation, "message", s.MessageView(tx, id))
+		event := s.Event(tx, conversation, "message", s.MessageView(tx, id))
+		if s.OnMessage != nil {
+			s.OnMessage(tx, Obj(event["payload"]))
+		}
+		return event
 	}))
 	if reopened {
 		s.Notify("state:changed", M{})
@@ -294,6 +299,10 @@ func (s *Service) ChangeMessage(uid, rid, id string, body M) M {
 			if B(body["removeReaction"]) {
 				tx.Run("DELETE FROM reactions WHERE message_id=? AND user_id=? AND emoji=?", id, uid, emoji)
 			} else {
+				if isCatalogReaction(emoji) {
+					validateCustomEmoji(tx, uid, emoji, cv)
+					Check(tx.One("SELECT id FROM feature_catalog WHERE id=? AND kind='emoji'", emoji[4:len(emoji)-1]) != nil, 400, "VALIDATION", "Only emoji can be used as reactions.")
+				}
 				Check(N(tx.One("SELECT COUNT(*) AS count FROM reactions WHERE message_id=?", id)["count"]) < 100, 409, "LIMIT", "Reaction limit reached.")
 				tx.Run("INSERT INTO reactions(message_id,user_id,emoji) VALUES(?,?,?) ON CONFLICT DO NOTHING", id, uid, emoji)
 			}
@@ -310,6 +319,8 @@ func (s *Service) ChangeMessage(uid, rid, id string, body M) M {
 			content := S(body["content"])
 			if B(body["delete"]) {
 				content = ""
+			} else if content != S(m["content"]) {
+				validateCustomEmoji(tx, uid, content, cv)
 			}
 			tx.Run("UPDATE messages SET content=?,deleted=?,edited_at=? WHERE id=?", content, serviceBoolInt(B(body["delete"])), Now(), id)
 			s.ReplaceMentions(tx, id, conversation, S(m["user_id"]), content)

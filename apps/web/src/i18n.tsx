@@ -8,6 +8,11 @@ function detect(): Language {
 }
 let language = detect();
 export const currentLanguage = () => language;
+const messageDates = Object.fromEntries((['en-US', 'fa-IR'] as const).map(locale => [locale, {
+  full: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+  short: new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }),
+}])) as Record<Language, { full: Intl.DateTimeFormat; short: Intl.DateTimeFormat }>;
+export const formatMessageTime = (timestamp: number, short = false) => messageDates[language][short ? 'short' : 'full'].format(timestamp);
 const numbers = { 'en-US': new Intl.NumberFormat('en-US'), 'fa-IR': new Intl.NumberFormat('fa-IR') };
 export const formatNumber = (value: number) => numbers[language].format(value);
 const sizes = { 'en-US': new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }), 'fa-IR': new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 2 }) };

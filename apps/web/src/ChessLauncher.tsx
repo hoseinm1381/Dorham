@@ -34,7 +34,7 @@ export function GamesProvider({ me, room, serverId, socket, children }: { me: Pu
 }
 export function GamesButton() {
   const g = useContext(Games); if (!g) return null;
-  return <button type="button" className="games-launch-button" disabled={!g.room || !g.connected} onClick={() => g.launch()}><span aria-hidden="true">♟</span>{tr('Games')}</button>;
+  return <button type="button" className="icon-button games-launch-button" aria-label={tr("Games")} title={tr("Games")} disabled={!g.room || !g.connected} onClick={() => g.launch()}><span aria-hidden="true">♟</span></button>;
 }
 export function VoiceGames({ channelId }: { channelId: string }) {
   const g = useContext(Games); if (!g || g.room?.channelId !== channelId) return null;

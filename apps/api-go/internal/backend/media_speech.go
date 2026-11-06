@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type mediaSpeechJob struct {
 	UID             string
 	Message, Sender M
 	Initial         []M
+	AcceptedAt      int64
 }
 type mediaSpeech struct {
 	m              *Media
@@ -34,23 +36,44 @@ type mediaSpeech struct {
 	audio          map[string]mediaClip
 	order          []string
 	audioBytes     int64
+	reuse          map[[32]byte]mediaSpeechReuse
+	reuseBytes     int64
+	cacheHits      int
 	queued         int
 	started        int64
 	closed         bool
 	jobs           chan mediaSpeechJob
+	plusJobs       chan mediaSpeechJob
+	plusDone       chan struct{}
+	plusStats      speechPlusStats
 	done           chan struct{}
+	stop           chan struct{}
 	worker         *mediaSpeechWorker
 	engine         func(string, func()) ([]byte, error)
+	progressEngine func(string, func(), func(int)) ([]byte, error)
 }
 
 func newMediaSpeech(m *Media) *mediaSpeech {
-	s := &mediaSpeech{m: m, seen: map[string]int64{}, cooldown: map[string]int64{}, audio: map[string]mediaClip{}, started: Now(), jobs: make(chan mediaSpeechJob, 4), done: make(chan struct{}), worker: &mediaSpeechWorker{idle: int64(m.a.C.TTSIdleSeconds) * 1000, lastUsed: Now(), cpuPercent: m.a.C.TTSCPUPercent, timeout: time.Duration(m.a.C.TTSTimeoutSeconds) * time.Second}}
+	s := &mediaSpeech{m: m, seen: map[string]int64{}, cooldown: map[string]int64{}, audio: map[string]mediaClip{}, reuse: map[[32]byte]mediaSpeechReuse{}, started: Now(), jobs: make(chan mediaSpeechJob, 4), done: make(chan struct{}), stop: make(chan struct{}), worker: &mediaSpeechWorker{keepWarm: m.a.C.TTSKeepWarm, idle: int64(m.a.C.TTSIdleSeconds) * 1000, lastUsed: Now(), cpuPercent: m.a.C.TTSCPUPercent, timeout: time.Duration(m.a.C.TTSTimeoutSeconds) * time.Second}}
+	s.plusJobs = make(chan mediaSpeechJob, 1)
+	s.plusDone = make(chan struct{})
+	go func() {
+		defer close(s.plusDone)
+		for job := range s.plusJobs {
+			s.runPlus(job)
+		}
+	}()
 	go s.loop()
 	return s
 }
 func (m *Media) SetSpeechSynthesizer(engine func(string, func()) ([]byte, error)) {
 	m.speech.mu.Lock()
 	m.speech.engine = engine
+	m.speech.mu.Unlock()
+}
+func (m *Media) SetSpeechProgressSynthesizer(engine func(string, func(), func(int)) ([]byte, error)) {
+	m.speech.mu.Lock()
+	m.speech.progressEngine = engine
 	m.speech.mu.Unlock()
 }
 func (m *Media) Speech(uid string, msg M) { m.speech.enqueue(uid, msg) }
@@ -87,17 +110,26 @@ func (s *mediaSpeech) cleanup() {
 			delete(s.cooldown, id)
 		}
 	}
-	idle := s.queued == 0
+	for key, item := range s.reuse {
+		if item.expires <= now {
+			s.removeReuse(key)
+		}
+	}
 	s.mu.Unlock()
-	if idle {
-		s.worker.cleanup()
+	s.worker.cleanup()
+	if s.worker.underPressure() {
+		s.mu.Lock()
+		s.reuse = map[[32]byte]mediaSpeechReuse{}
+		s.reuseBytes = 0
+		s.mu.Unlock()
 	}
 }
 func (s *mediaSpeech) metrics() M {
 	s.mu.Lock()
-	v := M{"queued": s.queued, "cachedClips": len(s.audio), "cachedAudioBytes": s.audioBytes, "audioBudgetBytes": int64(s.m.a.C.TTSAudioCacheMiB) * mediaMiB, "dedupEntries": len(s.seen), "cooldownEntries": len(s.cooldown)}
+	v := M{"queued": s.queued, "cachedClips": len(s.audio), "cachedAudioBytes": s.audioBytes, "reusableClips": len(s.reuse), "reusableAudioBytes": s.reuseBytes, "synthesisCacheHits": s.cacheHits, "audioBudgetBytes": int64(s.m.a.C.TTSAudioCacheMiB) * mediaMiB, "dedupEntries": len(s.seen), "cooldownEntries": len(s.cooldown)}
 	s.mu.Unlock()
 	v["worker"] = s.worker.metrics()
+	v["plus"] = M{"requests": s.plusStats.requests.Load(), "errors": s.plusStats.errors.Load(), "fallbacks": s.plusStats.fallbacks.Load(), "queued": len(s.plusJobs)}
 	return v
 }
 func (s *mediaSpeech) enqueue(uid string, msg M) {
@@ -111,7 +143,7 @@ func (s *mediaSpeech) enqueue(uid string, msg M) {
 	s.seen[id] = now + 60000
 	s.mu.Unlock()
 	db := s.m.a.DB
-	sender := db.One("SELECT * FROM voice_members WHERE user_id=? AND heartbeat>?", uid, now-30000)
+	sender := db.One("SELECT v.*,u.speech_plus FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.user_id=? AND v.heartbeat>?", uid, now-30000)
 	if sender == nil {
 		return
 	}
@@ -123,7 +155,7 @@ func (s *mediaSpeech) enqueue(uid string, msg M) {
 		return
 	}
 	s.mu.Lock()
-	limited := len(utf16.Encode([]rune(Str(msg, "content")))) > 400 || s.queued >= 4 || now-s.cooldown[uid] < 4000
+	limited := len(utf16.Encode([]rune(Str(msg, "content")))) > 400 || now-s.cooldown[uid] < 4000
 	s.mu.Unlock()
 	if limited {
 		s.notice(uid, "TTS is limited to 400 characters and one request every 4 seconds. Your message was sent normally.")
@@ -135,19 +167,38 @@ func (s *mediaSpeech) enqueue(uid string, msg M) {
 		s.mu.Unlock()
 		return
 	}
-	if s.queued >= 4 {
-		s.mu.Unlock()
-		s.notice(uid, "TTS is busy. Your message was sent normally.")
-		return
-	}
 	if now-s.cooldown[uid] < 4000 {
 		s.mu.Unlock()
 		s.notice(uid, "TTS is limited to 400 characters and one request every 4 seconds. Your message was sent normally.")
 		return
 	}
 	s.cooldown[uid] = now
+	job := mediaSpeechJob{uid, Clone(msg), sender, initial, now}
+	plusSelected := Bool(sender, "speech_plus")
+	if plusSelected {
+		select {
+		case s.plusJobs <- job:
+			s.mu.Unlock()
+			return
+		default:
+			s.plusStats.fallbacks.Add(1)
+		}
+	}
+	if s.queued >= 4 {
+		s.mu.Unlock()
+		s.notice(uid, "TTS is busy. Your message was sent normally.")
+		return
+	}
 	s.queued++
-	s.jobs <- mediaSpeechJob{uid, Clone(msg), sender, initial}
+	s.mu.Unlock()
+	s.progress(job, 0, "queued")
+	s.mu.Lock()
+	if s.closed {
+		s.queued--
+		s.mu.Unlock()
+		return
+	}
+	s.jobs <- job
 	s.mu.Unlock()
 }
 func (s *mediaSpeech) audience(job mediaSpeechJob) []M {
@@ -182,26 +233,46 @@ func (s *mediaSpeech) audience(job mediaSpeechJob) []M {
 }
 func (s *mediaSpeech) loop() {
 	defer close(s.done)
-	for job := range s.jobs {
-		s.run(job)
-		s.mu.Lock()
-		s.queued--
-		s.mu.Unlock()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case job, ok := <-s.jobs:
+			if !ok {
+				return
+			}
+			s.run(job)
+			s.mu.Lock()
+			s.queued--
+			s.mu.Unlock()
+		case <-ticker.C:
+			s.mu.Lock()
+			warm := !s.closed && s.queued == 0 && s.engine == nil && s.progressEngine == nil
+			s.mu.Unlock()
+			if warm {
+				s.worker.prewarm()
+			}
+		}
 	}
 }
 func (s *mediaSpeech) run(job mediaSpeechJob) {
+	defer func() { s.progress(job, 100, "finished") }()
 	defer func() {
 		if recover() != nil {
 			s.mu.Lock()
 			closed := s.closed
 			s.mu.Unlock()
 			if !closed {
-				s.notice(job.UID, "TTS is unavailable. Your message was sent normally.")
+				if s.worker.underPressure() {
+					s.notice(job.UID, speechMemoryNotice)
+				} else {
+					s.notice(job.UID, "TTS is unavailable. Your message was sent normally.")
+				}
 			}
 		}
 	}()
 	s.mu.Lock()
-	closed, engine := s.closed, s.engine
+	closed, engine, progressEngine := s.closed, s.engine, s.progressEngine
 	s.mu.Unlock()
 	if closed {
 		return
@@ -217,18 +288,71 @@ func (s *mediaSpeech) run(job mediaSpeechJob) {
 			s.m.emitSocket(Str(member, "socket_id"), "voice:tts-loading", M{"id": job.Message["id"], "channelId": job.Sender["channel_id"], "userId": job.UID, "expiresAt": Now() + 15000})
 		}
 	}
+	if len(s.audience(job)) == 0 {
+		return
+	}
+	text := Str(job.Message, "content")
+	s.progress(job, 0, "preparing")
+	chunks := s.reused(text)
+	if len(chunks) == 1 {
+		if !s.waitFirst(job) {
+			return
+		}
+		s.publish(job, chunks[0], 0, 1)
+		return
+	}
+	last := -1
+	progress := func(percent int) {
+		if percent > last && percent >= 0 && percent < 100 {
+			last = percent
+			s.progress(job, percent, "synthesizing")
+		}
+	}
 	var data []byte
 	var err error
-	if engine != nil {
-		data, err = engine(Str(job.Message, "content"), cold)
+	if progressEngine != nil {
+		data, err = progressEngine(text, cold, progress)
+	} else if engine != nil {
+		data, err = engine(text, cold)
 	} else {
-		data, err = s.worker.synthesize(Str(job.Message, "content"), cold)
+		data, err = s.worker.synthesizeProgress(text, cold, progress)
 	}
 	if err != nil {
 		panic(err)
 	}
+	if !s.waitFirst(job) {
+		return
+	}
+	// Publish one complete WAV. Piper's natural sentence/language boundaries stay
+	// intact; no first-half playback or arbitrary midpoint synthesis is used.
+	s.publish(job, data, 0, 1)
+	s.remember(text, [][]byte{data})
+}
+
+func (s *mediaSpeech) progress(job mediaSpeechJob, percent int, phase string) {
+	for _, member := range s.audience(job) {
+		s.m.emitSocket(Str(member, "socket_id"), "voice:tts-progress", M{"id": job.Message["id"], "messageId": job.Message["id"], "channelId": job.Sender["channel_id"], "userId": job.UID, "percent": percent, "phase": phase, "expiresAt": Now() + 600000})
+	}
+}
+
+func (s *mediaSpeech) waitFirst(job mediaSpeechJob) bool {
+	delay := time.Duration(job.AcceptedAt+3000-Now()) * time.Millisecond
+	if delay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-s.stop:
+		return false
+	}
+}
+
+func (s *mediaSpeech) publish(job mediaSpeechJob, data []byte, index, count int) {
 	members := s.audience(job)
-	if members == nil {
+	if len(members) == 0 {
 		return
 	}
 	recipients := map[string]string{}
@@ -245,7 +369,10 @@ func (s *mediaSpeech) run(job mediaSpeechJob) {
 		s.mu.Unlock()
 		return
 	}
-	for len(s.audio) >= 8 || s.audioBytes+int64(len(data)) > budget {
+	for s.audioBytes+s.reuseBytes+int64(len(data)) > budget && len(s.reuse) > 0 {
+		s.evictReuse()
+	}
+	for len(s.audio) >= 16 || s.audioBytes+s.reuseBytes+int64(len(data)) > budget {
 		if len(s.order) == 0 {
 			s.mu.Unlock()
 			return
@@ -253,12 +380,15 @@ func (s *mediaSpeech) run(job mediaSpeechJob) {
 		s.remove(s.order[0])
 	}
 	id := Str(job.Message, "id")
+	if index > 0 {
+		id += "-tts-" + S(index)
+	}
 	s.audio[id] = mediaClip{data, Str(job.Sender, "channel_id"), recipients, expires}
 	s.order = append(s.order, id)
 	s.audioBytes += int64(len(data))
 	s.mu.Unlock()
 	for _, member := range members {
-		s.m.emitSocket(Str(member, "socket_id"), "voice:tts", M{"id": id, "channelId": job.Sender["channel_id"], "userId": job.UID, "expiresAt": expires})
+		s.m.emitSocket(Str(member, "socket_id"), "voice:tts", M{"id": id, "messageId": job.Message["id"], "chunkIndex": index, "chunkCount": count, "channelId": job.Sender["channel_id"], "userId": job.UID, "expiresAt": expires})
 	}
 }
 func (s *mediaSpeech) read(uid, id string) []byte {
@@ -285,15 +415,20 @@ func (s *mediaSpeech) close() {
 		return
 	}
 	s.closed = true
+	close(s.stop)
 	s.audio = map[string]mediaClip{}
 	s.order = nil
 	s.audioBytes = 0
+	s.reuse = map[[32]byte]mediaSpeechReuse{}
+	s.reuseBytes = 0
 	s.seen = map[string]int64{}
 	s.cooldown = map[string]int64{}
-	custom := s.engine != nil
+	custom := s.engine != nil || s.progressEngine != nil
 	close(s.jobs)
+	close(s.plusJobs)
 	s.mu.Unlock()
 	s.worker.close()
+	<-s.plusDone
 	if !custom {
 		<-s.done
 	}
@@ -312,22 +447,28 @@ func (m *Media) registerSpeech() {
 }
 
 type mediaWorkerReply struct {
-	data []byte
-	err  error
+	data  []byte
+	err   error
+	ready bool
 }
 type mediaSpeechWorker struct {
-	mu                sync.Mutex
-	cmd               *exec.Cmd
-	input             io.WriteCloser
-	replies           chan mediaWorkerReply
-	exited            chan struct{}
-	closed, busy      bool
-	lastUsed, idle    int64
-	starts, idleStops int
-	start             func() *exec.Cmd
-	cpuPercent        int
-	timeout           time.Duration
-	isolation         *speechCPUGroup
+	mu                        sync.Mutex
+	cmd                       *exec.Cmd
+	input                     io.WriteCloser
+	replies                   chan mediaWorkerReply
+	updates                   chan int
+	exited                    chan struct{}
+	closed, busy              bool
+	lastUsed, idle            int64
+	starts, idleStops         int
+	start                     func() *exec.Cmd
+	cpuPercent                int
+	timeout                   time.Duration
+	isolation                 *speechCPUGroup
+	keepWarm, ready, pressure bool
+	memoryStops               int
+	nextWarm                  int64
+	memory                    func() (int64, int64, bool)
 }
 
 func (w *mediaSpeechWorker) launch() error {
@@ -379,12 +520,15 @@ func (w *mediaSpeechWorker) launch() error {
 		return e
 	}
 	replies := make(chan mediaWorkerReply, 1)
+	updates := make(chan int, 1)
 	exited := make(chan struct{})
 	w.cmd = cmd
 	w.input = in
 	w.replies = replies
+	w.updates = updates
 	w.exited = exited
 	w.starts++
+	w.ready = false
 	w.isolation = group
 	go func() {
 		defer close(exited)
@@ -392,21 +536,41 @@ func (w *mediaSpeechWorker) launch() error {
 		scanner.Buffer(make([]byte, 4096), 4001000)
 		for scanner.Scan() {
 			var response struct {
-				Audio string `json:"audio"`
+				Audio    string `json:"audio"`
+				Ready    bool   `json:"ready"`
+				Progress *int   `json:"progress"`
 			}
 			data := scanner.Bytes()
 			var err error
 			var audio []byte
-			if json.Unmarshal(data, &response) != nil || len(response.Audio) > 4000000 || response.Audio == "" {
+			decoded := json.Unmarshal(data, &response)
+			if decoded == nil && response.Progress != nil && *response.Progress >= 0 && *response.Progress < 100 && response.Audio == "" && !response.Ready {
+				// Progress has its own bounded latest-value slot. It must never
+				// occupy or displace the terminal audio/error response.
+				select {
+				case updates <- *response.Progress:
+				default:
+					select {
+					case <-updates:
+					default:
+					}
+					select {
+					case updates <- *response.Progress:
+					default:
+					}
+				}
+				continue
+			}
+			if decoded != nil || len(response.Audio) > 4000000 || (response.Audio == "" && !response.Ready) {
 				err = errors.New("invalid speech response")
-			} else {
+			} else if !response.Ready {
 				audio, err = base64.StdEncoding.DecodeString(response.Audio)
 				if len(audio) > 3000000 || !bytes.HasPrefix(audio, []byte("RIFF")) {
 					err = errors.New("invalid speech audio")
 				}
 			}
 			select {
-			case replies <- mediaWorkerReply{audio, err}:
+			case replies <- mediaWorkerReply{data: audio, err: err, ready: response.Ready}:
 			default:
 			}
 		}
@@ -428,6 +592,12 @@ func mediaWorkerEnv(env []string) []string {
 	return append(out, "OMP_NUM_THREADS=1", "OPENBLAS_NUM_THREADS=1")
 }
 func (w *mediaSpeechWorker) synthesize(text string, cold func()) ([]byte, error) {
+	return w.request(M{"text": text}, cold)
+}
+func (w *mediaSpeechWorker) synthesizeProgress(text string, cold func(), progress func(int)) ([]byte, error) {
+	return w.request(M{"text": text, "progress": true}, cold, progress)
+}
+func (w *mediaSpeechWorker) request(request M, cold func(), callbacks ...func(int)) ([]byte, error) {
 	w.mu.Lock()
 	if w.closed || w.busy {
 		w.mu.Unlock()
@@ -441,21 +611,32 @@ func (w *mediaSpeechWorker) synthesize(text string, cold func()) ([]byte, error)
 		}
 	}
 	wasCold := w.cmd == nil
+	if w.keepWarm && !w.memorySafeLocked(wasCold) {
+		w.pressure = true
+		w.retireLocked()
+		w.mu.Unlock()
+		return nil, errors.New("speech memory pressure")
+	}
 	if wasCold {
 		if e := w.launch(); e != nil {
 			w.mu.Unlock()
 			return nil, e
 		}
 	}
+	w.pressure = false
 	w.busy = true
 	w.lastUsed = Now()
-	input, replies, exit := w.input, w.replies, w.exited
+	input, replies, updates, exit := w.input, w.replies, w.updates, w.exited
+	select {
+	case <-updates:
+	default:
+	}
 	w.mu.Unlock()
 	defer func() { w.mu.Lock(); w.busy = false; w.lastUsed = Now(); w.mu.Unlock() }()
 	if wasCold && cold != nil {
 		cold()
 	}
-	_, e := io.WriteString(input, JSON(M{"text": text})+"\n")
+	_, e := io.WriteString(input, JSON(request)+"\n")
 	if e != nil {
 		w.mu.Lock()
 		w.retireLocked()
@@ -468,16 +649,30 @@ func (w *mediaSpeechWorker) synthesize(text string, cold func()) ([]byte, error)
 	}
 	timer := time.NewTimer(deadline)
 	defer timer.Stop()
-	select {
-	case reply := <-replies:
-		return reply.data, reply.err
-	case <-exit:
-		return nil, errors.New("speech exited")
-	case <-timer.C:
-		w.mu.Lock()
-		w.retireLocked()
-		w.mu.Unlock()
-		return nil, errors.New("speech timeout")
+	for {
+		select {
+		case percent := <-updates:
+			if len(callbacks) > 0 && callbacks[0] != nil {
+				callbacks[0](percent)
+			}
+		case reply := <-replies:
+			if reply.err == nil && reply.ready != Bool(request, "warmup") {
+				return nil, errors.New("unexpected speech response")
+			}
+			if Bool(request, "warmup") && reply.err == nil {
+				w.mu.Lock()
+				w.ready = w.cmd != nil
+				w.mu.Unlock()
+			}
+			return reply.data, reply.err
+		case <-exit:
+			return nil, errors.New("speech exited")
+		case <-timer.C:
+			w.mu.Lock()
+			w.retireLocked()
+			w.mu.Unlock()
+			return nil, errors.New("speech timeout")
+		}
 	}
 }
 func (w *mediaSpeechWorker) retireLocked() {
@@ -494,14 +689,31 @@ func (w *mediaSpeechWorker) retireLocked() {
 	case <-time.After(2 * time.Second):
 	}
 	w.cmd = nil
+	w.ready = false
 	w.input = nil
 	w.replies = nil
+	w.updates = nil
 	w.exited = nil
 }
 func (w *mediaSpeechWorker) cleanup() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if !w.closed && w.cmd != nil && !w.busy && Now()-w.lastUsed >= w.idle {
+	if w.cmd != nil {
+		select {
+		case <-w.exited:
+			w.retireLocked()
+			w.nextWarm = Now() + 30000
+		default:
+		}
+	}
+	if !w.closed && w.keepWarm && !w.memorySafeLocked(false) {
+		w.pressure = true
+		if w.cmd != nil {
+			w.memoryStops++
+			w.retireLocked()
+		}
+	}
+	if !w.closed && !w.keepWarm && w.cmd != nil && !w.busy && Now()-w.lastUsed >= w.idle {
 		w.idleStops++
 		w.retireLocked()
 	}
@@ -517,7 +729,47 @@ func (w *mediaSpeechWorker) metrics() M {
 	if w.isolation != nil {
 		cpu = w.isolation.metrics()
 	}
-	return M{"running": w.cmd != nil, "stopping": false, "pid": pid, "busy": w.busy, "starts": w.starts, "idleStops": w.idleStops, "idleSeconds": w.idle / 1000, "timeoutSeconds": int64(w.timeout / time.Second), "cpu": cpu}
+	return M{"running": w.cmd != nil, "stopping": false, "pid": pid, "busy": w.busy, "starts": w.starts, "idleStops": w.idleStops, "idleSeconds": w.idle / 1000, "keepWarm": w.keepWarm, "modelsReady": w.ready, "memoryPressure": w.pressure, "memoryStops": w.memoryStops, "timeoutSeconds": int64(w.timeout / time.Second), "cpu": cpu}
+}
+
+const speechMemoryNotice = "TTS was unloaded to free server memory. Speech will resume when enough memory is available. Your text message was sent normally."
+
+// The restart reserve includes room for both models, avoiding reload/evict loops.
+func (w *mediaSpeechWorker) memorySafeLocked(launch bool) bool {
+	read := w.memory
+	if read == nil {
+		read = cacheMemoryHeadroom
+	}
+	host, service, ok := read()
+	if !ok {
+		return runtime.GOOS != "linux"
+	}
+	reserve := int64(0)
+	if launch || w.pressure {
+		reserve = 448 * mediaMiB
+	}
+	return host >= 384*mediaMiB+reserve && service >= 192*mediaMiB+reserve
+}
+func (w *mediaSpeechWorker) underPressure() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.pressure
+}
+func (w *mediaSpeechWorker) prewarm() {
+	w.mu.Lock()
+	if !w.keepWarm || w.closed || w.busy || w.ready || Now() < w.nextWarm || !w.memorySafeLocked(w.cmd == nil) {
+		w.mu.Unlock()
+		return
+	}
+	w.nextWarm = Now() + 60000
+	w.mu.Unlock()
+	_, err := w.request(M{"warmup": true}, nil)
+	if err == nil {
+		w.mu.Lock()
+		w.pressure = false
+		w.nextWarm = 0
+		w.mu.Unlock()
+	}
 }
 func (w *mediaSpeechWorker) close() {
 	w.mu.Lock()

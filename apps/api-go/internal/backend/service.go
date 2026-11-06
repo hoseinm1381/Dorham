@@ -13,6 +13,7 @@ type Service struct {
 	C              Config
 	Notify         func(string, any)
 	OnTTS          func(string, M)
+	OnMessage      func(*DB, M)
 	cloudflareTurn *CloudflareTurn
 }
 
@@ -24,9 +25,17 @@ func NewService(db *DB, c Config) *Service {
 	return s
 }
 func PublicUser(u M) M {
+	if u["deleted_at"] != nil {
+		return deletedAccountView(Str(u, "id"))
+	}
 	p := M{"id": u["id"], "username": u["username"], "displayName": u["display_name"], "bio": u["bio"], "avatar": u["avatar"], "status": u["status"], "instanceAdmin": B(u["instance_admin"]), "guest": B(u["guest"]), "banned": B(u["banned"]), "mustChangePassword": B(u["must_change_password"])}
 	if lang := S(u["language"]); lang == "fa-IR" || lang == "en-US" {
 		p["language"] = lang
+	}
+	for _, field := range [][2]string{{"rankBadge", "rank_badge"}, {"profileFrame", "profile_frame"}, {"profileBanner", "profile_banner"}, {"profileAccent", "profile_accent"}, {"profileBadge", "profile_badge"}, {"profileBadge", "profile_badge_award"}, {"avatar", "catalog_avatar"}} {
+		if value := Str(u, field[1]); value != "" {
+			p[field[0]] = value
+		}
 	}
 	return p
 }
@@ -39,7 +48,7 @@ func (s *Service) Mutate(uid, rid, operation string, payload any, fn func(*DB) a
 	// rollback to the preserved TypeScript runtime. Accept early Go hashes too.
 	fingerprint := Hash(serviceLegacyJSON(operation, payload))
 	return s.DB.Tx(func(tx *DB) any {
-		Check(tx.One("SELECT id FROM users WHERE id=? AND banned=0", uid) != nil, 403, "FORBIDDEN", "Account access is unavailable.")
+		Check(tx.One("SELECT id FROM users WHERE id=? AND banned=0 AND deleted_at IS NULL", uid) != nil, 403, "FORBIDDEN", "Account access is unavailable.")
 		if old := tx.One("SELECT * FROM mutations WHERE user_id=? AND request_id=?", uid, rid); old != nil {
 			compatible := S(old["fingerprint"]) == fingerprint || S(old["fingerprint"]) == Hash(JSON(payload))
 			Check(S(old["operation"]) == operation && compatible, 409, "IDEMPOTENCY_CONFLICT", "Request identifier was already used with different input.")
@@ -220,6 +229,7 @@ func (s *Service) Channel(tx *DB, uid, id string, permission ...string) M {
 	return Merge(ch, M{"role": role, "permissions": permissions, "timeoutUntil": timeout})
 }
 func (s *Service) AllowDirectMessage(tx *DB, uid, other string) {
+	Check(tx.One("SELECT id FROM users WHERE id=? AND deleted_at IS NOT NULL", other) == nil, 403, "ACCOUNT_DELETED", "This direct conversation is read-only because the other account was deleted.")
 	Check(tx.One("SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)", uid, other, other, uid) == nil, 403, "DM_BLOCKED", "Direct messaging is blocked between these accounts.")
 }
 func (s *Service) Conversation(tx *DB, uid, id string, write ...bool) M {

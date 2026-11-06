@@ -115,13 +115,17 @@ func (g *Games) chessSave(tx *DB, c *ChessGame) {
 }
 func (g *Games) chessAllowed(tx *DB, uid string, c *ChessGame) {
 	g.a.Service.Member(tx, uid, c.ServerID)
-	g.a.Service.Member(tx, c.WhiteID, c.ServerID)
-	if c.BlackID != nil {
-		g.a.Service.Member(tx, *c.BlackID, c.ServerID)
+	for _, player := range []string{c.WhiteID, chessString(c.BlackID)} {
+		if player != "" && !deletedChessPlayer(tx, c, player) {
+			g.a.Service.Member(tx, player, c.ServerID)
+		}
 	}
 	if c.ChannelID != nil && uid != c.WhiteID && uid != chessString(c.BlackID) {
 		g.requireVoice(tx, uid, *c.ChannelID)
 	}
+}
+func deletedChessPlayer(db *DB, c *ChessGame, player string) bool {
+	return c.Status == "finished" && db.One("SELECT id FROM users WHERE id=? AND deleted_at IS NOT NULL", player) != nil
 }
 func (g *Games) ChessView(uid, id string) any {
 	g.mu.Lock()
@@ -444,7 +448,8 @@ func (g *Games) chessChanged(id string) {
 	for _, r := range g.a.DB.All("SELECT u.id AS user_id FROM users u JOIN servers s ON s.id=? LEFT JOIN members m ON m.server_id=s.id AND m.user_id=u.id WHERE u.banned=0 AND (u.instance_admin=1 OR (m.user_id IS NOT NULL AND (u.guest=0 OR s.allow_guests=1)))", c.ServerID) {
 		members[S(r["user_id"])] = true
 	}
-	if !members[c.WhiteID] || (c.BlackID != nil && !members[*c.BlackID]) {
+	if (!members[c.WhiteID] && !deletedChessPlayer(g.a.DB, c, c.WhiteID)) ||
+		(c.BlackID != nil && !members[*c.BlackID] && !deletedChessPlayer(g.a.DB, c, *c.BlackID)) {
 		return
 	}
 	voice := map[string]bool{}

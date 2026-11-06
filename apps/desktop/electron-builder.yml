@@ -6,6 +6,11 @@ directories:
 files:
   - main.cjs
   - capture-origin.cjs
+  - screen-capture.cjs
+  - capture-picker-preload.cjs
+  - capture-picker.html
+  - capture-picker.css
+  - capture-picker.js
   - preload.cjs
   - voice-overlay.cjs
   - overlay-preload.cjs
@@ -17,6 +22,7 @@ files:
   - voice-hotkeys.cjs
   - voice-keys.json
   - native/VoiceHotkey.exe
+  - native/ShareAudio.exe
   - dist/**/*
   - icon.ico
   - icon.png
@@ -24,6 +30,7 @@ files:
 npmRebuild: false
 asarUnpack:
   - native/VoiceHotkey.exe
+  - native/ShareAudio.exe
 toolsets:
   nsis: 1.2.1
 win:

@@ -1,5 +1,8 @@
 /* Readable compact gaming UI; no extra timers, media layers or animations. */
 .message-body>p { font-size:14px; }
+/* Avoid laying out long offscreen paragraphs in the virtualizer's overscan.
+   Keep action menus outside this containment and short chat rows uncontained. */
+.message-body>p.long-message { content-visibility:auto; contain-intrinsic-block-size:auto 24px; }
 .message-byline button { font-size:12px; }
 .message-byline time,.mini-time,.message-body>p small { font-size:11px; }
 .composer textarea { font-size:14px; }
@@ -14,3 +17,9 @@
   *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; }
 }
 .invite-people { width:100%; margin-top:16px; }
+html.native-window-hidden *{animation-play-state:paused!important;transition:none!important}
+.tts-progress{display:inline-flex;align-items:center;gap:4px;margin-inline:6px;vertical-align:middle;color:var(--muted,#a1a3b5);font-size:10px;line-height:1;direction:ltr;white-space:nowrap}
+.tts-progress-track{display:inline-block;width:34px;height:3px;overflow:hidden;border-radius:3px;background:#ffffff1a}
+.tts-progress-track>span{display:block;height:100%;border-radius:inherit;background:#9b88ef;transition:width .15s linear}
+.tts-progress.waiting .tts-progress-track>span{min-width:3px}
+.tts-progress small{font-size:10px;font-variant-numeric:tabular-nums}

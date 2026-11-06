@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var authSlots = make(chan struct{}, 2)
@@ -114,7 +113,7 @@ func verifyCurrent(u M, password string) {
 func (a *App) setCookie(r *Request, access string) {
 	http.SetCookie(r.W, &http.Cookie{Name: "dorham_session", Value: access, Path: "/", HttpOnly: true, Secure: a.C.Secure, SameSite: http.SameSiteLaxMode, MaxAge: 30 * 86400})
 }
-func (a *App) sessionFor(r *Request, uid string) M {
+func (a *App) sessionFor(r *Request, uid string, verifiedHash ...string) M {
 	native := r.R.Header.Get("X-Dorham-Native") == "1"
 	access, csrf, refresh := Token(), Token(), ""
 	var refreshHash any
@@ -131,7 +130,9 @@ func (a *App) sessionFor(r *Request, uid string) M {
 	if len(device) > 160 {
 		device = device[:160]
 	}
-	a.DB.Tx(func(tx *DB) any {
+	u := Obj(a.DB.Tx(func(tx *DB) any {
+		current := tx.One("SELECT * FROM users WHERE id=? AND banned=0 AND deleted_at IS NULL", uid)
+		Check(current != nil && (len(verifiedHash) == 0 || Str(current, "password_hash") == verifiedHash[0]), 401, "INVALID_CREDENTIALS", "Username or password is incorrect.")
 		old := tx.All("SELECT id FROM sessions WHERE user_id=? ORDER BY created_at DESC", uid)
 		for i, s := range old {
 			if i >= 2 {
@@ -139,9 +140,8 @@ func (a *App) sessionFor(r *Request, uid string) M {
 			}
 		}
 		tx.Run("INSERT INTO sessions(id,user_id,access_hash,refresh_hash,csrf,native,access_expires,expires_at,created_at,device_name,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?)", ID(), uid, Hash(access), refreshHash, csrf, native, expires, Now()+30*86400000, Now(), device, Now())
-		return nil
-	})
-	u := a.DB.One("SELECT * FROM users WHERE id=?", uid)
+		return current
+	}))
 	result := M{"user": PublicUser(u), "csrf": csrf}
 	if native {
 		result["accessToken"], result["refreshToken"] = access, refresh
@@ -167,7 +167,7 @@ func (a *App) registerAuth() {
 		authBody(b, true)
 		encoded := PasswordHash(Str(b, "password"))
 		created := Obj(a.DB.Tx(func(tx *DB) any {
-			Check(Num(tx.One("SELECT COUNT(*) AS count FROM users"), "count") < int64(a.C.MaxUsers), 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
+			Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL"), "count") < int64(a.C.MaxUsers), 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
 			Check(tx.One("SELECT id FROM users WHERE username=?", strings.ToLower(Str(b, "username"))) == nil, 409, "USERNAME_TAKEN", "This username is unavailable.")
 			uid := ID()
 			tx.Run("INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)", uid, strings.ToLower(Str(b, "username")), b["displayName"], encoded, Now(), Str(b, "language"))
@@ -181,12 +181,12 @@ func (a *App) registerAuth() {
 		b := r.Body
 		authBody(b, false)
 		u := a.DB.One("SELECT * FROM users WHERE username=?", strings.ToLower(Str(b, "username")))
-		if u == nil || Bool(u, "guest") || Bool(u, "banned") {
+		if u == nil || Bool(u, "guest") || Bool(u, "banned") || u["deleted_at"] != nil {
 			PasswordHash(Str(b, "password"))
 			Fail(401, "INVALID_CREDENTIALS", "Username or password is incorrect.")
 		}
 		Check(PasswordVerify(Str(u, "password_hash"), Str(b, "password")), 401, "INVALID_CREDENTIALS", "Username or password is incorrect.")
-		return a.sessionFor(r, Str(u, "id"))
+		return a.sessionFor(r, Str(u, "id"), Str(u, "password_hash"))
 	})
 	a.Route("POST", "/api/v1/auth/refresh", false, func(r *Request) any {
 		b := r.Body
@@ -198,7 +198,7 @@ func (a *App) registerAuth() {
 				return nil
 			}
 			s := tx.One("SELECT * FROM sessions WHERE refresh_hash=? AND native=1 AND expires_at>=?", fingerprint, Now())
-			if s == nil || tx.One("SELECT id FROM users WHERE id=? AND banned=0", s["user_id"]) == nil {
+			if s == nil || tx.One("SELECT id FROM users WHERE id=? AND banned=0 AND deleted_at IS NULL", s["user_id"]) == nil {
 				return nil
 			}
 			access, refresh := Token(), Token()
@@ -291,7 +291,7 @@ func (a *App) guest(r *Request) any {
 		}
 		inv := tx.One("SELECT i.*,s.allow_guests FROM invites i JOIN servers s ON s.id=i.server_id WHERE i.hash=? AND i.expires_at>=? AND i.remaining>0", Hash(Str(b, "code")), Now())
 		Check(inv != nil && Bool(inv, "allow_guests"), 403, "GUEST_INVITE_REQUIRED", "A valid invitation to a guest-enabled server is required.")
-		Check(Num(tx.One("SELECT COUNT(*) AS count FROM users"), "count") < int64(a.C.MaxUsers), 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
+		Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL"), "count") < int64(a.C.MaxUsers), 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
 		Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE guest=1"), "count") < int64(a.C.MaxGuests), 409, "GUEST_LIMIT", "Guest capacity has been reached.")
 		uid := ID()
 		tx.Run("INSERT INTO users(id,username,display_name,password_hash,guest,created_at,language) VALUES(?,?,?,?,1,?,?)", uid, "guest_"+strings.ReplaceAll(uid, "-", "")[:20], b["displayName"], "!guest-no-password", Now(), Str(b, "language"))
@@ -329,7 +329,7 @@ func (a *App) recoverAccount(r *Request) any {
 	Check(u != nil && a.DB.One("SELECT code_hash FROM recovery_codes WHERE user_id=? AND code_hash=?", u["id"], digest) != nil, 401, "RECOVERY_INVALID", "Recovery details are invalid or unavailable.")
 	encoded := PasswordHash(password)
 	a.DB.Tx(func(tx *DB) any {
-		Check(tx.One("SELECT code_hash FROM recovery_codes WHERE user_id=? AND code_hash=?", u["id"], digest) != nil, 401, "RECOVERY_INVALID", "Recovery details are invalid or unavailable.")
+		Check(tx.One("SELECT c.code_hash FROM recovery_codes c JOIN users u ON u.id=c.user_id WHERE c.user_id=? AND c.code_hash=? AND u.banned=0 AND u.deleted_at IS NULL", u["id"], digest) != nil, 401, "RECOVERY_INVALID", "Recovery details are invalid or unavailable.")
 		tx.Run("DELETE FROM recovery_codes WHERE user_id=? AND code_hash=?", u["id"], digest)
 		tx.Run("UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?", encoded, u["id"])
 		tx.Run("DELETE FROM sessions WHERE user_id=?", u["id"])
@@ -378,6 +378,7 @@ func (a *App) registerRecovery() {
 		verifyCurrent(r.User, VString(b, "password", 0, 128, false))
 		var codes []string
 		a.DB.Tx(func(tx *DB) any {
+			requireLiveSession(tx, r)
 			Check(tx.One("SELECT request_id FROM mutations WHERE user_id=? AND request_id=?", r.UID(), rid) == nil, 409, "CODES_ALREADY_ISSUED", "Codes are shown only once. Generate a new set if needed.")
 			tx.Run("DELETE FROM recovery_codes WHERE user_id=?", r.UID())
 			codes = recoveryCodes(tx, r.UID())
@@ -408,77 +409,15 @@ func (a *App) registerRecovery() {
 		answer := normalizeAnswer(VString(b, "answer", 1, 200, false))
 		encoded := PasswordHash(answer)
 		return a.Service.Mutate(r.UID(), rid, "recovery.question", M{"question": question, "answer": Hash(answer)}, func(tx *DB) any {
+			requireLiveSession(tx, r)
 			tx.Run("INSERT INTO recovery_questions(user_id,question,answer_hash) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET question=excluded.question,answer_hash=excluded.answer_hash", r.UID(), question, encoded)
 			Audit(tx, r.UID(), "recovery.question", r.UID(), nil)
 			return M{"success": true}
 		})
 	})
 }
-func (a *App) registerAdmin() {
-	a.Route("GET", "/api/v1/admin/users", true, func(r *Request) any {
-		Administrator(a.DB, r.UID())
-		rows := []M{}
-		for _, u := range a.DB.All("SELECT * FROM users ORDER BY created_at LIMIT 250") {
-			rows = append(rows, PublicUser(u))
-		}
-		return M{"users": rows}
-	})
-	a.Route("GET", "/api/v1/admin/audit", true, func(r *Request) any {
-		Administrator(a.DB, r.UID())
-		before := Now() + 1
-		if r.Query("before") != "" {
-			v, e := strconv.ParseInt(r.Query("before"), 10, 64)
-			Check(e == nil && v > 0, 400, "VALIDATION", "Invalid before")
-			before = v
-		}
-		return M{"events": a.DB.All("SELECT * FROM audit_log WHERE created_at<? ORDER BY created_at DESC LIMIT 100", before)}
-	})
-	a.Route("GET", "/api/v1/admin/metrics", true, func(r *Request) any {
-		Check(Bool(r.User, "instance_admin"), 403, "FORBIDDEN", "Instance administrator required.")
-		return a.metrics()
-	})
-	a.Route("POST", "/api/v1/admin/users/{id}", true, func(r *Request) any {
-		b := r.Body
-		rid := RID(b)
-		action := VEnum(b, "action", []string{"ban", "unban", "revoke", "resetPassword"})
-		target := r.Param("id")
-		Administrator(a.DB, r.UID())
-		temporary, encoded := "", ""
-		if action == "resetPassword" {
-			temporary = Token()[:20]
-			encoded = PasswordHash(temporary)
-		}
-		a.DB.Tx(func(tx *DB) any {
-			Administrator(tx, r.UID())
-			Check(tx.One("SELECT request_id FROM mutations WHERE user_id=? AND request_id=?", r.UID(), rid) == nil, 409, "ALREADY_APPLIED", "Administrative action was already applied.")
-			u := tx.One("SELECT * FROM users WHERE id=?", target)
-			Check(u != nil && !Bool(u, "instance_admin"), 403, "PROTECTED_ACCOUNT", "The global administrator cannot be modified by this operation.")
-			if action == "ban" || action == "unban" {
-				tx.Run("UPDATE users SET banned=? WHERE id=?", action == "ban", target)
-			}
-			if encoded != "" {
-				Check(!Bool(u, "guest"), 400, "GUEST_ACCOUNT", "Convert the guest account before setting a password.")
-				tx.Run("UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?", encoded, target)
-				tx.Run("DELETE FROM recovery_codes WHERE user_id=?", target)
-			}
-			if action != "unban" {
-				tx.Run("DELETE FROM sessions WHERE user_id=?", target)
-				tx.Run("DELETE FROM voice_members WHERE user_id=?", target)
-			}
-			fingerprint := Hash(`{"targetId":` + JSON(target) + `,"action":` + JSON(action) + `}`)
-			tx.Run("INSERT INTO mutations(user_id,request_id,operation,fingerprint,response,created_at) VALUES(?,?,?,?,?,?)", r.UID(), rid, "admin.user", fingerprint, `{"success":true}`, Now())
-			Audit(tx, r.UID(), "admin."+action, target, nil)
-			return nil
-		})
-		a.Hub.DisconnectInvalid()
-		a.Hub.Notify("voice:changed", M{})
-		a.Hub.Notify("state:changed", M{})
-		result := M{"success": true}
-		if temporary != "" {
-			result["temporaryPassword"] = temporary
-		}
-		return result
-	})
+func requireLiveSession(tx *DB, r *Request) {
+	now := Now()
+	Check(tx.One("SELECT s.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.user_id=? AND s.access_hash=? AND s.access_expires>=? AND s.expires_at>=? AND u.banned=0 AND u.deleted_at IS NULL",
+		r.Session["id"], r.UID(), r.Session["access_hash"], now, now) != nil, 401, "UNAUTHENTICATED", "Sign in again to continue.")
 }
-
-var _ = time.Second

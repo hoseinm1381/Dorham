@@ -13,8 +13,12 @@ if not exist node_modules (
   if errorlevel 1 exit /b 1
 )
 if not exist .env copy .env.example .env >nul
-if not exist apps\api\dist\index.js (
-  call npm run build
+if not exist apps\api-go\dist\dorham.exe (
+  call npm run build:api:go
+  if errorlevel 1 exit /b 1
+)
+if not exist apps\web\dist\index.html (
+  call npm run build:web
   if errorlevel 1 exit /b 1
 )
 set "PUBLIC_URL=http://localhost:3001"

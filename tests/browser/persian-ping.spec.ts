@@ -19,6 +19,11 @@ async function register(page: Page, username: string, displayName: string, persi
   await page.getByLabel(text('Password'), { exact: true }).fill('persian-test-123');
   await page.getByRole('button', { name: text('Create account'), exact: true }).click();
   await expect(page.locator('.app')).toBeVisible();
+  const recovery = page.getByRole('dialog', { name: text('Protect your account'), exact: true });
+  await expect(recovery).toBeVisible();
+  await recovery.getByLabel(text('I have saved my recovery codes'), { exact: true }).check();
+  await recovery.getByRole('button', { name: text('Continue to Dorham'), exact: true }).click();
+  await expect(recovery).toBeHidden();
 }
 
 test('Persian typography, mixed messages, Arabic-keyboard search, ping badges and mobile RTL work together', async ({ browser }) => {
@@ -61,10 +66,13 @@ test('Persian typography, mixed messages, Arabic-keyboard search, ping badges an
     await expect(english.getByTestId('connection-ping')).toHaveText(/[۰-۹]+ میلی‌ثانیه/);
     await mkdir('artifacts/evidence', { recursive: true }); await first.screenshot({ path: 'artifacts/evidence/persian-chat-desktop.png' });
     await other.getByRole('button', { name: 'Home', exact: true }).click();
-    await other.getByRole('textbox', { name: 'Find a person', exact: true }).fill('علی کریمی');
-    await expect(other.locator('.person-row')).toHaveCount(1); await expect(other.locator('.person-row')).toContainText(originalName);
+    await other.getByRole('button', { name: 'New direct message', exact: true }).first().click();
+    await other.getByRole('textbox', { name: 'Search people', exact: true }).fill('علی کریمی');
+    await expect(other.locator('.modal-people .member-row')).toHaveCount(1); await expect(other.locator('.modal-people .member-row')).toContainText(originalName);
+    await other.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await first.getByRole('button', { name: translate('Account settings'), exact: true }).click();
     await first.getByRole('tab', { name: translate('Audio'), exact: true }).click();
+    await first.getByText(translate('Advanced audio'), { exact: true }).click();
     await expect(first.getByRole('heading', { name: translate('Voice input & hotkeys'), exact: true })).toBeVisible();
     await first.getByLabel(translate('Voice input mode'), { exact: true }).selectOption('push');
     await expect(first.getByRole('button', { name: translate('Record talk hotkey'), exact: true })).toBeVisible();

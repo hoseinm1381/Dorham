@@ -1,0 +1,37 @@
+[package]
+name = "dorham-windows"
+version = "1.1.1"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "Dorham"
+path = "src/main.rs"
+
+[features]
+default = []
+native-test = []
+
+[dependencies]
+wry = { version = "=0.57.1", default-features = false, features = ["os-webview"] }
+tao = "=0.37.2"
+webview2-com = "0.39"
+windows-core = "0.62"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_Threading", "Win32_System_RemoteDesktop", "Win32_System_Power", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com"] }
+tray-icon = "=0.26.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+url = "2.5"
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

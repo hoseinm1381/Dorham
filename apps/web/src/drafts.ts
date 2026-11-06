@@ -8,6 +8,7 @@ function target(id: string | undefined, conversationId: string): Message | null 
 }
 export class DraftStore {
   private data = new Map<string, Draft>();
+  private listeners = new Map<string, Set<() => void>>();
   constructor(private storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>) {
     try { const serialized = storage?.getItem(storageKey) || '[]'; if (new TextEncoder().encode(serialized).length > maximumBytes) { storage?.removeItem(storageKey); return; } const raw = JSON.parse(serialized);
       if (Array.isArray(raw)) for (const [key, value] of raw.slice(-200)) {
@@ -21,13 +22,15 @@ export class DraftStore {
     } catch { /* Storage is optional; malformed records are never sent. */ }
   }
   key(account: string, origin: string, conversation: string) { return [account, origin, conversation].join('\n'); }
-  get(key: string): Draft { const existing = this.data.get(key); if (existing && Date.now() - existing.updatedAt <= maximumAge) return existing; return empty(); }
-  set(key: string, value: Draft) { this.data.set(key, { ...value, updatedAt: Date.now() }); }
+  get(key: string): Draft { const existing = this.data.get(key); if (existing && Date.now() - existing.updatedAt <= maximumAge) return existing; const value = empty(); this.data.set(key, value); return value; }
+  subscribe(key: string, listener: () => void) { let group = this.listeners.get(key); if (!group) this.listeners.set(key, group = new Set()); group.add(listener); return () => { group.delete(listener); if (!group.size) this.listeners.delete(key); }; }
+  private notify(key: string) { for (const listener of this.listeners.get(key) || []) listener(); }
+  set(key: string, value: Draft) { this.data.set(key, { ...value, updatedAt: Date.now() }); this.notify(key); }
   retain(account: string, origin: string, allowed: Set<string>) {
-    const prefix = `${account}\n${origin}\n`; for (const key of this.data.keys()) if (key.startsWith(prefix) && !allowed.has(key.slice(prefix.length))) this.data.delete(key);
+    const prefix = `${account}\n${origin}\n`; for (const key of [...this.data.keys()]) if (key.startsWith(prefix) && !allowed.has(key.slice(prefix.length))) { this.data.delete(key); this.notify(key); }
     this.flush();
   }
-  clear(account: string, origin: string) { const prefix = `${account}\n${origin}\n`; for (const key of this.data.keys()) if (key.startsWith(prefix)) this.data.delete(key); this.flush(); }
+  clear(account: string, origin: string) { const prefix = `${account}\n${origin}\n`; for (const key of [...this.data.keys()]) if (key.startsWith(prefix)) { this.data.delete(key); this.notify(key); } this.flush(); }
   flush() {
     try {
       const records = [...this.data].filter(([, v]) => Date.now() - v.updatedAt <= maximumAge && (v.text || v.files.length || v.reply || v.editing || v.pending)).sort((a, b) => a[1].updatedAt - b[1].updatedAt).slice(-200)

@@ -38,7 +38,7 @@ class DorhamSecretsPlugin : Plugin() {
         try {
             val prefs = context.getSharedPreferences("dorham.secrets", 0)
             val value = call.getString("value")
-            if (value == null) prefs.edit().remove("value").commit()
+            if (value == null) { DorhamNotificationService.reset(context); prefs.edit().remove("value").commit() }
             else {
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
                 val bytes = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))

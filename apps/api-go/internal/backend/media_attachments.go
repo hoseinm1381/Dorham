@@ -105,7 +105,7 @@ func (m *Media) registerAttachments() {
 				return M{"id": old["id"], "state": old["state"], "expiresAt": Num(old, "expires_at")}
 			}
 			usage := tx.One("SELECT COALESCE(SUM(bytes),0) AS bytes FROM attachment_usage WHERE user_id=? AND created_at>?", r.UID(), Now()-86400000)
-			Check(Num(usage, "bytes")+size <= 300*mediaMiB, 429, "UPLOAD_QUOTA", "The 300 MiB rolling daily upload allowance has been reached.")
+			Check(Num(usage, "bytes")+size <= uploadAllowance(tx, r.UID()), 429, "UPLOAD_QUOTA", "Your rolling daily upload allowance has been reached.")
 			global := Num(tx.One("SELECT COALESCE(SUM(bytes),0) AS bytes FROM attachment_usage WHERE created_at>?", Now()-86400000), "bytes")
 			Check(global+size <= int64(a.C.UploadHardMiB)*mediaMiB, 429, "UPLOAD_GLOBAL_HARD", "The shared daily upload allowance has been reached.")
 			Check(global+size <= int64(a.C.UploadSoftMiB)*mediaMiB || size <= int64(a.C.UploadSmallMiB)*mediaMiB, 429, "UPLOAD_SMALL_ONLY", "Only files up to 2 MiB are allowed after the shared normal allowance is used. Compress pictures or try again later.")
@@ -185,7 +185,7 @@ func (m *Media) registerAttachments() {
 		return M{"id": row["id"], "name": row["name"], "size": Num(row, "size"), "expiresAt": Num(row, "expires_at"), "available": true}
 	})
 	a.Route("GET", "/api/v1/uploads/usage", true, func(r *Request) any {
-		limit := int64(300) * mediaMiB
+		limit := uploadAllowance(a.DB, r.UID())
 		if Bool(r.User, "guest") {
 			limit = 0
 		}
@@ -381,12 +381,12 @@ func (m *Media) serveAttachment(r *Request, preview bool) any {
 			m.mu.Unlock()
 			if cached.Key == key && cached.Expires > Now() && cached.Info != nil && os.SameFile(cached.Info, info) && mediaFileVersion(info) != "" {
 				mime = cached.MIME
-				atomic.AddInt64(&m.verificationHits,1)
+				atomic.AddInt64(&m.verificationHits, 1)
 			}
 		}
 		if mime == "" {
 			digest, prefix, e := mediaHashReader(f)
-			atomic.AddInt64(&m.verifiedReads,1)
+			atomic.AddInt64(&m.verifiedReads, 1)
 			if e != nil || digest == "" || digest != Str(row, "digest") {
 				invalid()
 			}
@@ -499,7 +499,7 @@ func (m *Media) cleanupAttachments(required int64, forceScan ...bool) {
 	a.DB.Run("DELETE FROM attachment_usage WHERE id IN (SELECT id FROM attachment_usage WHERE created_at<? LIMIT 1000)", Now()-86400000)
 	m.scanMu.Lock()
 	defer m.scanMu.Unlock()
-	if Now() < m.nextScan && (len(forceScan)==0 || !forceScan[0]) {
+	if Now() < m.nextScan && (len(forceScan) == 0 || !forceScan[0]) {
 		return
 	}
 	if m.scan == nil {

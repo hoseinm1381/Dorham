@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 await cp('packages/contracts/src/voice-keys.json', 'apps/desktop/voice-keys.json');
 if (process.platform === 'win32') execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'), ['/nologo', '/optimize+', '/platform:x64', `/out:${path.resolve('apps/desktop/native/VoiceHotkey.exe')}`, path.resolve('apps/desktop/native/VoiceHotkey.cs')], { stdio: 'inherit', windowsHide: true });
+if (process.platform === 'win32') execFileSync(path.resolve(process.env.DORHAM_WINDOWS_CXX || '.tools/llvm-mingw-20261020-ucrt-x86_64/bin/x86_64-w64-mingw32-clang++.exe'), ['-std=c++20', '-O2', '-static', '-municode', '-DNOMINMAX', 'apps/desktop/native/ShareAudio.cpp', '-o', 'apps/desktop/native/ShareAudio.exe', '-lole32', '-lmmdevapi', '-luuid', '-luser32'], { stdio: 'inherit', windowsHide: true });
 const desktopDist = path.resolve('apps/desktop/dist');
 if (path.relative(process.cwd(), desktopDist).split(path.sep).join('/') !== 'apps/desktop/dist') throw new Error('Unexpected generated desktop directory');
 await rm(desktopDist, { recursive: true, force: true });

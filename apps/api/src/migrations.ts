@@ -111,4 +111,12 @@ export async function migrateExpansion(db: Database) {
     await tx.run('CREATE TABLE message_mentions (message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, username TEXT NOT NULL, PRIMARY KEY(message_id,user_id))');
     await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(11,?)', [Date.now()]);
   });
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=12')) return;
+    await tx.run('CREATE TABLE notification_devices (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, installation_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at BIGINT NOT NULL, UNIQUE(session_id,installation_id))');
+    await tx.run('CREATE INDEX notification_devices_user ON notification_devices(user_id)');
+    await tx.run('CREATE TABLE notification_queue (device_id TEXT NOT NULL REFERENCES notification_devices(id) ON DELETE CASCADE, message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL, PRIMARY KEY(device_id,message_id))');
+    await tx.run('CREATE INDEX notification_queue_message ON notification_queue(message_id)');
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(12,?)', [Date.now()]);
+  });
 }

@@ -118,7 +118,7 @@ try {
   app = await launch(url);
   pass('Go production process actual PostgreSQL adapter ready', (await app.request('/ready')).json.database === 'postgres');
   const versions = await engine.query('SELECT version FROM schema_migrations ORDER BY version');
-  assert.deepEqual(versions.rows.map(row => row.version), Array.from({ length: 11 }, (_, i) => i+1)); pass('Go fresh PostgreSQL applied exactly schema migrations 1-11');
+  assert.deepEqual(versions.rows.map(row => row.version), Array.from({ length: 13 }, (_, i) => i+1)); pass('Go fresh PostgreSQL applied exactly schema migrations 1-13');
   pass('PostgreSQL global transaction lock row created', (await engine.query('SELECT id FROM global_locks')).rows.length === 1);
   const alice = await register(app, 'pg_review_alice'), bob = await register(app, 'pg_review_bravo');
   const login = await app.request('/api/v1/auth/login', { method: 'POST', native: true, body: { username: 'pg_review_alice', password: 'Synthetic-private-password-84', requestId: randomUUID() } });
@@ -151,6 +151,24 @@ try {
   const sequences = (await engine.query('SELECT sequence FROM messages WHERE conversation_id=$1 ORDER BY sequence', [dm.json.id])).rows.map(r => Number(r.sequence));
   assert.deepEqual(sequences, Array.from({ length: 9 }, (_, i) => i+1)); pass('Go PostgreSQL concurrent writes preserve unique contiguous sequence');
   pass('Go PostgreSQL exact message row count excludes conflicting replay', (await engine.query('SELECT id FROM messages WHERE conversation_id=$1', [dm.json.id])).rows.length === 9);
+  const operator = await register(app, 'pg_review_operator');
+  await engine.query('UPDATE users SET instance_admin=1 WHERE id=$1', [operator.user.id]);
+  const capabilities = await app.request('/api/v1/admin/capabilities', { session: operator });
+  pass('Go PostgreSQL advertises the Monitor 1.1.0 contract', capabilities.status === 200 && capabilities.json.userActions.includes('delete') && capabilities.json.userActions.includes('setPassword'));
+  const manage = (action, body = {}) => app.request(`/api/v1/admin/users/${alice.user.id}`, { method: 'POST', session: operator, body: { action, requestId: randomUUID(), ...body } });
+  pass('Go PostgreSQL administrator sets a temporary password', (await manage('setPassword', { password: 'temporary-fixture-password' })).status === 200);
+  pass('Go PostgreSQL password reset revokes old sessions', (await app.request('/api/v1/auth/me', { session: alice })).status === 401);
+  await engine.exec("CREATE FUNCTION independent_reject_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic deletion rollback'; END; $$; CREATE TRIGGER independent_delete_fail BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action = 'admin.delete') EXECUTE FUNCTION independent_reject_delete();");
+  assert.equal((await manage('delete', { confirmUsername: alice.user.username })).status, 500);
+  const rolledBack = await app.request(`/api/v1/conversations/${dm.json.id}/messages?after=0`, { session: bob });
+  pass('Go PostgreSQL failed delete rolls back history and server ownership', rolledBack.json.events[0].payload.author.id === alice.user.id && rolledBack.json.events[0].payload.author.username === alice.user.username && (await engine.query('SELECT owner_id FROM servers WHERE id=$1', [room.json.id])).rows[0].owner_id === alice.user.id);
+  await engine.exec('DROP TRIGGER independent_delete_fail ON audit_log; DROP FUNCTION independent_reject_delete();');
+  assert.equal((await manage('delete', { confirmUsername: alice.user.username })).status, 200);
+  const kept = await app.request(`/api/v1/conversations/${dm.json.id}/messages?after=0`, { session: bob });
+  pass('Go PostgreSQL delete preserves sequence and anonymizes retained events', kept.status === 200 && kept.json.events.length === 9 && kept.json.events.every(event => event.payload.author.deleted && event.payload.author.displayName === 'Deleted account'));
+  pass('Go PostgreSQL delete transfers owned servers', (await engine.query('SELECT owner_id FROM servers WHERE id=$1', [room.json.id])).rows[0].owner_id === operator.user.id);
+  const users = await app.request('/api/v1/admin/users?offset=0', { session: operator });
+  pass('Go PostgreSQL deleted account excluded from admin list', users.status === 200 && users.json.users.every(user => user.id !== alice.user.id));
   report.status = 'passed';
 } catch (error) { report.status = 'failed'; report.error = String(error?.stack || error); process.exitCode = 1; }
 finally {

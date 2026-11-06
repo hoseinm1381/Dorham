@@ -16,24 +16,28 @@ type peer struct {
 	mu                                                sync.Mutex
 	eventMu                                           sync.Mutex
 	voiceChannel, gameWatching, directoryKey, roomKey string
+	voiceEpoch                                        string
+	voiceRecoverable                                  bool
 	windowStart                                       int64
 	eventCount                                        int
 	latency                                           M
 	probing                                           bool
 }
 type Hub struct {
-	a            *App
-	server       *sio.Server
-	mu           sync.RWMutex
-	peers        map[string]*peer
-	voiceRefresh revisionFlight
-	closed       bool
-	workWG       sync.WaitGroup
-	loopWG       sync.WaitGroup
-	metricMu     sync.Mutex
-	actions      map[string]M
-	disconnects  map[string]int64
-	maintenance  M
+	a              *App
+	server         *sio.Server
+	mu             sync.RWMutex
+	peers          map[string]*peer
+	voiceResumeKey string
+	detachedVoice  map[string]detachedVoice
+	voiceRefresh   revisionFlight
+	closed         bool
+	workWG         sync.WaitGroup
+	loopWG         sync.WaitGroup
+	metricMu       sync.Mutex
+	actions        map[string]M
+	disconnects    map[string]int64
+	maintenance    M
 }
 
 func NewHub(a *App) *Hub {
@@ -46,7 +50,7 @@ func NewHub(a *App) *Hub {
 	recovery.SetMaxDisconnectionDuration(120000)
 	recovery.SetSkipMiddlewares(false)
 	opts.SetConnectionStateRecovery(recovery)
-	return &Hub{a: a, server: sio.NewServer(nil, opts), peers: map[string]*peer{}}
+	return &Hub{a: a, server: sio.NewServer(nil, opts), peers: map[string]*peer{}, voiceResumeKey: Token(), detachedVoice: map[string]detachedVoice{}}
 }
 func (h *Hub) Register() {
 	h.a.Mux.Handle("/socket.io/", h.server.ServeHandler(nil))
@@ -115,7 +119,7 @@ func (h *Hub) Register() {
 				label = S(reason[0])
 			}
 			h.recordDisconnect(label)
-			h.disconnected(p)
+			h.disconnected(p, label)
 		})
 		go h.probe(p)
 	})
@@ -155,7 +159,7 @@ func (h *Hub) Viewers() []M {
 	out := []M{}
 	for _, p := range h.snapshot() {
 		p.mu.Lock()
-		out = append(out, M{"socketId": p.id, "userId": p.uid, "sessionId": p.session, "channelId": p.voiceChannel, "voiceChannel": p.voiceChannel, "gameWatching": p.gameWatching})
+		out = append(out, M{"socketId": p.id, "userId": p.uid, "sessionId": p.session, "channelId": p.voiceChannel, "voiceEpoch": p.voiceEpoch, "voiceChannel": p.voiceChannel, "gameWatching": p.gameWatching})
 		p.mu.Unlock()
 	}
 	return out
@@ -189,8 +193,7 @@ func (h *Hub) emit(event string, payload any) {
 	}
 }
 func (h *Hub) valid(p *peer) {
-	s := h.a.DB.One("SELECT s.id FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.id=? AND s.expires_at>=? AND s.access_expires>=? AND u.banned=0 AND u.must_change_password=0", p.session, Now(), Now())
-	if s == nil {
+	if !voiceSessionActive(h.a.DB, p.session, Now()) {
 		p.socket.Disconnect(true)
 		Fail(401, "UNAUTHENTICATED", "Session expired.")
 	}
@@ -199,6 +202,7 @@ func (h *Hub) DisconnectInvalid() {
 	for _, p := range h.snapshot() {
 		func() { defer func() { _ = recover() }(); h.valid(p) }()
 	}
+	h.checkDetachedVoice()
 }
 func (h *Hub) DisconnectSession(id string) {
 	for _, p := range h.snapshot() {
@@ -206,6 +210,7 @@ func (h *Hub) DisconnectSession(id string) {
 			p.socket.Disconnect(true)
 		}
 	}
+	h.cancelDetachedVoice(id)
 }
 func (h *Hub) safe(fn func()) {
 	defer func() {
@@ -215,11 +220,22 @@ func (h *Hub) safe(fn func()) {
 	}()
 	fn()
 }
-func (h *Hub) disconnected(p *peer) {
+func (h *Hub) disconnected(p *peer, reason string) {
+	p.mu.Lock()
+	detached := detachedVoice{uid: p.uid, session: p.session, channel: p.voiceChannel, epoch: p.voiceEpoch, until: Now() + 30000}
+	preserveVoice := p.voiceRecoverable && detached.epoch != "" && transientVoiceDisconnect(reason)
+	p.mu.Unlock()
 	h.mu.Lock()
+	if h.peers[p.id] != p {
+		h.mu.Unlock()
+		return
+	}
 	delete(h.peers, p.id)
 	closing := h.closed
 	if !closing {
+		if preserveVoice {
+			h.detachedVoice[detached.epoch] = detached
+		}
 		h.workWG.Add(1)
 	}
 	h.mu.Unlock()
@@ -228,7 +244,9 @@ func (h *Hub) disconnected(p *peer) {
 	}
 	defer h.workWG.Done()
 	h.safe(func() {
-		if h.a.DB.One("SELECT channel_id FROM voice_members WHERE socket_id=?", p.id) != nil {
+		// A recoverable transport loss leaves the last heartbeat's existing
+		// lease in place. The normal expiry still removes abandoned calls.
+		if !preserveVoice && h.a.DB.One("SELECT channel_id FROM voice_members WHERE socket_id=?", p.id) != nil {
 			h.a.Service.VoiceAction(p.uid, p.id, "leave")
 		}
 		if !h.Online(p.uid) {
@@ -270,6 +288,8 @@ func (h *Hub) Notify(kind string, payload any) {
 		if p != nil {
 			p.mu.Lock()
 			p.voiceChannel = ""
+			p.voiceEpoch = ""
+			p.voiceRecoverable = false
 			p.mu.Unlock()
 			h.EmitSocket(id, "voice:move", M{"channelId": b["channelId"]})
 		}
@@ -318,10 +338,17 @@ func (h *Hub) refreshVoicePass() {
 		}
 		if room == nil {
 			p.mu.Lock()
+			epoch := Str(update, "voiceEpoch")
+			if p.voiceEpoch != epoch || p.voiceChannel != Str(update, "channelId") {
+				p.mu.Unlock()
+				continue
+			}
 			p.voiceChannel = ""
+			p.voiceEpoch = ""
+			p.voiceRecoverable = false
 			p.roomKey = ""
 			p.mu.Unlock()
-			h.EmitSocket(id, "voice:removed", M{})
+			_ = p.socket.Emit("voice:removed", M{"epoch": epoch})
 			continue
 		}
 		r := Merge(Obj(room))
@@ -429,21 +456,40 @@ func (h *Hub) handlers(p *peer) {
 	h.handle(p, "voice:join", func(b M) any {
 		channel := VString(b, "channelId", 1, 80, false)
 		eligible := VBool(b, "eligible")
-		result := s.JoinVoice(p.uid, p.id, channel, eligible)
+		recoverable := b["recoverable"] != nil && VBool(b, "recoverable")
+		result := s.JoinVoice(p.uid, p.id, channel, eligible, p.session)
+		epoch := Str(result, "epoch")
+		h.bindVoice(p, channel, epoch, recoverable)
 		if !p.socket.Connected() {
-			s.VoiceAction(p.uid, p.id, "leave")
+			s.VoiceAction(p.uid, p.id, "leave", M{"epoch": epoch})
 			Fail(401, "UNAUTHENTICATED", "Voice connection closed.")
 		}
-		p.mu.Lock()
-		p.voiceChannel = channel
-		p.mu.Unlock()
+		if recoverable {
+			result["resumeToken"] = h.voiceResumeToken(p, channel, epoch)
+		}
+		return result
+	})
+	h.handle(p, "voice:resume", func(b M) any {
+		channel, epoch := h.validateVoiceResume(p, b)
+		result := s.ResumeVoice(p.uid, p.session, p.id, channel, epoch)
+		h.bindVoice(p, channel, epoch, true)
 		return result
 	})
 	h.handle(p, "voice:leave", func(b M) any {
 		RID(b)
-		result := s.VoiceAction(p.uid, p.id, "leave")
+		result := M{}
+		if b["resumeToken"] != nil {
+			channel, epoch := h.validateVoiceResume(p, b)
+			s.CancelVoiceResume(p.uid, channel, epoch)
+		} else {
+			result = s.VoiceAction(p.uid, p.id, "leave")
+		}
 		p.mu.Lock()
-		p.voiceChannel = ""
+		if b["epoch"] == nil || p.voiceEpoch == Str(b, "epoch") {
+			p.voiceChannel = ""
+			p.voiceEpoch = ""
+			p.voiceRecoverable = false
+		}
 		p.mu.Unlock()
 		return result
 	})
@@ -464,20 +510,26 @@ func (h *Hub) handlers(p *peer) {
 		VBool(b, "deafened")
 		return s.VoiceAction(p.uid, p.id, "state", M{"muted": b["muted"], "deafened": b["deafened"]})
 	})
+	h.handle(p, "soundboard:play", func(b M) any { return h.a.playSound(p.uid, p.id, p.session, b) })
 	h.handle(p, "share:start", func(b M) any {
 		_, numeric := b["protocolVersion"].(float64)
 		Check(numeric && Num(b, "protocolVersion") == 2, 428, "UPGRADE_REQUIRED", "Update Dorham to 0.5.0 before sharing your screen.")
-		Strict(b, "requestId", "protocolVersion", "includeAudio")
+		Strict(b, "requestId", "protocolVersion", "includeAudio", "height")
 		rid := RID(b)
 		audio := VBool(b, "includeAudio", true)
-		return s.Share(p.uid, p.id, rid, false, audio)
+		height := VInt(b, "height", 1080, 1080, true)
+		return s.Share(p.uid, p.id, rid, false, audio, height)
 	})
 	h.handle(p, "share:stop", func(b M) any { return s.Share(p.uid, p.id, RID(b), true, false) })
 	h.handle(p, "share:update", func(b M) any {
-		Strict(b, "requestId", "leaseId", "expectedRevision", "frameRate", "includeAudio")
+		Strict(b, "requestId", "leaseId", "expectedRevision", "frameRate", "includeAudio", "height")
 		rid := RID(b)
 		VString(b, "leaseId", 1, 80, false)
 		VInt(b, "expectedRevision", 1, 9007199254740991)
+		if _, ok := b["height"]; ok {
+			height := VInt(b, "height", 720, 1080)
+			Check(height == 720 || height == 1080, 400, "VALIDATION", "Invalid screen height.")
+		}
 		if _, ok := b["frameRate"]; ok {
 			rate := VInt(b, "frameRate", 15, 30)
 			Check(rate == 15 || rate == 30, 400, "VALIDATION", "Invalid frame rate")
@@ -487,7 +539,13 @@ func (h *Hub) handlers(p *peer) {
 		}
 		return s.UpdateShare(p.uid, p.id, rid, b)
 	})
-	h.handle(p, "voice:sfu", func(b M) any { return h.a.Media.Credentials(p.uid, p.id, VString(b, "channelId", 1, 80, false)) })
+	h.handle(p, "voice:sfu", func(b M) any {
+		channel := VString(b, "channelId", 1, 80, false)
+		if Str(b, "purpose") == "screenAudio" {
+			return h.a.Media.ScreenAudioCredentials(p.uid, p.id, channel, VString(b, "leaseId", 1, 80, false))
+		}
+		return h.a.Media.Credentials(p.uid, p.id, channel)
+	})
 	h.handle(p, "voice:signal", func(b M) any { return h.signal(p, b) })
 }
 func (h *Hub) signal(p *peer, raw M) any {

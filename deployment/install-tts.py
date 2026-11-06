@@ -24,4 +24,5 @@ for name,entry in manifest['voices'].items():
     if Path(name).name!=name:raise RuntimeError('Invalid model filename')
     download(entry['url'],voices/name,entry['sha256'])
 (root/'manifest.json').write_text(json.dumps(manifest,indent=2))
+subprocess.run([python,str(source/'optimize-tts.py'),'--models',str(voices)],check=True)
 print('Local speech runtime and both pinned voice models verified. No application service was restarted.')

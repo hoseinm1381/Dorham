@@ -38,7 +38,7 @@ func main() {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 	go func() { <-done; a.Close() }()
-	log.Printf("Dorham 1.1.0 Go backend ready on %s database=%s", listener.Addr(), a.DB.Dialect)
+	log.Printf("Dorham %s Go backend ready on %s database=%s", backend.Version, listener.Addr(), a.DB.Dialect)
 	if e = a.Serve(listener); e != nil && e != http.ErrServerClosed {
 		a.Close()
 		panic(e)

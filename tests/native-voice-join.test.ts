@@ -3,6 +3,7 @@ import { harness, event } from './helpers';
 const native = vi.hoisted(() => ({
   prepare: vi.fn(), join: vi.fn(), setState: vi.fn(), leave: vi.fn(), stopShare: vi.fn(),
   updateRoom: vi.fn(), addListener: vi.fn(),
+  startShare: vi.fn(), subscribe: vi.fn(), setStreamVolume: vi.fn(),
 }));
 vi.mock('@capacitor/core', () => ({ registerPlugin: () => native }));
 import { NativeTransport } from '../packages/media/src/native';
@@ -14,6 +15,7 @@ beforeEach(() => {
   native.prepare.mockResolvedValue({ microphoneAvailable: true }); native.join.mockResolvedValue({ listenOnly: false });
   native.setState.mockResolvedValue(undefined); native.addListener.mockResolvedValue({ remove: async () => {} });
   native.leave.mockResolvedValue(undefined); native.stopShare.mockResolvedValue(undefined); native.updateRoom.mockResolvedValue(undefined);
+  native.startShare.mockResolvedValue(undefined); native.subscribe.mockResolvedValue(undefined); native.setStreamVolume.mockResolvedValue(undefined);
 });
 afterEach(() => vi.unstubAllGlobals());
 async function fixture() {
@@ -58,4 +60,23 @@ it('a native capture failure after connection falls back to listening, while act
     await expect(media.join(f.channel.id)).rejects.toThrow('unreachable'); expect(media.room).toBeNull();
     await expect(event(f.socket, 'voice:heartbeat', { eligible: true })).rejects.toThrow('NOT_IN_VOICE');
   } finally { await media.destroy(); await f.h.close(); }
+});
+it('publishes an Android local preview descriptor after capture and removes it without leaking the lease', async () => {
+  const f = await fixture();
+  vi.stubGlobal('MediaStream', class { id = 'native-pixels-stay-outside-js'; });
+  const media = new NativeTransport({ socket: f.socket, userId: f.user.id, emit: f.emit });
+  try {
+    await media.join(f.channel.id); await media.startShare('720p15', { includeAudio: true });
+    await vi.waitFor(() => expect(f.emit).toHaveBeenCalledWith('localScreen', expect.objectContaining({ userId: f.user.id, native: { local: true } })));
+    expect(native.startShare).toHaveBeenCalledWith(expect.objectContaining({ includeAudio: false })); // Mesh does not advertise a fabricated sound path.
+    expect(media.room?.shares).toHaveLength(1);
+    await media.stopShare();
+    expect(f.emit).toHaveBeenCalledWith('localScreen', null);
+    const room = await event(f.socket, 'voice:heartbeat', { eligible: true }); expect(room.room.shares).toHaveLength(0);
+  } finally { await media.destroy(); await f.h.close(); }
+});
+it('routes stream volume by lease independently of a person microphone volume', async () => {
+  const f = await fixture(), media = new NativeTransport({ socket: f.socket, userId: f.user.id, emit: f.emit });
+  try { media.setStreamVolume('screen-lease', 0); expect(native.setStreamVolume).toHaveBeenCalledWith({ leaseId: 'screen-lease', volume: 0 }); }
+  finally { await media.destroy(); await f.h.close(); }
 });

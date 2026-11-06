@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.dorham.chat",
+      "sha256_cert_fingerprints": ["2A:E9:8D:E4:EE:02:73:68:96:7E:C6:35:68:4A:41:AA:B5:91:5C:71:F4:08:4D:ED:A7:71:19:13:8A:62:38:3C"]
+    }
+  }
+]

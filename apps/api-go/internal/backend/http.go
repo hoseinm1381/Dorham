@@ -18,6 +18,9 @@ import (
 	"time"
 )
 
+// Version is set by the release build.
+var Version = "dev"
+
 type jsonNumber = json.Number
 type Request struct {
 	A                   *App
@@ -45,6 +48,7 @@ type App struct {
 	Hub           *Hub
 	Media         *Media
 	Games         *Games
+	Notifications *Notifications
 	Mux           *http.ServeMux
 	HTTP          *http.Server
 	started       time.Time
@@ -53,6 +57,7 @@ type App struct {
 	maintenanceWG sync.WaitGroup
 	rateMu        sync.Mutex
 	rates         map[string]windowBudget
+	soundboard    soundboardState
 	lockPath      string
 }
 
@@ -69,6 +74,7 @@ func NewApp(c Config) *App {
 		}
 	}()
 	a.DB = OpenDB(c)
+	a.seedSoundboard()
 	a.Service = NewService(a.DB, c)
 	a.Hub = NewHub(a)
 	a.DB.Tx(func(tx *DB) any {
@@ -80,9 +86,17 @@ func NewApp(c Config) *App {
 	a.Media = NewMedia(a)
 	a.Games = NewGames(a)
 	a.Service.Notify = a.Hub.Notify
+	a.Notifications = newNotifications(a)
+	a.Service.Notify = func(kind string, value any) {
+		a.Hub.Notify(kind, value)
+		if kind == "conversation:event" {
+			a.Notifications.changed(Obj(value))
+		}
+	}
 	a.Service.OnTTS = a.Media.Speech
 	a.registerAuth()
 	a.registerCore()
+	a.registerFeatures()
 	a.Media.RegisterRoutes()
 	a.Games.RegisterRoutes()
 	a.Hub.Register()
@@ -161,7 +175,7 @@ func (a *App) middleware(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, X-Request-Id, X-Dorham-Native, Range")
 		w.Header().Set("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -275,7 +289,7 @@ func (a *App) resolveSession(raw string) (M, M) {
 	for _, col := range columns {
 		selects = append(selects, "s."+col+" AS session_"+col)
 	}
-	u := a.DB.One("SELECT "+strings.Join(selects, ",")+" FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.access_hash=? AND s.access_expires>=? AND s.expires_at>=? AND u.banned=0", Hash(raw), Now(), Now())
+	u := a.DB.One("SELECT "+strings.Join(selects, ",")+" FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.access_hash=? AND s.access_expires>=? AND s.expires_at>=? AND u.banned=0 AND u.deleted_at IS NULL", Hash(raw), Now(), Now())
 	if u == nil {
 		return nil, nil
 	}
@@ -410,7 +424,7 @@ func (a *App) metrics() M {
 	media := a.Media.Metrics()
 	mediaStorage := a.Media.Storage()
 	mediaStorage["io"] = media["attachmentIO"]
-	return M{"uptimeSeconds": time.Since(a.started).Seconds(), "runtime": "go", "version": "1.1.0", "databaseIO": a.DB.Metrics(), "memory": M{"rss": processRSS(), "heapUsed": m.HeapAlloc, "heapTotal": m.HeapSys, "external": m.Sys - m.HeapSys, "arrayBuffers": 0}, "go": M{"goroutines": runtime.NumGoroutine(), "gcCycles": m.NumGC}, "tts": media["tts"], "images": media["images"], "sfuControl": media["sfuControl"], "cpu": processCPU(), "eventLoop": M{"meanMs": 0, "p95Ms": 0, "maxMs": 0, "applicable": false}, "realtime": a.Hub.Metrics(), "dataBytes": disk, "storage": a.storageStatus(), "attachments": mediaStorage, "connectedUsers": len(a.Hub.Users()), "accounts": a.DB.One("SELECT COUNT(*) AS count FROM users")["count"], "messages": a.DB.One("SELECT COUNT(*) AS count FROM messages")["count"], "shares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases")["count"]}
+	return M{"uptimeSeconds": time.Since(a.started).Seconds(), "runtime": "go", "version": Version, "databaseIO": a.DB.Metrics(), "memory": M{"rss": processRSS(), "heapUsed": m.HeapAlloc, "heapTotal": m.HeapSys, "external": m.Sys - m.HeapSys, "arrayBuffers": 0}, "go": M{"goroutines": runtime.NumGoroutine(), "gcCycles": m.NumGC}, "tts": media["tts"], "images": media["images"], "sfuControl": media["sfuControl"], "cpu": processCPU(), "eventLoop": M{"meanMs": 0, "p95Ms": 0, "maxMs": 0, "applicable": false}, "realtime": a.Hub.Metrics(), "dataBytes": disk, "storage": a.storageStatus(), "attachments": mediaStorage, "connectedUsers": len(a.Hub.Users()), "accounts": a.DB.One("SELECT COUNT(*) AS count FROM users")["count"], "messages": a.DB.One("SELECT COUNT(*) AS count FROM messages")["count"], "shares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases")["count"], "hdShares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases WHERE quality_height=1080")["count"]}
 }
 
 var _ = fmt.Sprint

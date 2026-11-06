@@ -12,7 +12,12 @@ import { audit } from './accounts';
 import { readSnapshot } from './read-snapshot';
 import { reconcileShares, shareView } from './share-policy';
 
-export const publicUser = (u: Row): PublicUser => ({ id: u.id, username: u.username, displayName: u.display_name, bio: u.bio, avatar: u.avatar, status: u.status, instanceAdmin: Boolean(u.instance_admin), guest: Boolean(u.guest), banned: Boolean(u.banned), language: u.language === 'fa-IR' ? 'fa-IR' : u.language === 'en-US' ? 'en-US' : undefined, mustChangePassword: Boolean(u.must_change_password) });
+// Go schema 13 retains a reserved identity for deleted message authors. The
+// marker also works on legacy databases without the deleted_at column.
+export const deletedAccount = (u: Row) => typeof u.username === 'string' && u.username.startsWith('!deleted:');
+export const publicUser = (u: Row): PublicUser => deletedAccount(u)
+  ? { id: u.id, username: '', displayName: 'Deleted account', bio: '', avatar: null, status: 'offline', deleted: true }
+  : { id: u.id, username: u.username, displayName: u.display_name, bio: u.bio, avatar: u.avatar, status: u.status, instanceAdmin: Boolean(u.instance_admin), guest: Boolean(u.guest), banned: Boolean(u.banned), language: u.language === 'fa-IR' ? 'fa-IR' : u.language === 'en-US' ? 'en-US' : undefined, mustChangePassword: Boolean(u.must_change_password) };
 export class Service {
   notify: (kind: string, payload: any) => Promise<void> = async () => {};
   onTts?: (userId: string, message: Message) => void;
@@ -131,7 +136,9 @@ export class Service {
         const read = await tx.one('SELECT sequence FROM read_cursors WHERE conversation_id=? AND user_id=?', [conversationId, userId]);
         unread[conversationId] = { sequence: Number(cv?.sequence || 0), readSequence: Number(read?.sequence || 0) };
       }
-      return { me: publicUser(me!), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map(d => ({ id: d.conversation_id, lastMessageAt: Number(d.last_message_at || 0), user: publicUser(d), blocked: blockedPeers.has(d.id), blockedByMe: blockedUsers.some(u => u.id === d.id) })), blockedUsers, users: (await tx.all('SELECT * FROM users ORDER BY username LIMIT 250')).map(publicUser), unread, mediaTransport: this.c.mediaTransport, screenPolicy: { maxBitrate: this.c.screenMaxBitrate, maxFrameRate: this.c.screenMaxFrameRate }, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
+      const users = (await tx.all("SELECT * FROM users WHERE username NOT LIKE '!deleted:%' ORDER BY username LIMIT 250")).map(publicUser);
+      const deletedUserIds = (await tx.all("SELECT id FROM users WHERE username LIKE '!deleted:%'")).map(u => u.id);
+      return { me: publicUser(me!), servers, channels, voicePresence: await this.voiceDirectory(userId, tx), dms: dms.map(d => ({ id: d.conversation_id, lastMessageAt: Number(d.last_message_at || 0), user: publicUser(d), blocked: blockedPeers.has(d.id), blockedByMe: blockedUsers.some(u => u.id === d.id) })), blockedUsers, users, deletedUserIds, unread, mediaTransport: this.c.mediaTransport, screenPolicy: { maxBitrate: this.c.screenMaxBitrate, maxFrameRate: this.c.screenMaxFrameRate }, limits: { users: this.c.maxUsers, online: this.c.maxOnline, voice: this.c.maxVoice, roomShares: this.c.roomShares, globalShares: this.c.globalShares } };
     });
   }
   async createServer(userId: string, requestId: string, name: string) {
@@ -311,6 +318,7 @@ export class Service {
     }); await this.notify('state:changed', {}); await this.notify('voice:changed', {}); return result;
   }
   async allowDirectMessage(tx: Connection, userId: string, otherId: string) {
+    if (await tx.one("SELECT id FROM users WHERE id=? AND username LIKE '!deleted:%'", [otherId])) fail(403, 'ACCOUNT_DELETED', 'This direct conversation is read-only because the other account was deleted.');
     if (await tx.one('SELECT user_id FROM user_blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)', [userId, otherId, otherId, userId])) fail(403, 'DM_BLOCKED', 'Direct messaging is blocked between these accounts.');
   }
   async closeDirectMessage(userId: string, rid: string, conversationId: string) {
@@ -325,7 +333,7 @@ export class Service {
   async blockUser(userId: string, rid: string, targetId: string, blocked: boolean) {
     const result = await this.mutate(userId, rid, 'user.block', { targetId, blocked }, async tx => {
       if (targetId === userId) fail(400, 'SELF_BLOCK', 'You cannot block yourself.');
-      if (!await tx.one('SELECT id FROM users WHERE id=?', [targetId])) fail(404, 'NOT_FOUND', 'Account not found.');
+      if (!await tx.one("SELECT id FROM users WHERE id=? AND username NOT LIKE '!deleted:%'", [targetId])) fail(404, 'NOT_FOUND', 'Account not found.');
       if (blocked) await tx.run('INSERT INTO user_blocks(user_id,blocked_id) VALUES(?,?) ON CONFLICT DO NOTHING', [userId, targetId]);
       else await tx.run('DELETE FROM user_blocks WHERE user_id=? AND blocked_id=?', [userId, targetId]);
       return { success: true };

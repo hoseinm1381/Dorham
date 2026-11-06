@@ -30,7 +30,20 @@ func (m *Media) Credentials(uid string, args ...string) M {
 	ch := m.a.Service.Channel(m.a.DB, uid, channel)
 	sources := m.sources(vm, ch)
 	identity := uid + ":" + Str(vm, "epoch")
-	return M{"url": m.a.C.LivekitURL, "identity": identity, "token": mediaJWT(m.a.C.LivekitKey, m.a.C.LivekitSecret, identity, M{"roomJoin": true, "room": channel, "canSubscribe": !Bool(vm, "server_deafened"), "canPublish": len(sources) > 0, "canPublishSources": sources, "canPublishData": false, "canUpdateOwnMetadata": false}, 60)}
+	return M{"nativeScreenAudio": true, "url": m.a.C.LivekitURL, "identity": identity, "token": mediaJWT(m.a.C.LivekitKey, m.a.C.LivekitSecret, identity, M{"roomJoin": true, "room": channel, "canSubscribe": !Bool(vm, "server_deafened"), "canPublish": len(sources) > 0, "canPublishSources": sources, "canPublishData": false, "canUpdateOwnMetadata": false}, 60)}
+}
+
+// ScreenAudioCredentials is a publish-only auxiliary SDK session. Its identity
+// binds the same authenticated voice epoch to one exact active audio lease.
+func (m *Media) ScreenAudioCredentials(uid, socket, channel, leaseID string) M {
+	Check(m.a.C.MediaTransport == "livekit", 409, "SFU_DISABLED", "This instance uses peer-to-peer media.")
+	vm := m.a.DB.One("SELECT * FROM voice_members WHERE user_id=? AND socket_id=? AND channel_id=? AND heartbeat>=?", uid, socket, channel, Now()-30000)
+	Check(vm != nil, 403, "FORBIDDEN", "An active voice session is required.")
+	ch := m.a.Service.Channel(m.a.DB, uid, channel)
+	lease := m.a.DB.One("SELECT id FROM share_leases WHERE id=? AND user_id=? AND channel_id=? AND expires_at>? AND include_audio=1", leaseID, uid, channel, Now())
+	Check(Bool(Obj(ch["permissions"]), "share") && lease != nil, 403, "FORBIDDEN", "An active sound sharing lease is required.")
+	identity := uid + ":" + Str(vm, "epoch") + ":screen:" + leaseID
+	return M{"url": m.a.C.LivekitURL, "identity": identity, "token": mediaJWT(m.a.C.LivekitKey, m.a.C.LivekitSecret, identity, M{"roomJoin": true, "room": channel, "canSubscribe": false, "canPublish": true, "canPublishSources": []string{"screen_share_audio"}, "canPublishData": false, "canUpdateOwnMetadata": false}, 60)}
 }
 func (m *Media) Synchronize() {
 	if m.a.C.MediaTransport != "livekit" {
@@ -106,7 +119,8 @@ func (m *Media) synchronizePass() {
 				identity := Str(p, "identity")
 				split := strings.Split(identity, ":")
 				uid, epoch := "", ""
-				if len(split) == 2 {
+				auxiliary := len(split) == 4 && split[2] == "screen" && split[3] != ""
+				if len(split) == 2 || auxiliary {
 					uid, epoch = split[0], split[1]
 				}
 				remove := func() {
@@ -141,7 +155,14 @@ func (m *Media) synchronizePass() {
 						sources = append(sources, 4)
 					}
 				}
-				perm := M{"canSubscribe": !Bool(vm, "server_deafened"), "canPublish": len(sources) > 0, "canPublishSources": sources, "canPublishData": false, "canUpdateMetadata": false}
+				if auxiliary {
+					if !Bool(permissions, "share") || lease == nil || !Bool(lease, "include_audio") || Str(lease, "id") != split[3] {
+						remove()
+						continue
+					}
+					sources = []int{4}
+				}
+				perm := M{"canSubscribe": !auxiliary && !Bool(vm, "server_deafened"), "canPublish": len(sources) > 0, "canPublishSources": sources, "canPublishData": false, "canUpdateMetadata": false}
 				actual := Obj(p["permission"])
 				same := actual != nil && Bool(actual, "canSubscribe") == Bool(perm, "canSubscribe") && Bool(actual, "canPublish") == Bool(perm, "canPublish") && !Bool(actual, "canPublishData") && !Bool(actual, "canUpdateMetadata") && mediaSourceSet(actual["canPublishSources"]) == mediaSourceSet(sources)
 				if !same {
@@ -209,7 +230,8 @@ func (m *Media) registerAdmission() {
 		claims := mediaVerifyJWT(raw, m.a.C.LivekitKey, m.a.C.LivekitSecret)
 		video := Obj(claims["video"])
 		split := strings.Split(Str(claims, "sub"), ":")
-		if !Bool(video, "roomJoin") || Str(video, "room") == "" || len(split) != 2 || split[0] == "" || split[1] == "" {
+		auxiliary := len(split) == 4 && split[2] == "screen" && split[3] != ""
+		if !Bool(video, "roomJoin") || Str(video, "room") == "" || (len(split) != 2 && !auxiliary) || split[0] == "" || split[1] == "" {
 			denied()
 		}
 		uid, epoch := split[0], split[1]
@@ -223,6 +245,13 @@ func (m *Media) registerAdmission() {
 		}
 		ch := m.a.Service.Channel(m.a.DB, uid, Str(vm, "channel_id"))
 		p := Obj(ch["permissions"])
+		if auxiliary {
+			lease := m.a.DB.One("SELECT id FROM share_leases WHERE id=? AND user_id=? AND channel_id=? AND expires_at>? AND include_audio=1", split[3], uid, Str(vm, "channel_id"), Now())
+			sources := Arr(video["canPublishSources"])
+			if lease == nil || !Bool(p, "share") || video["canSubscribe"] != false || !Bool(video, "canPublish") || len(sources) != 1 || !mediaSourceIs(sources[0], "screen_share_audio", 4) {
+				denied()
+			}
+		}
 		if Bool(vm, "server_deafened") && video["canSubscribe"] != false {
 			denied()
 		}

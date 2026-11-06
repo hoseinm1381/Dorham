@@ -212,3 +212,33 @@ test('social update closes and blocks DMs and lets members leave a server withou
     await page.getByRole('button', { name: 'Open Server leaving lab', exact: true }).click(); await expect(page.getByText('Public history remains', { exact: true })).toBeVisible();
   } finally { await a.close(); await b.close(); }
 });
+
+test('admin account deletion relabels an already-open direct chat', async ({ browser }) => {
+  test.skip(process.env.DORHAM_BACKEND_ENGINE !== 'go', 'Account deletion is implemented in the Go API');
+  const viewerContext = await browser.newContext({ locale: 'en-US' });
+  const targetContext = await browser.newContext({ locale: 'en-US' });
+  try {
+    const viewer = await viewerContext.newPage();
+    const target = await targetContext.newPage();
+    const suffix = Date.now().toString().slice(-7);
+    const username = `Retired${suffix}`;
+    await register(viewer, `Operator${suffix}`);
+    await register(target, username);
+    await api(viewer, '/admin/claim', { secret: 'browser-fixture-bootstrap-not-for-deployment' });
+    const user = (await api(target, '/auth/me')).user;
+    const dm = await api(viewer, '/dms', { userId: user.id });
+    await api(target, '/messages', { conversationId: dm.id, content: 'History survives account deletion' });
+    await viewer.locator('.dm-item').click();
+    const message = viewer.getByTestId('message').filter({ hasText: 'History survives account deletion' });
+    await expect(message.locator('.message-byline')).toContainText(username);
+    await api(viewer, `/admin/users/${user.id}`, { action: 'delete', confirmUsername: user.username });
+    await expect(message.locator('.message-byline')).toContainText('Deleted account');
+    await expect(message).toContainText('History survives account deletion');
+    await expect(viewer.getByText('This account was deleted. You can still read the conversation.')).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Send message' })).toHaveCount(0);
+    await expect(viewer.getByRole('button', { name: 'Block person' })).toHaveCount(0);
+  } finally {
+    await viewerContext.close();
+    await targetContext.close();
+  }
+});

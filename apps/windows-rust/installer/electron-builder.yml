@@ -1,0 +1,27 @@
+# Only NSIS packaging tooling is reused. --prepackaged MUST contain only the
+# Rust/WebView2 runtime payload; no Electron runtime is downloaded or shipped.
+appId: com.dorham.chat
+productName: Dorham
+executableName: Dorham
+directories:
+  app: apps/windows-rust/installer
+  buildResources: apps/windows-rust/installer
+  output: artifacts/windows-rust
+npmRebuild: false
+asar: false
+toolsets:
+  nsis: 1.2.1
+artifactName: Dorham-${version}-Windows-${arch}.${ext}
+win:
+  target: nsis
+  icon: apps/desktop/icon.ico
+nsis:
+  guid: 26094eeb-aead-5f8d-b988-ece04b473a4b
+  script: installer.nsi
+  include: migration.nsh
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false

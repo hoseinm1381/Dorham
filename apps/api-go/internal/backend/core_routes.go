@@ -244,7 +244,7 @@ func (a *App) registerCore() {
 		VBool(b, "delete", true)
 		if _, ok := b["emoji"]; ok {
 			emoji := coreString(b, "emoji", 1, 100, false)
-			Check(coreReactionValues[emoji], 400, "VALIDATION", "Invalid reaction emoji")
+			Check(coreReactionValues[emoji] || isCatalogReaction(emoji), 400, "VALIDATION", "Invalid reaction emoji")
 		}
 		VBool(b, "removeReaction", true)
 		Check(S(b["content"]) != "" || B(b["delete"]) || S(b["emoji"]) != "", 400, "VALIDATION", "Choose a message change.")

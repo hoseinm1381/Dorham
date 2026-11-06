@@ -1,0 +1,22 @@
+.rank-badge { display: inline-flex; align-items: center; gap: .25rem; color: #a4d7ff; vertical-align: middle; margin-inline-start: .3rem; white-space: nowrap; }
+.rank-pro { color: #d6b8ff; }
+.rank-ultra { color: #ffb6e7; }
+.rank-max { color: #ffe086; }
+.avatar .profile-frame, .avatar .profile-badge-icon { position: absolute; pointer-events: none; object-fit: contain; }
+.avatar .profile-frame { inset: 0; width: 100%; height: 100%; }
+.avatar .profile-badge-icon { width: 35%; height: 35%; inset-inline-end: 0; bottom: 0; }
+.community-banner { width: 100%; max-height: 88px; object-fit: cover; border-radius: 6px; }
+.profile-banner-image { width: 100%; max-height: 120px; object-fit: cover; border-radius: 8px; }
+.feature-announcement { padding: .55rem .8rem; margin: .3rem .8rem; border-inline-start: 3px solid #86e5bd; background: #20362f; overflow-wrap: anywhere; }
+.feature-assets { display: flex; flex-wrap: wrap; gap: .35rem; margin: .45rem 0; }
+.feature-assets img { object-fit: contain; }
+.feature-profile label { margin-block: .6rem; }
+.voice-panel .voice-panel-actions > .icon-button { width: 34px; height: 34px; flex: none; border: 1px solid #ffffff14; background: #8274e014; color: #cbc5ed; }
+.voice-panel .voice-panel-actions > .icon-button:hover { background: #8274e02e; }
+.voice-panel .voice-panel-actions > .icon-button.active { color: #9bdbc4; border-color: #83daba66; background: #83daba17; }
+.soundboard-panel { display: grid; gap: .4rem; }
+.soundboard-pack { flex: 0 0 100%; }
+.soundboard-pack > strong { font-size: .86rem; }
+.soundboard-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-block: .35rem; }
+.soundboard-panel input[type="range"] { max-width: 8rem; vertical-align: middle; }
+.custom-emoji.catalog-sticker { width: min(7rem, 40vw); height: auto; aspect-ratio: 1; object-fit: contain; }

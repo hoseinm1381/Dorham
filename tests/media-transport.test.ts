@@ -21,7 +21,7 @@ afterEach(() => vi.unstubAllGlobals());
 function fixture() {
   vi.stubGlobal('navigator', { onLine: true, mediaDevices: { getUserMedia: vi.fn() } });
   vi.stubGlobal('AudioContext', class { resume = async () => {}; close = async () => {}; });
-  const socket = new EventEmitter(), events: string[] = []; let joined!: (error: null, result: any) => void;
+  const socket = Object.assign(new EventEmitter(), { connected: true }), events: string[] = []; let joined!: (error: null, result: any) => void;
   (socket as any).timeout = () => ({ emit: (name: string, _body: unknown, reply: typeof joined) => {
     events.push(name); if (name === 'voice:join') joined = reply;
     else reply(null, { ok: true, data: name === 'voice:sfu' ? { url: 'ws://fixture', token: 'fixture' } : {} });

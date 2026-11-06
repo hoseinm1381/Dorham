@@ -21,7 +21,7 @@ export function AudioProcessingControls({ transport, onError, onBusyChange }: { 
   const [clarity, setClarity] = useState(readVoiceClarity);
   const [pending, setPending] = useState<AudioProcessing | null>(null);
   const [, refresh] = useState(0);
-  if (transport && (!transport.getAudioProcessing || !transport.setAudioProcessing)) return <p>{tr("Android manages microphone noise and echo processing automatically.")}</p>;
+  if (transport && (transport.getCapabilities().nativeVideo || !transport.getAudioProcessing || !transport.setAudioProcessing)) return <p>{tr("Android manages microphone noise and echo processing automatically.")}</p>;
   const state = transport?.getAudioProcessing?.() ?? browserAudioProcessing(readAudioProcessingPreferences());
   async function update(key: keyof AudioProcessing, value: boolean) {
     working(true);

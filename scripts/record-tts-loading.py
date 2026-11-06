@@ -4,9 +4,10 @@ Set DORHAM_TTS_MODELS to the verified voices folder. Normal app builds do not ru
 this script, download models, install Python dependencies or generate speech.
 """
 from pathlib import Path
-import hashlib, io, json, wave
+import hashlib, io, json, wave, sys
 
 root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root / 'deployment'))
 directory = root / 'assets/tts-loading'
 manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
 namespace = {'__name__': 'dorham_static_recording'}

@@ -21,22 +21,34 @@ function statusIcon(kind, off) {
  }
  return svg;
 }
+const rows = new Map();
 window.voiceOverlay.onState(value => {
  if (!value) return;
  document.documentElement.dir = value.language === 'fa-IR' ? 'rtl' : 'ltr';
  document.title = 'Dorham voice — ' + value.channel;
- const list = document.getElementById('members'); list.replaceChildren();
- const fa = value.language === 'fa-IR';
- for (const person of value.members) {
-  const muted = person.muted || person.serverMuted || person.deafened;
-  const row = document.createElement('div'); row.className = 'member ' + (muted ? 'muted' : person.speaking ? 'speaking' : '');
-  const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.textContent = Array.from(person.name).slice(0,2).join('');
-  if (person.avatar) { const image = document.createElement('img'); image.src = person.avatar; image.alt = ''; image.addEventListener('error', () => { avatar.textContent = Array.from(person.name).slice(0,2).join(''); }, { once: true }); avatar.replaceChildren(image); }
-  const name = document.createElement('bdi'); name.className = 'name'; name.textContent = person.name;
-  const status = document.createElement('span'); status.className = 'state';
+ const list = document.getElementById('members'), wanted = new Set(), fa = value.language === 'fa-IR';
+ for (const [index, person] of value.members.entries()) {
+  const key = person.id || String(index); wanted.add(key);
+  let item = rows.get(key);
+  if (!item) {
+   const row = document.createElement('div'), avatar = document.createElement('span'), name = document.createElement('bdi'), status = document.createElement('span');
+   avatar.className = 'avatar'; name.className = 'name'; status.className = 'state'; status.setAttribute('role', 'img');
+   row.append(avatar, name, status); item = { row, avatar, name, status, previous: {} }; rows.set(key, item);
+  }
+  const muted = person.muted || person.serverMuted || person.deafened, old = item.previous;
+  const avatar = Object.hasOwn(person, 'avatar') && person.avatar !== undefined ? person.avatar : old.avatar;
+  if (person.name !== old.name) item.name.textContent = person.name;
+  if (avatar !== old.avatar || (!avatar && person.name !== old.name)) {
+   item.avatar.textContent = Array.from(person.name).slice(0, 2).join('');
+   if (avatar) { const image = document.createElement('img'); image.src = avatar; image.alt = ''; image.addEventListener('error', () => { item.avatar.textContent = Array.from(person.name).slice(0, 2).join(''); }, { once: true }); item.avatar.replaceChildren(image); }
+  }
+  const className = 'member ' + (muted ? 'muted' : person.speaking ? 'speaking' : '');
+  if (item.row.className !== className) item.row.className = className;
   const label = person.serverMuted ? (fa ? 'بی‌صدا توسط مدیر' : 'Server muted') : person.deafened ? (fa ? 'ناشنوا' : 'Deafened') : person.muted ? (fa ? 'بی‌صدا' : 'Muted') : person.speaking ? (fa ? 'در حال صحبت' : 'Speaking') : (fa ? 'در حال شنیدن' : 'Listening');
-  status.setAttribute('role', 'img'); status.setAttribute('aria-label', label); status.title = label;
-  status.append(statusIcon('mic', muted), statusIcon('headphones', person.deafened));
-  row.append(avatar,name,status); list.append(row);
+  if (item.status.title !== label) { item.status.setAttribute('aria-label', label); item.status.title = label; }
+  if (muted !== old.effectiveMuted || person.deafened !== old.deafened) item.status.replaceChildren(statusIcon('mic', muted), statusIcon('headphones', person.deafened));
+  if (list.children[index] !== item.row) list.insertBefore(item.row, list.children[index] || null);
+  item.previous = { ...person, avatar, effectiveMuted: muted };
  }
+ for (const [key, item] of rows) if (!wanted.has(key)) { item.row.remove(); rows.delete(key); }
 });

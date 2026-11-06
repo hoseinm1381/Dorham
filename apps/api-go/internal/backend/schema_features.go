@@ -1,0 +1,27 @@
+package backend
+
+var featureSchema = []string{
+	"CREATE TABLE feature_settings (id TEXT PRIMARY KEY, value TEXT NOT NULL, revision BIGINT NOT NULL DEFAULT 1)",
+	"CREATE TABLE account_features (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, feature TEXT NOT NULL, expires_at BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(user_id,feature))",
+	"CREATE TABLE community_features (server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, feature TEXT NOT NULL, expires_at BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(server_id,feature))",
+	"CREATE TABLE feature_catalog (id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, pack TEXT NOT NULL DEFAULT '', digest TEXT NOT NULL, mime TEXT NOT NULL, bytes BIGINT NOT NULL, access TEXT NOT NULL, server_id TEXT, free_slot INTEGER, active INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 0, owner_id TEXT)",
+	"CREATE UNIQUE INDEX feature_catalog_free_active ON feature_catalog(free_slot) WHERE active=1 AND free_slot IS NOT NULL",
+	"CREATE INDEX feature_catalog_digest ON feature_catalog(digest)",
+	"CREATE INDEX feature_catalog_scope ON feature_catalog(active,kind,server_id)",
+	"CREATE TABLE feature_announcements (id TEXT PRIMARY KEY, text_en TEXT NOT NULL, text_fa TEXT NOT NULL, platform TEXT NOT NULL, app_version TEXT NOT NULL, starts_at BIGINT NOT NULL, ends_at BIGINT NOT NULL)",
+	"CREATE TABLE feature_speech_usage (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, month TEXT NOT NULL, characters BIGINT NOT NULL, PRIMARY KEY(user_id,month))",
+	"CREATE INDEX feature_speech_usage_month ON feature_speech_usage(month)",
+	"ALTER TABLE servers ADD COLUMN community_banner TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE servers ADD COLUMN invite_blurb TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE servers ADD COLUMN community_emoji_slots INTEGER NOT NULL DEFAULT 8",
+	"ALTER TABLE users ADD COLUMN rank_badge TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN profile_frame TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN profile_banner TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN profile_accent TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN profile_badge TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN profile_badge_award TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN catalog_avatar TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE share_leases ADD COLUMN quality_height INTEGER NOT NULL DEFAULT 720",
+	"ALTER TABLE share_leases ADD COLUMN quality_bitrate INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE users ADD COLUMN speech_plus INTEGER NOT NULL DEFAULT 0",
+}

@@ -16,8 +16,13 @@ import java.util.concurrent.Executors
 class DorhamFilesPlugin : Plugin() {
     private val worker = Executors.newSingleThreadExecutor()
     private var busy = false
+    @Volatile private var cancelled = false
+    @Volatile private var activeConnection: HttpURLConnection? = null
+    @PluginMethod fun cancel(call: PluginCall) { cancelled = true; activeConnection?.disconnect(); call.resolve() }
+    private fun progress(value: Int, active: Boolean = true) { notifyListeners("download", JSObject().put("progress", value).put("active", active)) }
     @PluginMethod fun download(call: PluginCall) {
         synchronized(this) { if (busy) { call.reject("A download is already active"); return }; busy = true }
+        cancelled = false; progress(0)
         worker.execute {
             var connection: HttpURLConnection? = null
             var destination: android.net.Uri? = null
@@ -27,6 +32,7 @@ class DorhamFilesPlugin : Plugin() {
                 require(url.userInfo == null && url.path.matches(Regex("/api/v1/attachments/[0-9a-fA-F-]{36}/download")) && url.query == null) { "Invalid download address" }
                 val name = requireNotNull(call.getString("name")); require(name.length in 1..180 && name.none { it.code < 32 || it == '/' || it == '\\' }) { "Invalid download name" }
                 connection = url.openConnection() as HttpURLConnection
+                activeConnection = connection
                 connection.instanceFollowRedirects = false; connection.connectTimeout = 15000; connection.readTimeout = 30000
                 connection.setRequestProperty("Authorization", "Bearer ${requireNotNull(call.getString("accessToken"))}")
                 require(connection.responseCode == 200) { "File is unavailable or access was denied" }
@@ -36,8 +42,8 @@ class DorhamFilesPlugin : Plugin() {
                 val resolver = context.contentResolver
                 destination = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
                 resolver.openOutputStream(destination)?.use { output -> connection.inputStream.use { input ->
-                    val buffer = ByteArray(65536); var received = 0L
-                    while (true) { val n = input.read(buffer); if (n < 0) break; received += n; require(received <= length) { "File exceeded declared size" }; output.write(buffer, 0, n) }
+                    val buffer = ByteArray(65536); var received = 0L; var last = -1; val deadline = android.os.SystemClock.elapsedRealtime() + 300000
+                    while (true) { check(!cancelled && android.os.SystemClock.elapsedRealtime() < deadline); val n = input.read(buffer); if (n < 0) break; received += n; require(received <= length) { "File exceeded declared size" }; output.write(buffer, 0, n); val percent = (received * 100 / length).toInt(); if (percent != last) { last = percent; progress(percent) } }
                     require(received == length) { "File download was interrupted" }
                 } } ?: throw IllegalStateException("Could not create download")
                 resolver.update(destination, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
@@ -45,8 +51,8 @@ class DorhamFilesPlugin : Plugin() {
             } catch (_: Exception) {
                 destination?.let { context.contentResolver.delete(it, null, null) }
                 call.reject("The file could not be downloaded. Check the connection and access permissions.")
-            } finally { connection?.disconnect(); synchronized(this) { busy = false } }
+            } finally { progress(100, false); activeConnection = null; connection?.disconnect(); synchronized(this) { busy = false } }
         }
     }
-    override fun handleOnDestroy() { worker.shutdownNow(); super.handleOnDestroy() }
+    override fun handleOnDestroy() { cancelled = true; activeConnection?.disconnect(); worker.shutdownNow(); super.handleOnDestroy() }
 }

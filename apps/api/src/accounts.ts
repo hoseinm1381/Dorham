@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyContextConfig } from 'fastif
 import { z } from 'zod';
 import { passwordSchema, registerSchema, requestId, id } from '@dorham/contracts';
 import type { Connection, Row } from './db';
-import { publicUser, type Service } from './service';
+import { deletedAccount, publicUser, type Service } from './service';
 import { fail, hash, passwordHash, passwordVerify, token } from './security';
 
 export async function initialRecoveryCodes(tx: Connection, userId: string) {
@@ -34,7 +34,7 @@ export function publicAccountRoutes(app: FastifyInstance, service: Service, auth
       if (previous) { if (!previous.guest) fail(409, 'NOT_GUEST', 'This account is already registered.'); if (previous.fingerprint !== fingerprint) fail(409, 'IDEMPOTENCY_CONFLICT', 'Request identifier was already used with different input.'); return { userId: previous.user_id as string, ...JSON.parse(previous.response || '{}') }; }
       const inv = await tx.one('SELECT i.*,s.allow_guests FROM invites i JOIN servers s ON s.id=i.server_id WHERE i.hash=? AND i.expires_at>=? AND i.remaining>0', [hash(b.code), Date.now()]);
       if (!inv?.allow_guests) fail(403, 'GUEST_INVITE_REQUIRED', 'A valid invitation to a guest-enabled server is required.');
-      if (Number((await tx.one('SELECT COUNT(*) AS count FROM users'))!.count) >= c.maxUsers) fail(409, 'ACCOUNT_LIMIT', 'This instance has reached its account limit.');
+      if (Number((await tx.one("SELECT COUNT(*) AS count FROM users WHERE username NOT LIKE '!deleted:%'"))!.count) >= c.maxUsers) fail(409, 'ACCOUNT_LIMIT', 'This instance has reached its account limit.');
       if (Number((await tx.one('SELECT COUNT(*) AS count FROM users WHERE guest=1'))!.count) >= c.maxGuests) fail(409, 'GUEST_LIMIT', 'Guest capacity has been reached.');
       const uid = randomUUID(), now = Date.now();
       await tx.run('INSERT INTO users(id,username,display_name,password_hash,guest,created_at,language) VALUES(?,?,?,?,1,?,?)', [uid, `guest_${uid.replaceAll('-', '').slice(0, 20)}`, b.displayName, '!guest-no-password', now, b.language || '']);
@@ -116,7 +116,7 @@ export function protectedAccountRoutes(api: FastifyInstance, service: Service, d
       await audit(tx, req.account.id, 'recovery.question', req.account.id); return { success: true };
     });
   });
-  api.get('/admin/users', async req => { await administrator(db, req.account.id); return { users: (await db.all('SELECT * FROM users ORDER BY created_at LIMIT 250')).map(publicUser) }; });
+  api.get('/admin/users', async req => { await administrator(db, req.account.id); return { users: (await db.all("SELECT * FROM users WHERE username NOT LIKE '!deleted:%' ORDER BY created_at LIMIT 250")).map(publicUser) }; });
   api.get('/admin/audit', async req => { await administrator(db, req.account.id); const before = z.coerce.number().int().positive().optional().parse((req.query as any).before); return { events: await db.all('SELECT * FROM audit_log WHERE created_at<? ORDER BY created_at DESC LIMIT 100', [before || Date.now() + 1]) }; });
   api.post('/admin/users/:id', async req => {
     const targetId = id.parse((req.params as any).id), b = z.object({ action: z.enum(['ban', 'unban', 'revoke', 'resetPassword']), requestId }).parse(req.body);
@@ -128,6 +128,7 @@ export function protectedAccountRoutes(api: FastifyInstance, service: Service, d
       if (await tx.one('SELECT request_id FROM mutations WHERE user_id=? AND request_id=?', [req.account.id, b.requestId])) fail(409, 'ALREADY_APPLIED', 'Administrative action was already applied.');
       const target = await tx.one('SELECT * FROM users WHERE id=?', [targetId]);
       if (!target || target.instance_admin) fail(403, 'PROTECTED_ACCOUNT', 'The global administrator cannot be modified by this operation.');
+      if (deletedAccount(target!)) fail(409, 'ACCOUNT_DELETED', 'This account has already been deleted.');
       if (b.action === 'ban' || b.action === 'unban') await tx.run('UPDATE users SET banned=? WHERE id=?', [b.action === 'ban' ? 1 : 0, targetId]);
       if (encoded) { if (target!.guest) fail(400, 'GUEST_ACCOUNT', 'Convert the guest account before setting a password.'); await tx.run('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?', [encoded, targetId]); await tx.run('DELETE FROM recovery_codes WHERE user_id=?', [targetId]); }
       if (b.action !== 'unban') { await tx.run('DELETE FROM sessions WHERE user_id=?', [targetId]); await tx.run('DELETE FROM voice_members WHERE user_id=?', [targetId]); }

@@ -48,6 +48,11 @@ try {
  const goAttachment=await request('/attachments',a.accessToken,body({conversationId:channel.conversationId,name:'go.png',size:bytes.length}));
  const uploaded=await app.inject({method:'POST',url:`/api/v1/attachments/${goAttachment.id}/content`,headers:{authorization:'Bearer '+a.accessToken,'content-type':'application/octet-stream','content-length':String(bytes.length)},payload:bytes});assert.equal(uploaded.statusCode,200);
  await request('/messages',a.accessToken,body({conversationId:channel.conversationId,content:'Go upload',attachmentIds:[goAttachment.id]}));
+ const retired = await register('go_retired');
+ await go.db.run('UPDATE users SET instance_admin=1 WHERE id=?', [a.user.id]);
+ const retiredChat = await request('/dms',renewed.accessToken,body({userId:retired.user.id}));
+ await request('/messages',retired.accessToken,body({conversationId:retiredChat.id,content:'Retained across rollback'}));
+ await request(`/admin/users/${retired.user.id}`,a.accessToken,body({action:'delete',confirmUsername:'go_retired'}));
  await go.close();go=undefined;
 
  node=await createApp(c,{logger:false,rateLimit:false});app=node.app;
@@ -57,6 +62,11 @@ try {
  assert.equal((await request('/messages',a.accessToken,goMessageBody)).payload.id,goMessage.payload.id);checks.goReceiptsReplayOnNode=true;
  const after=await request(`/conversations/${channel.conversationId}/messages`,a.accessToken);assert.equal(after.messages.length,4);assert.equal(after.messages[2].content,goMessageBody.content);checks.goWritesPreservedOnRollback=true;
  const returned=await app.inject({method:'GET',url:`/api/v1/attachments/${goAttachment.id}/download`,headers:{authorization:'Bearer '+a.accessToken}});assert.equal(returned.statusCode,200);assert.deepEqual(returned.rawPayload,bytes);checks.goAttachmentReadableByNode=true;
- assert.equal((await node.db.one('PRAGMA integrity_check'))!.integrity_check,'ok');assert.equal((await node.db.all('PRAGMA foreign_key_check')).length,0);assert.equal((await node.db.one('SELECT MAX(version) AS version FROM schema_migrations'))!.version,11);checks.integrityAndSchema11=true;
- await writeFile('artifacts/evidence/v110-node-go-node-rollback.json',JSON.stringify({passed:true,checks,databaseSchema:11,fixture:'private temporary synthetic accounts/uploads only',productionChanged:false},null,2));console.log(JSON.stringify({passed:true,checks}));
+ const retained=await request(`/conversations/${retiredChat.id}/messages`,nextRefresh.accessToken);
+ assert.equal(retained.messages[0].author.displayName,'Deleted account');assert.equal(retained.messages[0].author.deleted,true);
+ assert.equal((await request('/admin/users',a.accessToken)).users.some((u:any)=>u.id===retired.user.id),false);
+ const rejected=await app.inject({method:'POST',url:`/api/v1/admin/users/${retired.user.id}`,headers:{authorization:'Bearer '+a.accessToken},payload:body({action:'unban'})});
+ assert.equal(rejected.statusCode,409);checks.deletedAccountRemainsRetiredAfterRollback=true;
+ assert.equal((await node.db.one('PRAGMA integrity_check'))!.integrity_check,'ok');assert.equal((await node.db.all('PRAGMA foreign_key_check')).length,0);assert.equal((await node.db.one('SELECT MAX(version) AS version FROM schema_migrations'))!.version,13);checks.integrityAndSchema13=true;
+ await writeFile('artifacts/evidence/v110-node-go-node-rollback.json',JSON.stringify({passed:true,checks,databaseSchema:13,fixture:'private temporary synthetic accounts/uploads only',productionChanged:false},null,2));console.log(JSON.stringify({passed:true,checks}));
 } finally {await go?.close();await node?.app.close();await rm(dataDir,{recursive:true,force:true});}

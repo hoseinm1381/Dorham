@@ -144,7 +144,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     const body = registerSchema.parse(req.body), username = body.username.toLowerCase();
     const encoded = await passwordHash(body.password);
     const created = await db.transaction(async tx => {
-      const count = await tx.one('SELECT COUNT(*) AS count FROM users');
+      const count = await tx.one("SELECT COUNT(*) AS count FROM users WHERE username NOT LIKE '!deleted:%'");
       if (count!.count >= c.maxUsers) fail(409, 'ACCOUNT_LIMIT', 'This instance has reached its account limit.');
       if (await tx.one('SELECT id FROM users WHERE username=?', [username])) fail(409, 'USERNAME_TAKEN', 'This username is unavailable.');
       const userId = randomUUID(); await tx.run('INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)', [userId, username, body.displayName, encoded, Date.now(), body.language || '']); return { userId, codes: await initialRecoveryCodes(tx, userId) };

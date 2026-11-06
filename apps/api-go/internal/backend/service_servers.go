@@ -9,12 +9,16 @@ func (s *Service) Bootstrap(uid string) M {
 		Check(me != nil, 403, "FORBIDDEN", "Account access is unavailable.")
 		admin := me["instance_admin"]
 		servers := []M{}
-		for _, r := range tx.All("SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at", uid, admin) {
+		for _, r := range tx.All("SELECT s.*,m.role, f.expires_at AS community_expires FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? LEFT JOIN community_features f ON f.server_id=s.id AND f.feature='communityPlus' WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at", uid, admin) {
 			role := S(r["role"])
 			if B(admin) {
 				role = "owner"
 			}
-			servers = append(servers, M{"id": r["id"], "name": r["name"], "ownerId": r["owner_id"], "icon": r["icon"], "role": role, "allowGuests": B(r["allow_guests"]), "allowMemberInvites": B(r["allow_member_invites"]), "permissions": s.MemberPermissions(tx, role, uid, S(r["id"]))})
+			server := M{"id": r["id"], "name": r["name"], "ownerId": r["owner_id"], "icon": r["icon"], "role": role, "allowGuests": B(r["allow_guests"]), "allowMemberInvites": B(r["allow_member_invites"]), "permissions": s.MemberPermissions(tx, role, uid, S(r["id"]))}
+			if r["community_expires"] != nil && (N(r["community_expires"]) == 0 || N(r["community_expires"]) > Now()) && Str(r, "community_banner") != "" && featureSetting(tx, "features")["communityPlus"] != false {
+				server["banner"] = r["community_banner"]
+			}
+			servers = append(servers, server)
 		}
 		channels := []M{}
 		for _, r := range tx.All("SELECT c.* FROM channels c LEFT JOIN members m ON c.server_id=m.server_id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY c.created_at", uid, admin) {
@@ -48,7 +52,7 @@ func (s *Service) Bootstrap(uid string) M {
 				conversations = append(conversations, id)
 			}
 		}
-		for _, d := range tx.All("SELECT d.conversation_id,u.id,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,(SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id=d.conversation_id) AS last_message_at FROM dm_members d JOIN dm_members other ON other.conversation_id=d.conversation_id AND other.user_id<>d.user_id JOIN users u ON u.id=other.user_id WHERE d.user_id=? AND d.hidden=0 ORDER BY last_message_at DESC,d.conversation_id", uid) {
+		for _, d := range tx.All("SELECT d.conversation_id,u.id,u.username,u.display_name,u.bio,u.avatar,u.status,u.instance_admin,u.deleted_at,u.rank_badge,u.catalog_avatar,u.profile_frame,u.profile_banner,u.profile_accent,u.profile_badge,u.profile_badge_award,(SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id=d.conversation_id) AS last_message_at FROM dm_members d JOIN dm_members other ON other.conversation_id=d.conversation_id AND other.user_id<>d.user_id JOIN users u ON u.id=other.user_id WHERE d.user_id=? AND d.hidden=0 ORDER BY last_message_at DESC,d.conversation_id", uid) {
 			dms = append(dms, M{"id": d["conversation_id"], "lastMessageAt": N(d["last_message_at"]), "user": PublicUser(d), "blocked": peers[S(d["id"])], "blockedByMe": blockedByMe[S(d["id"])]})
 			conversations = append(conversations, S(d["conversation_id"]))
 		}
@@ -70,10 +74,14 @@ func (s *Service) Bootstrap(uid string) M {
 			}
 		}
 		users := []M{}
-		for _, u := range tx.All("SELECT * FROM users ORDER BY username LIMIT 250") {
+		for _, u := range tx.All("SELECT * FROM users WHERE deleted_at IS NULL ORDER BY username LIMIT 250") {
 			users = append(users, PublicUser(u))
 		}
-		return M{"me": PublicUser(me), "servers": servers, "channels": channels, "voicePresence": s.VoiceDirectory(uid, tx), "dms": dms, "blockedUsers": blocked, "users": users, "unread": unread, "mediaTransport": s.C.MediaTransport, "screenPolicy": M{"maxBitrate": s.C.ScreenMaxBitrate, "maxFrameRate": s.C.ScreenMaxFrameRate}, "limits": M{"users": s.C.MaxUsers, "online": s.C.MaxOnline, "voice": s.C.MaxVoice, "roomShares": s.C.RoomShares, "globalShares": s.C.GlobalShares}}
+		deletedUsers := []string{}
+		for _, u := range tx.All("SELECT id FROM users WHERE deleted_at IS NOT NULL") {
+			deletedUsers = append(deletedUsers, Str(u, "id"))
+		}
+		return M{"me": PublicUser(me), "servers": servers, "channels": channels, "voicePresence": s.VoiceDirectory(uid, tx), "dms": dms, "blockedUsers": blocked, "users": users, "deletedUserIds": deletedUsers, "unread": unread, "mediaTransport": s.C.MediaTransport, "screenPolicy": M{"maxBitrate": s.C.ScreenMaxBitrate, "maxFrameRate": s.C.ScreenMaxFrameRate}, "limits": M{"users": s.C.MaxUsers, "online": s.C.MaxOnline, "voice": s.C.MaxVoice, "roomShares": s.C.RoomShares, "globalShares": s.C.GlobalShares}}
 	}))
 }
 func (s *Service) InsertChannel(tx *DB, server, name, kind string) M {
@@ -402,7 +410,7 @@ func (s *Service) CloseDirectMessage(uid, rid, conversation string) M {
 func (s *Service) BlockUser(uid, rid, target string, blocked bool) M {
 	r := s.Mutate(uid, rid, "user.block", M{"targetId": target, "blocked": blocked}, func(tx *DB) any {
 		Check(target != uid, 400, "SELF_BLOCK", "You cannot block yourself.")
-		Check(tx.One("SELECT id FROM users WHERE id=?", target) != nil, 404, "NOT_FOUND", "Account not found.")
+		Check(tx.One("SELECT id FROM users WHERE id=? AND deleted_at IS NULL", target) != nil, 404, "NOT_FOUND", "Account not found.")
 		if blocked {
 			tx.Run("INSERT INTO user_blocks(user_id,blocked_id) VALUES(?,?) ON CONFLICT DO NOTHING", uid, target)
 		} else {

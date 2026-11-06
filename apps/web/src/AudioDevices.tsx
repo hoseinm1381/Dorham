@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject, type ReactNode } from 'rea
 import type { MediaTransport } from '@dorham/media';
 import { readAudioProcessingPreferences } from './AudioProcessingControls';
 import { serverUrl } from './api';
+import { NativeAudioRoutes } from './NativeAudioRoutes';
 import { t } from './i18n';
 import { MicrophoneVoiceTest } from './MicrophoneVoiceTest';
 function storageKey(account: string) { return `dorham-audio:${serverUrl() || location.origin}:${account}`; }
@@ -13,7 +14,7 @@ export function saveVoiceLevel(account: string, user: string, volume: number) { 
 export function useAudioRouting(transport: RefObject<MediaTransport | null>, active: boolean, account: string | undefined, error: (e: unknown) => void) {
   const onError = useRef(error); onError.current = error;
   useEffect(() => {
-    if (!active || !account || !navigator.mediaDevices) return;
+    if (!active || !account || !navigator.mediaDevices || transport.current?.getCapabilities().nativeVideo) return;
     const media = transport.current; let stopped = false, serial = Promise.resolve(), appliedInput: string | undefined, appliedOutput: string | undefined;
     const refresh = () => { serial = serial.then(async () => {
       const devices = await navigator.mediaDevices.enumerateDevices(); if (stopped || transport.current !== media) return;
@@ -56,6 +57,7 @@ export function AudioDeviceSettings({ account, transport, error, advancedControl
     try { release = await transport?.beginAudioTest?.(); if (cancelled) { await release?.(); return; } if (choices.output && typeof (context as any).setSinkId === 'function') await (context as any).setSinkId(choices.output); if (cancelled) return; await context.resume(); if (cancelled) return; const oscillator = context.createOscillator(), gain = context.createGain(); oscillator.frequency.value = 520; gain.gain.value = 0.04; oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + 0.3); oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); finish(); }; setNotice('Test sound played.'); }
     catch (e) { finish(); error(e); }
   }
+  if (transport?.getCapabilities().nativeVideo) return <section className="native-audio-settings"><NativeAudioRoutes/>{advancedControls}</section>;
   const outputSupported = transport?.getCapabilities().outputSelection ?? (typeof (AudioContext.prototype as any).setSinkId === 'function');
   return <section className="audio-device-settings">
     <details className="audio-voice-test" onToggle={e => { const open = e.currentTarget.open; setVoiceTestOpen(open); if (!open) { generation.current++; cleanup.current(); speakerCleanup.current(); setTesting(false); setLevel(0); } }}><summary>{t('Test your voice')}</summary>

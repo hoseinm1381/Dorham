@@ -19,7 +19,14 @@ func processAlive(pid int) bool {
 	}
 	return code == 259
 }
-func processCPU() M {var created,ended,kernel,user windows.Filetime;if windows.GetProcessTimes(windows.CurrentProcess(),&created,&ended,&kernel,&user)!=nil{return M{"user":0,"system":0}};micros:=func(v windows.Filetime)uint64{return (uint64(v.HighDateTime)<<32|uint64(v.LowDateTime))/10};return M{"user":micros(user),"system":micros(kernel)} }
+func processCPU() M {
+	var created, ended, kernel, user windows.Filetime
+	if windows.GetProcessTimes(windows.CurrentProcess(), &created, &ended, &kernel, &user) != nil {
+		return M{"user": 0, "system": 0}
+	}
+	micros := func(v windows.Filetime) uint64 { return (uint64(v.HighDateTime)<<32 | uint64(v.LowDateTime)) / 10 }
+	return M{"user": micros(user), "system": micros(kernel)}
+}
 func processRSS() uint64 {
 	type counters struct {
 		Size, Faults                                                                    uint32

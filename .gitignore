@@ -15,6 +15,7 @@ coverage/
 .cache/
 .codegraph/
 apps/android/android/.gradle/
+apps/android/android/.kotlin/
 apps/android/android/.idea/
 apps/android/android/local.properties
 apps/android/android/**/build/

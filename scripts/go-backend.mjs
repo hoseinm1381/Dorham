@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd(), moduleDir = path.join(root, 'apps/api-go');
@@ -25,7 +25,8 @@ if (action === 'build' || action === 'test') {
     const os = linux ? 'linux' : process.platform === 'win32' ? 'windows' : process.platform;
     const output = path.join(moduleDir, 'dist', `dorham${os === 'windows' ? '.exe' : ''}`);
     mkdirSync(path.dirname(output), { recursive: true });
-    run(compiler, ['build', '-mod=readonly', '-buildvcs=false', '-trimpath', '-ldflags=-s -w', '-o', output, './cmd/dorham'], {
+    const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+    run(compiler, ['build', '-mod=readonly', '-buildvcs=false', '-trimpath', `-ldflags=-s -w -X dorham.local/backend/internal/backend.Version=${version}`, '-o', output, './cmd/dorham'], {
       cwd: moduleDir, env: { ...env, GOOS: os, GOARCH: 'amd64' },
     });
     console.log(`Built Go backend: ${output}`);

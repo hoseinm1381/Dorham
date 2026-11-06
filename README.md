@@ -1,4 +1,12 @@
-**Released Android and Windows 1.1.0:** native packages now include the current interface and retain their existing update identities. No new feature is added; additional work is reserved for 1.1.1. The Go backend remains 1.1.0. See [native release verification](docs/RELEASE-1.1.0-NATIVE.md).
+**Released Android 1.1.4:** built-in DM/mention notifications connect directly to Dorham without Firebase or a companion app. Each chat has its own 15-second alert gap and a persistent Mute/Unmute button. Android notification settings include a shortcut to hide only the connection notice. Signed APKs and Android update/download feeds are published. The user confirmed notification receipt on 1.1.3 and waived further handset testing for 1.1.4. See [release verification](docs/RELEASE-1.1.4-ANDROID.md).
+
+**Released Android 1.1.1:** channel occupants and Members sheet, persistent call controls, native screen preview/viewers, phone audio/lifecycle improvements and verified update downloads. The user reports a preliminary pass on Poco F3 / Android 13; the auxiliary sound-sharing backend and APK update feed are published. Closed-app notifications are released in Android 1.1.4. See [Android release verification](docs/RELEASE-1.1.1-ANDROID.md).
+
+**Released web and Windows 1.1.1:** preview screen picker, application/computer sound sharing, automatic update staging, overlay/background efficiency and shared frontend improvements. TTS prepares the complete message with a small progress bar beside its text. See [release verification](docs/RELEASE-1.1.1.md).
+
+**Previous Android and Windows 1.1.0:** native packages include the interface current at that release and retain their existing update identities. See [native release verification](docs/RELEASE-1.1.0-NATIVE.md).
+
+Persian TTS uses the original Piper Amir voice, restored on 2026-11-02 after the Mana voice was rejected during listening. The existing 30% speech CPU cap is preserved. See [Mana verification](docs/TTS-MANA.md).
 
 **Released web/backend 1.1.0:** Dorham now runs a standalone Go backend, preserving accounts, sessions, history and schema 11. Public HTTPS/WSS, English/Farsi TTS, database/file preservation and rollback checks pass. At the backend switch, the published Windows 1.0.7 app passed chat, listen-only voice and real native sharing against Go; Android stayed 1.0.6. That switch preserved native manifests and both 1024 MiB service limits. See [release verification](docs/RELEASE-1.1.0.md).
 
@@ -66,12 +74,13 @@ Version 0.4.2 improves Persian typography, translations, mixed-language messages
 
 ## Run locally
 
-Requires patched Node.js 24 LTS (24.22.1 or newer within 24.x), npm, and Windows for Windows packaging. Python 3 is used only to create the deployment ZIP. Java 21 and Android SDK 36 are needed only for APK builds.
+Requires patched Node.js 24 LTS (24.22.1 or newer within 24.x), npm, and Go 1.26 or newer for the Go backend. Put Go on `PATH` or set `DORHAM_GO` to its executable.
 
 ```powershell
 npm ci
 Copy-Item .env.example .env
-npm run build
+npm run build:api:go
+npm run build:web
 npm start
 ```
 
@@ -108,14 +117,18 @@ npm run deploy:bundle
 
 Generated packages and evidence live under `artifacts/`; they are intentionally ignored by Git. The Windows installer is unsigned. Android debug APKs are installable test builds; release signing uses environment variables and a keystore outside the repository.
 
+On Windows, a clean `npm ci` may need Python and Visual Studio C++ Build Tools with a Windows SDK to compile `better-sqlite3`. The Electron installer requires Windows and LLVM-MinGW. Set `DORHAM_WINDOWS_CXX` to the `x86_64-w64-mingw32-clang++` executable when using a system toolchain. Android requires Java 21 and Android SDK 36. Dorham Monitor requires the .NET 8 SDK on Windows. Run `tools/server-monitor/Build.ps1 -Portable` to package it locally. Keep local `.env` settings, databases and signing keys private. Dependencies, compiled outputs and caches can be recreated from the checked-in source and lockfiles.
+
 ## Repository
 
 | Area | Purpose |
 | --- | --- |
-| `apps/api` | Authentication, authorized HTTP/socket actions, persistence, signaling, and media leases |
+| `apps/api-go` | Production backend for authentication, chat, voice, and administration |
+| `apps/api` | Legacy Node backend and compatibility fixtures |
 | `apps/web` | Shared responsive React application and PWA shell |
 | `apps/desktop` | Sandboxed Electron shell and NSIS packaging |
 | `apps/android` | Capacitor project, Kotlin media/Keystore plugins, foreground service |
+| `tools/server-monitor` | Windows monitoring and administration app |
 | `packages/contracts` | Shared validation, types, and permission rules |
 | `packages/media` | Mesh, LiveKit, and native transport adapters |
 | `tests` | Unit/integration, browser/media, and load tests |
