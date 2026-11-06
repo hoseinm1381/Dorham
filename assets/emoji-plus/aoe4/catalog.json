@@ -1,0 +1,67 @@
+{
+  "pack": "Age of Empires IV",
+  "kind": "emoji",
+  "access": "emojiPlus",
+  "items": [
+    {
+      "label": "Wololo",
+      "file": "wololo.png",
+      "bytes": 25983,
+      "sha256": "f92e2574d0bc882aa2d69337bd0b40d5e96590cc893f24af810eef903fafc151"
+    },
+    {
+      "label": "Sheep Scout",
+      "file": "sheep-scout.png",
+      "bytes": 20118,
+      "sha256": "8c3a64d76d38b7e28dbc190c076035b4d96f975d4538667a7dff63fa1878cbf5"
+    },
+    {
+      "label": "Villager Panic",
+      "file": "villager-panic.png",
+      "bytes": 25586,
+      "sha256": "0c11e5ae860009101f335053c69ceed0a79784d07808c7839109b39b77e928dc"
+    },
+    {
+      "label": "Longbow Love",
+      "file": "longbow-love.png",
+      "bytes": 25659,
+      "sha256": "e103b8e8bb9cde88f641c3ad0a71fdfffe1a520ec80b3911fdefc4b4025fbdc9"
+    },
+    {
+      "label": "Knight GG",
+      "file": "knight-gg.png",
+      "bytes": 28400,
+      "sha256": "ac1ea8c9070b53ed5a1b2f1053bec513e3348d4658201a875b3548096928dbe8"
+    },
+    {
+      "label": "Elephant Boop",
+      "file": "elephant-boop.png",
+      "bytes": 24258,
+      "sha256": "71a8e65daa387160b142b27bf421710c3749b8f5f995d73bc58d144368c459ae"
+    },
+    {
+      "label": "Trebuchet Oops",
+      "file": "trebuchet-oops.png",
+      "bytes": 25175,
+      "sha256": "8b7799484e6dc161454dbca7c129f5896bdc52c0df6336bb608cd902de2ae6be"
+    },
+    {
+      "label": "Age Up",
+      "file": "age-up.png",
+      "bytes": 21869,
+      "sha256": "cc8a68c8a511061b8c170a6b85305eba4896c856ff92cf5e1005d5f4910bae10"
+    },
+    {
+      "label": "Relic Gold",
+      "file": "relic-gold.png",
+      "bytes": 21430,
+      "sha256": "0d3f703732a4814bcd6f25a31ac11f6c83441e2ce757a6e56a2512763151bb33"
+    },
+    {
+      "label": "Town Bell Alert",
+      "file": "town-bell-alert.png",
+      "bytes": 21568,
+      "sha256": "7cd61f6e5a378cb13b4cb7409b0c99ec472a835c0044983b7c22a98cdb96ac36"
+    }
+  ]
+}

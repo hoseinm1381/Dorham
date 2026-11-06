@@ -86,7 +86,10 @@ func TestRealtimeSpeechWAV(t *testing.T) {
 					}
 					_ = conn.WriteJSON(M{"type": "response.output_audio_transcript.done", "response_id": "resp_fixture", "item_id": itemID, "transcript": test.transcript})
 				}
-				_ = conn.WriteJSON(M{"type": "response.done", "response": M{"id": "resp_fixture", "status": test.status}})
+				_ = conn.WriteJSON(M{"type": "response.done", "response": M{"id": "resp_fixture", "status": test.status,
+					"usage": M{"input_tokens": 20, "output_tokens": 30,
+						"input_token_details":  M{"text_tokens": 20, "cached_tokens": 10, "cached_tokens_details": M{"text_tokens": 10}},
+						"output_token_details": M{"text_tokens": 5, "audio_tokens": 25}}}})
 			}))
 			defer server.Close()
 			tlsConfig := server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
@@ -103,7 +106,16 @@ func TestRealtimeSpeechWAV(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			audio, err := synthesizeRealtimeSpeech(ctx, dialer, "offline-fixture", model, "marin", message)
+			var usage *speechTokenUsage
+			audio, err := synthesizeRealtimeSpeech(ctx, dialer, "offline-fixture", model, "marin", message, func(value *speechTokenUsage) { usage = value })
+			if !test.invalidAudio && !test.wrongItem {
+				if !usage.valid() {
+					t.Fatal("provider usage was lost")
+				}
+				if price, ok := usage.estimate(model); !ok || price != 518600 {
+					t.Fatalf("unexpected provider cost: %d, %v", price, ok)
+				}
+			}
 			if test.wantMismatch {
 				if !errors.Is(err, errRealtimeSpeechMismatch) || len(audio) != 0 {
 					t.Fatal("changed or missing transcript was accepted")

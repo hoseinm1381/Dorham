@@ -255,7 +255,7 @@ func TestSpeechPlusProviderAndQuota(t *testing.T) {
 		t.Fatal("voice choice missing")
 	}
 	reserve := func(text string) bool {
-		return a.DB.Tx(func(tx *DB) any { return len(reservePlusSpeech(tx, uid, text)) > 0 }) == true
+		return a.DB.Tx(func(tx *DB) any { return len(reservePlusSpeech(tx, uid, text, speechMeterMonth())) > 0 }) == true
 	}
 	if !reserve(strings.Repeat("ا", 380)) || reserve(strings.Repeat("a", 21)) || !reserve(strings.Repeat("b", 20)) {
 		t.Fatal("speech quota was not enforced")

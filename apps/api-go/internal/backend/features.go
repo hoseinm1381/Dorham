@@ -136,7 +136,13 @@ func (a *App) registerFeatures() {
 		})
 	})
 	a.Route("GET", "/api/v1/admin/features/users/{id}", true, func(r *Request) any {
-		return featureAdmin(r, func(tx *DB) any { return accountFeatureView(tx, r.Param("id")) })
+		r.Header("Cache-Control", "private, no-store")
+		return featureAdmin(r, func(tx *DB) any {
+			uid := r.Param("id")
+			view := accountFeatureView(tx, uid)
+			view["ttsPlusUsage"] = speechMeterView(tx, uid, speechMeterMonth())
+			return view
+		})
 	})
 	a.Route("PUT", "/api/v1/admin/features/users/{id}", true, func(r *Request) any {
 		Strict(r.Body, "rank", "feature", "enabled", "expiresAt", "selectTtsPlus", "requestId")

@@ -64,7 +64,7 @@ func validateSpeechSettings(value M) M {
 	return M{"enabled": enabled, "endpoint": endpoint, "model": model, "voice": voice, "label": label, "timeoutSeconds": VInt(value, "timeoutSeconds", 2, 15), "monthlyCharacters": monthly, "globalMonthlyCharacters": global}
 }
 
-func synthesizePlus(value M, text string) ([]byte, error) {
+func synthesizePlus(value M, text string, report func(*speechTokenUsage)) ([]byte, error) {
 	select {
 	case speechPlusRequests <- struct{}{}:
 		defer func() { <-speechPlusRequests }()
@@ -79,7 +79,7 @@ func synthesizePlus(value M, text string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(N(value["timeoutSeconds"]))*time.Second)
 	defer cancel()
 	if endpoint == openAIRealtimeSpeechEndpoint {
-		return synthesizeRealtimeSpeech(ctx, websocket.DefaultDialer, token, Str(value, "model"), Str(value, "voice"), text)
+		return synthesizeRealtimeSpeech(ctx, websocket.DefaultDialer, token, Str(value, "model"), Str(value, "voice"), text, report)
 	}
 	payload := M{"model": value["model"], "voice": value["voice"], "input": text, "response_format": "wav"}
 	body, err := json.Marshal(payload)
@@ -168,7 +168,7 @@ func (a *App) registerSpeechPlus() {
 			return nil
 		})
 		sample := VString(r.Body, "text", 1, 120, true)
-		data, err := synthesizePlus(value, sample)
+		data, err := synthesizePlus(value, sample, nil)
 		switch {
 		case errors.Is(err, errRealtimeSpeechRegion):
 			Fail(502, "SPEECH_PROVIDER_REGION", "The provider refused requests from this server's region.")
@@ -184,7 +184,7 @@ func (a *App) registerSpeechPlus() {
 	})
 }
 
-func reservePlusSpeech(tx *DB, uid, text string) M {
+func reservePlusSpeech(tx *DB, uid, text, month string) M {
 	if !featureAvailable(tx, uid, "ttsPlus") || !Bool(tx.One("SELECT speech_plus FROM users WHERE id=?", uid), "speech_plus") {
 		return nil
 	}
@@ -192,7 +192,6 @@ func reservePlusSpeech(tx *DB, uid, text string) M {
 	if !speechEnabled(value) {
 		return nil
 	}
-	month := time.Now().UTC().Format("2006-01")
 	chars := int64(TextLen(strings.TrimSpace(text)))
 	used := N(tx.One("SELECT characters FROM feature_speech_usage WHERE user_id=? AND month=?", uid, month)["characters"])
 	total := N(tx.One("SELECT COALESCE(SUM(characters),0) AS total FROM feature_speech_usage WHERE month=?", month)["total"])
@@ -217,10 +216,13 @@ func (s *mediaSpeech) runPlus(job mediaSpeechJob) {
 	var data []byte
 	if s.plusStats.retryAfter.Load() <= Now() {
 		text := Str(job.Message, "content")
-		settings := Obj(s.m.a.DB.Tx(func(tx *DB) any { return reservePlusSpeech(tx, job.UID, text) }))
+		month := speechMeterMonth()
+		settings := Obj(s.m.a.DB.Tx(func(tx *DB) any { return reservePlusSpeech(tx, job.UID, text, month) }))
 		if len(settings) > 0 {
 			s.plusStats.requests.Add(1)
-			audio, err := synthesizePlus(settings, text)
+			var usage *speechTokenUsage
+			audio, err := synthesizePlus(settings, text, func(reported *speechTokenUsage) { usage = reported })
+			recordSpeechMeter(s.m.a.DB, job.UID, month, Str(settings, "model"), Str(settings, "endpoint") == openAIRealtimeSpeechEndpoint, usage)
 			if err != nil {
 				s.plusStats.errors.Add(1)
 				if !errors.Is(err, errRealtimeSpeechMismatch) {

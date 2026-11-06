@@ -47,7 +47,9 @@ public static class AdminSelfTest
             if (path.EndsWith("/admin/features"))
                 return Reply(new { features = new[] { "screen1080", "ttsPlus", "profilePlus", "emojiPlus", "soundboardPlus", "uploadsPlus", "communityPlus" }, catalog = Array.Empty<object>() });
             if (path.EndsWith("/admin/features/users/user-1"))
-                return Reply(new { rank = "pro", grants = new { ttsPlus = 0 }, plusSelected = false });
+                return Reply(new { rank = "pro", grants = new { ttsPlus = 0 }, plusSelected = false,
+                    ttsPlusUsage = new { month = "2026-11", characters = 55, attempts = 3, reported = 2, priced = 1,
+                        inputTokens = 40, outputTokens = 50, estimatedNanoUsd = 512000 } });
             if (path.EndsWith("/admin/features/speech/preview"))
                 return Reply(new { error = new { code = SpeechStatus == 502 ? "SPEECH_PREVIEW_FAILED" : "VALIDATION", message = "fixture-secret" } }, SpeechStatus);
             if (path.Contains("/admin/users/"))

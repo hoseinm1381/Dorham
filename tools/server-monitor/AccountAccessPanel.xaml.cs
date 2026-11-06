@@ -115,9 +115,34 @@ public partial class AccountAccessPanel : UserControl
             var label = new StackPanel();
             label.Children.Add(new TextBlock { Text = option.Label, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             label.Children.Add(new TextBlock { Text = state, Foreground = (Brush)FindResource(granted ? "Accent" : "Muted"), FontSize = 11, TextWrapping = TextWrapping.Wrap });
+            if (option.Id == "ttsPlus" && access.TryGetProperty("ttsPlusUsage", out var usage))
+                label.Children.Add(new TextBlock { Text = SpeechUsageText(usage), Foreground = (Brush)FindResource("Muted"), FontSize = 11, TextWrapping = TextWrapping.Wrap });
             row.Children.Add(label);
             FeatureRows.Children.Add(new Border { Child = row, BorderBrush = (Brush)FindResource("Border"), BorderThickness = new Thickness(0, 0, 0, 1), Padding = new Thickness(0, 6, 0, 5) });
         }
+    }
+
+    private static string SpeechUsageText(JsonElement usage)
+    {
+        long Count(string field) => usage.GetProperty(field).GetInt64();
+        var month = usage.GetProperty("month").GetString();
+        var characters = Count("characters");
+        var attempts = Count("attempts");
+        var reported = Count("reported");
+        var priced = Count("priced");
+        var quota = $"{month} UTC · {characters:N0} quota characters";
+        if (reported == 0)
+            return quota + (attempts == 0 ? " · No token reports yet" : $" · No token reports for {attempts:N0} attempts");
+        var text = $"{quota}\n{Count("inputTokens"):N0} input + {Count("outputTokens"):N0} output tokens";
+        if (priced > 0)
+        {
+            decimal dollars = Count("estimatedNanoUsd") / 1_000_000_000m;
+            text += dollars == 0 ? " · Est. $0.0000" : dollars < 0.0001m ? " · Est. <$0.0001" : $" · Est. ${dollars:F4}";
+        }
+        else text += " · Cost unavailable";
+        if (reported < attempts) text += $"\nTokens reported for {reported:N0} of {attempts:N0} attempts";
+        if (priced > 0 && priced < attempts) text += $"\nCost estimate covers {priced:N0} of {attempts:N0} attempts";
+        return text;
     }
 
     private void RankChanged(object sender, SelectionChangedEventArgs e) =>

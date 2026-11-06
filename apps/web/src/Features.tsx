@@ -4,6 +4,7 @@ import type { Socket } from 'socket.io-client';
 import type { PublicUser } from '@dorham/contracts';
 import { assetUrl, request, serverUrl } from './api';
 import { currentLanguage, t } from './i18n';
+import { catalogEmojiShortcodes } from './emojis';
 import './features.css';
 
 declare const __APP_VERSION__: string;
@@ -31,7 +32,7 @@ type FeatureState = {
   catalogVersion: string;
 };
 const empty: FeatureState = { grants: {}, screen: 'hidden', soundboard: false, catalog: [], voices: [], plusSelected: false, announcements: [], announcementBoundary: 0, communityBoundary: 0, catalogVersion: "" };
-const initial = { ...empty, refresh: () => {}, byId: new Map<string, CatalogItem>(),  };
+const initial = { ...empty, refresh: () => {}, byId: new Map<string, CatalogItem>(), shortcodes: catalogEmojiShortcodes([]) };
 export const FeatureContext = createContext(initial);
 export const useFeatures = () => useContext(FeatureContext);
 export function useFeatureState(socket: RefObject<Socket | null>, uid: string | undefined) {
@@ -85,7 +86,8 @@ export function useFeatureState(socket: RefObject<Socket | null>, uid: string | 
     return () => window.clearTimeout(timer);
   }, [state, refresh]);
   const byId = useMemo(() => new Map(state.catalog.map(item => [item.id, item])), [state.catalog]);
-  return useMemo(() => ({ ...state, refresh, byId }), [state, refresh, byId]);
+  const shortcodes = useMemo(() => catalogEmojiShortcodes(state.catalog), [state.catalog]);
+  return useMemo(() => ({ ...state, refresh, byId, shortcodes }), [state, refresh, byId, shortcodes]);
 }
 
 const ranks = {

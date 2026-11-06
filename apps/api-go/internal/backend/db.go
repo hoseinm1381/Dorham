@@ -332,7 +332,7 @@ func (d *DB) Backup(destination string) {
 	d.Run("VACUUM INTO ?", destination)
 }
 func (d *DB) migrate() {
-	for version := 2; version <= 14; version++ {
+	for version := 2; version <= 15; version++ {
 		v := version
 		d.Tx(func(tx *DB) any {
 			if tx.One("SELECT version FROM schema_migrations WHERE version=?", v) != nil {
@@ -345,6 +345,9 @@ func (d *DB) migrate() {
 				for _, q := range featureSchema {
 					tx.Run(q)
 				}
+			}
+			if v == 15 {
+				tx.Run(speechMeterSchema)
 			}
 			if v == 3 {
 				for _, r := range tx.All("SELECT response FROM mutations WHERE operation='invite.create' ORDER BY created_at DESC LIMIT 5000") {

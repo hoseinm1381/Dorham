@@ -24,6 +24,8 @@ The backend accepts an allowlist through `DORHAM_TTS_PLUS_ENDPOINTS`. Use the se
 
 Advanced requests use a separate bounded worker and fall back to standard synthesis. In Monitor, **Grant** on an account's TTS Plus row grants access and selects the AI voice together. **Remove** revokes access and returns the account to Standard. **Enable AI voice** completes existing grants that still use Standard.
 
+Monitor's TTS Plus row shows the current UTC month's reserved characters, provider-reported input and output tokens, and estimated USD for supported pricing. The estimate uses the published GPT-Realtime-2.1 Mini rates for each token category. Coverage is shown when provider reports or price estimates are missing. Metering starts at deployment. Earlier character reservations are still available, and admin previews are separate from user totals.
+
 ## Resource behavior
 
 The signed-in app fetches feature data on sign-in, reconnect, foregrounding or explicit invalidation. A matching catalog revision skips resending the catalog. Images and sounds use immutable URLs and local HTTP caches. Soundboard playback sends a short voice-room event and fetches a clip only as needed. Speech audio generated from a message uses the existing authenticated short-lived delivery route. Publicly published profile assets and sound effects are reusable files, with Dorham permissions controlling who can select, send or play them.

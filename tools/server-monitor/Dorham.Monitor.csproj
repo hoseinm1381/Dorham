@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Dorham Monitor</AssemblyName>
     <RootNamespace>Dorham.Monitor</RootNamespace>
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>monitor.ico</ApplicationIcon>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
-import { emojiParts, insertEmoji, searchEmojis, isSingleEmoji } from '../apps/web/src/emojis';
+import { catalogEmojiShortcodes, emojiParts, insertEmoji, searchEmojis, isSingleEmoji } from '../apps/web/src/emojis';
 import { MessageContent } from '../apps/web/src/MessageContent';
 
 describe('bundled message emojis', () => {
@@ -29,6 +29,21 @@ describe('bundled message emojis', () => {
     expect(searchEmojis('چای', 'dorham-exclusive', label => label === 'Tea Time' ? 'وقت چای' : label).map(e => e.id)).toEqual(['dorham-tea-time']);
     expect(searchEmojis('chai', 'gaming')).toEqual([]);
   });
+});
+
+it('round-trips readable catalog codes with adjacent emoji, duplicate names, and existing wire IDs', () => {
+  const first = '67ff27f7-03f2-50ce-9f52-737c1e1ba38e', second = '12fefd0c-39cf-5026-bb14-0dcc7ae95dc3';
+  const codes = catalogEmojiShortcodes([
+    { id: first, label: 'Sheep Scout', kind: 'emoji' },
+    { id: second, label: 'Sheep Scout', kind: 'emoji' },
+    { id: 'ignored', label: 'Sheep Scout', kind: 'sound' },
+  ]);
+  const stored = `hi :dx-${first}::dx-${second}::emoji-happy: :unknown:`;
+  const display = 'hi :sheep-scout::sheep-scout-2::emoji-happy: :unknown:';
+  expect(codes.display(stored)).toBe(display);
+  expect(codes.encode(display)).toBe(stored);
+  expect(codes.encode(stored)).toBe(stored);
+  expect(insertEmoji('say hello!', 'dx-' + first, 4, 9, codes.code('dx-' + first))).toEqual({ text: 'say :sheep-scout:!', cursor: 17 });
 });
 
 it('enlarges exactly one bundled or Unicode grapheme and leaves mixed messages normal', () => {

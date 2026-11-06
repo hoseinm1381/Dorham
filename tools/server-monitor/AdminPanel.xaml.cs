@@ -255,6 +255,11 @@ public partial class AdminPanel : UserControl
                 !rows.Children.OfType<Border>().SelectMany(row => ((DockPanel)row.Child).Children.OfType<Button>())
                     .Any(button => button.Content as string == "Enable AI voice"))
                 throw new InvalidOperationException("The selected account's rank and individual feature grants were not loaded.");
+            if (!rows.Children.OfType<Border>().SelectMany(row => ((DockPanel)row.Child).Children.OfType<StackPanel>())
+                .SelectMany(panel => panel.Children.OfType<TextBlock>()).Any(text =>
+                    text.Text.Contains("40 input + 50 output tokens") && text.Text.Contains("Est. $") &&
+                    text.Text.Contains("Cost estimate covers 1 of 3 attempts")))
+                throw new InvalidOperationException("The selected account's TTS Plus usage was not displayed.");
             capture?.Invoke();
             var tools = new FeatureAdminWindow(fixture);
             try { await tools.VerifyNavigation(); }

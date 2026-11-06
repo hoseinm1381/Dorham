@@ -47,7 +47,7 @@ func realtimeSpeechFailure(status int, code string) error {
 	}
 }
 
-func synthesizeRealtimeSpeech(ctx context.Context, dialer *websocket.Dialer, token, model, voice, text string) ([]byte, error) {
+func synthesizeRealtimeSpeech(ctx context.Context, dialer *websocket.Dialer, token, model, voice, text string, report func(*speechTokenUsage)) ([]byte, error) {
 	if strings.TrimSpace(token) == "" || !strings.HasPrefix(model, "gpt-realtime-") || voice == "" {
 		return nil, errors.New("realtime speech provider is not configured")
 	}
@@ -124,8 +124,9 @@ func synthesizeRealtimeSpeech(ctx context.Context, dialer *websocket.Dialer, tok
 			Transcript string                      `json:"transcript"`
 			Error      realtimeSpeechProviderError `json:"error"`
 			Response   struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
+				ID     string          `json:"id"`
+				Status string          `json:"status"`
+				Usage  json.RawMessage `json:"usage"`
 			} `json:"response"`
 		}
 		if err := conn.ReadJSON(&event); err != nil {
@@ -158,7 +159,16 @@ func synthesizeRealtimeSpeech(ctx context.Context, dialer *websocket.Dialer, tok
 			}
 			wav = append(wav, chunk...)
 		case "response.done":
-			if responseID == "" || event.Response.ID != responseID || event.Response.Status != "completed" {
+			if responseID == "" || event.Response.ID != responseID {
+				return nil, errors.New("unexpected realtime speech response")
+			}
+			if report != nil && len(event.Response.Usage) > 0 {
+				var usage *speechTokenUsage
+				if json.Unmarshal(event.Response.Usage, &usage) == nil {
+					report(usage)
+				}
+			}
+			if event.Response.Status != "completed" {
 				return nil, errors.New("realtime speech response did not complete")
 			}
 			if normalizeRealtimeSpeechText(transcript) != expectedText {
