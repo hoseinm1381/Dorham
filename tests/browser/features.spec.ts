@@ -28,14 +28,35 @@ async function api(page: Page, path: string, data?: Record<string, unknown>, met
   }, { path, data, method });
 }
 
-test('Profile Plus avatars appear locked beside built-in pictures and can switch back', async ({ browser }) => {
-  const admin = await browser.newPage(), user = await browser.newPage();
+test('Profile Plus avatars appear locked beside built-in pictures and can switch back', async ({ browser, baseURL }, testInfo) => {
+  const admin = await browser.newPage();
+  const windows = process.env.DORHAM_AVATAR_WINDOWS_EXE;
+  const desktop = windows ? await _electron.launch({ executablePath: resolve(windows), args: [
+    `--user-data-dir=${testInfo.outputPath('avatar-profile')}`, '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
+  ] }) : undefined;
+  const user = desktop ? await desktop.firstWindow() : await browser.newPage();
   try {
+    if (desktop) {
+      await user.evaluate(origin => window.desktop!.setServer(origin), baseURL!);
+      await user.reload();
+    }
     const suffix = Date.now().toString().slice(-8);
     await register(admin, 'AvatarAdmin' + suffix);
     await api(admin, '/admin/claim', { secret: 'browser-fixture-bootstrap-not-for-deployment' });
-    await register(user, 'AvatarUser' + suffix);
-    const identity = await api(user, '/auth/me');
+    const username = 'AvatarUser' + suffix;
+    await register(user, username, !desktop);
+    const nativeLogin = desktop ? await fetch(baseURL + '/api/v1/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Dorham-Native': '1' },
+      body: JSON.stringify({ username, password: fixturePassword, requestId: randomUUID() }),
+    }) : null;
+    if (nativeLogin) expect(nativeLogin.ok).toBe(true);
+    const identity = nativeLogin ? await nativeLogin.json() : await api(user, '/auth/me');
+    async function avatarPath() {
+      if (!desktop) return (await api(user, '/auth/me')).user.avatar as string | null;
+      const response = await fetch(baseURL + '/api/v1/auth/me', { headers: { Authorization: 'Bearer ' + identity.accessToken } });
+      if (!response.ok) throw Error(await response.text());
+      return (await response.json()).user.avatar as string | null;
+    }
     const avatar = await admin.evaluate(async () => {
       const me = await (await fetch('/api/v1/auth/me')).json();
       const canvas = document.createElement('canvas');
@@ -52,7 +73,21 @@ test('Profile Plus avatars appear locked beside built-in pictures and can switch
       return response.json();
     });
     await api(admin, '/admin/features/catalog/' + avatar.id, { active: true }, 'PUT');
+    if (desktop) {
+      await user.getByRole('button', { name: 'Create a server', exact: true }).click();
+      await user.getByLabel('Server name', { exact: true }).fill('Avatar test room');
+      await user.getByRole('button', { name: 'Create space', exact: true }).click();
+      await user.getByRole('button', { name: 'Lounge', exact: true }).click();
+      await expect(user.locator('.voice-panel')).toBeVisible();
+    }
     await user.getByRole('button', { name: 'Account settings', exact: true }).click();
+    if (desktop) {
+      await user.getByRole('tab', { name: 'Game overlay', exact: true }).click();
+      const toggle = user.getByLabel('Show voice overlay in games', { exact: true });
+      await toggle.click();
+      await expect(toggle).toBeChecked();
+      await user.getByRole('tab', { name: 'Profile', exact: true }).click();
+    }
     await user.locator('.avatar-options summary').click();
     const picker = user.getByRole('group', { name: 'Choose your profile picture' });
     const fox = picker.getByRole('button', { name: 'Fox', exact: true });
@@ -60,6 +95,7 @@ test('Profile Plus avatars appear locked beside built-in pictures and can switch
     await expect(fox).toBeEnabled();
     await expect(locked).toBeDisabled();
     await expect(locked.locator('.avatar-lock')).toBeVisible();
+    await expect.poll(() => locked.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     await locked.dispatchEvent('click');
     await expect(locked).toHaveAttribute('aria-pressed', 'false');
     await expect(user.getByRole('region', { name: 'Profile catalog' }).getByRole('button', { name: /Sheep Scout/ })).toHaveCount(0);
@@ -69,14 +105,25 @@ test('Profile Plus avatars appear locked beside built-in pictures and can switch
     await expect(sheep).toBeEnabled();
     await sheep.click();
     await expect(sheep).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(async () => (await api(user, '/auth/me')).user.avatar).toContain('/catalog/' + avatar.id);
+    await expect.poll(avatarPath).toContain('/catalog/' + avatar.id);
+    await expect.poll(() => user.locator('.settings-form .avatar-upload > .avatar img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+    const overlay = desktop ? (await desktop.windows()).find(window => window.url().endsWith('/overlay.html')) : undefined;
+    if (desktop) {
+      expect(overlay).toBeDefined();
+      await expect.poll(() => overlay!.locator('.avatar img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(64);
+    }
+    const catalogThumbnail = await overlay?.locator('.avatar img').getAttribute('src');
     await fox.click();
     await expect(fox).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(async () => (await api(user, '/auth/me')).user.avatar).toMatch(/^\/avatars\//);
+    await expect.poll(avatarPath).toMatch(/^\/avatars\//);
+    if (overlay) {
+      await expect(overlay.locator('.avatar img')).not.toHaveAttribute('src', catalogThumbnail!);
+      await expect.poll(() => overlay.locator('.avatar img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(64);
+    }
     await api(admin, '/admin/features/users/' + identity.user.id, { feature: 'profilePlus', enabled: false }, 'PUT');
     await expect(locked).toBeDisabled();
   } finally {
-    await Promise.all([admin.context().close(), user.context().close()]);
+    await Promise.all([admin.context().close(), desktop ? desktop.close() : user.context().close()]);
   }
 });
 

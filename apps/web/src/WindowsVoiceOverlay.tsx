@@ -21,24 +21,38 @@ export function WindowsOverlayBridge({ room, name, language }: { room: VoiceRoom
 const emptySpeaking: Record<string, boolean> = {};
 const emptySnapshot = () => emptySpeaking;
 const noSubscription = () => () => {};
+function thumbnailSource(avatar: string | null) {
+  if (!avatar || !/^\/(?:avatars\/[A-Za-z0-9_-]+\.webp|catalog\/[A-Za-z0-9_-]{1,80}\/[a-f0-9]{64})$/.test(avatar)) return '';
+  // Canvas reads need CORS. Keep them separate from display-only image cache entries.
+  return `${assetUrl(avatar)}?overlay=1`;
+}
 export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, speaking: Record<string, boolean>, language: string, enabled: boolean) {
   const thumbnails = useRef(new Map<string, string>()), previous = useRef(new Map<string, string>());
   const [revision, setRevision] = useState(0);
   const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), latest = useRef({ room, name, language, speaking });
   latest.current = { room, name, language, speaking };
-  const avatarSources = JSON.stringify([...new Set(enabled ? room?.members.map(m => m.user.avatar).filter(Boolean) || [] : [])]);
+  const avatarSources = JSON.stringify([...new Set(enabled ? room?.members.map(m => thumbnailSource(m.user.avatar)).filter(Boolean) || [] : [])]);
   useEffect(() => {
     if (!window.desktop?.updateOverlay || !enabled) return;
     let active = true; const images: HTMLImageElement[] = [], wanted = new Set(JSON.parse(avatarSources) as string[]);
     for (const key of thumbnails.current.keys()) if (!wanted.has(key)) thumbnails.current.delete(key);
     for (const source of wanted) {
-      if (thumbnails.current.has(source) || !/^\/avatars\/[A-Za-z0-9_-]+\.webp$/.test(source)) continue;
+      if (thumbnails.current.has(source)) continue;
       const image = new Image(); images.push(image); image.crossOrigin = 'anonymous'; image.referrerPolicy = 'no-referrer';
       image.onload = () => {
         if (!active) return;
-        try { const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64; const context = canvas.getContext('2d'); if (!context) return; context.drawImage(image, 0, 0, 64, 64); const png = canvas.toDataURL('image/png'); if (png.length <= 32768) { thumbnails.current.set(source, png); setRevision(value => value + 1); } } catch { /* Keep initials if an avatar cannot be read. */ }
+        try {
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+          const context = canvas.getContext('2d');
+          if (!context) return;
+          const { naturalWidth, naturalHeight } = image;
+          const size = Math.min(naturalWidth, naturalHeight);
+          context.drawImage(image, (naturalWidth - size) / 2, (naturalHeight - size) / 2, size, size, 0, 0, 64, 64);
+          const png = canvas.toDataURL('image/png');
+          if (png.length <= 32768) { thumbnails.current.set(source, png); setRevision(value => value + 1); }
+        } catch { /* Keep initials if an avatar cannot be read. */ }
       };
-      image.src = assetUrl(source)!;
+      image.src = source;
     }
     return () => { active = false; for (const image of images) { image.onload = null; image.removeAttribute('src'); } };
   }, [avatarSources, enabled]);
@@ -53,7 +67,7 @@ export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, spe
       if (!room) return;
       const next = new Map<string, string>();
       const members = room.members.map(member => {
-        const id = member.user.id, avatar = thumbnails.current.get(member.user.avatar || '') || '';
+        const id = member.user.id, avatar = thumbnails.current.get(thumbnailSource(member.user.avatar)) || '';
         next.set(id, avatar);
         return { id, name: member.user.displayName, ...(previous.current.get(id) === avatar ? {} : { avatar: avatar || null }), muted: member.muted, deafened: member.deafened || member.serverDeafened === true, serverMuted: member.serverMuted, speaking: speaking[id] === true };
       });
