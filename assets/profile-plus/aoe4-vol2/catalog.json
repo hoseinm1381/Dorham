@@ -1,0 +1,55 @@
+{
+  "pack": "Age of Empires IV Avatars Vol. 2",
+  "kind": "avatar",
+  "access": "profilePlus",
+  "items": [
+    {
+      "label": "Japanese Samurai",
+      "file": "japanese-samurai.png",
+      "bytes": 160551,
+      "sha256": "fa8df050253f82c79f8b0cb32621a0c3163187b993e048e1d3d9f4aa28842c03"
+    },
+    {
+      "label": "Byzantine Guard",
+      "file": "byzantine-guard.png",
+      "bytes": 149384,
+      "sha256": "636be82793d37b451b23baf40c6bc995b192354fa417ebb4e2f254ca5c280204"
+    },
+    {
+      "label": "Malian Griot",
+      "file": "malian-griot.png",
+      "bytes": 156552,
+      "sha256": "e795068d0d0f5df00314ac50615b576996e6579649a9a1512b3565fe4eb9f7a4"
+    },
+    {
+      "label": "Rus Hunter",
+      "file": "rus-hunter.png",
+      "bytes": 153074,
+      "sha256": "2e139a5a2eef76743cbb663d5136625d99cb42e343d3f26cb77c832733c40ec9"
+    },
+    {
+      "label": "Dragon Lancer",
+      "file": "dragon-lancer.png",
+      "bytes": 158871,
+      "sha256": "4ff06344d1c991901a04eb6c9d4c4fa745b103b8a60610434d39a7d84d3a19ff"
+    },
+    {
+      "label": "Norse Sailor",
+      "file": "viking-sailor.png",
+      "bytes": 167024,
+      "sha256": "c9aa8c153b89812237d5396b96c57e6198fb582cebf11fc284ac54944ad41a86"
+    },
+    {
+      "label": "Persian Cataphract",
+      "file": "persian-cataphract.png",
+      "bytes": 135433,
+      "sha256": "463f0b500a4f272803f0b886327d2858efb22715745f48b866474a55fa84cf2a"
+    },
+    {
+      "label": "Royal Falcon",
+      "file": "royal-falcon.png",
+      "bytes": 150063,
+      "sha256": "9e0c5546e5453912be9260eceb74e1668adb876cfe7ce9d8fcec57bf77c906da"
+    }
+  ]
+}

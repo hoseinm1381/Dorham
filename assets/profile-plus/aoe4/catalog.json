@@ -1,0 +1,55 @@
+{
+  "pack": "Age of Empires IV Avatars",
+  "kind": "avatar",
+  "access": "profilePlus",
+  "items": [
+    {
+      "label": "Wololo Monk",
+      "file": "wololo-monk.png",
+      "bytes": 155788,
+      "sha256": "03a1aca4b1bd5aa91863458a23a1dfdde0556fb092273fd6d1f1ab1608a20c14"
+    },
+    {
+      "label": "English Longbow",
+      "file": "english-longbow.png",
+      "bytes": 137897,
+      "sha256": "f50c7c0421702c797e5afb09457170fd84fad6c0dc5a64e4f12b8ba0484c154f"
+    },
+    {
+      "label": "French Knight",
+      "file": "french-knight.png",
+      "bytes": 158974,
+      "sha256": "d5c1faffa9ec29b432f1de084a797793f1dfaaf04744107a3fb2656582556a5b"
+    },
+    {
+      "label": "Delhi Elephant",
+      "file": "delhi-elephant.png",
+      "bytes": 141202,
+      "sha256": "10a59432382af02380705cb372f81a1251731c46f0aec3391a73b092ec1c8b94"
+    },
+    {
+      "label": "Mongol Scout",
+      "file": "mongol-scout.png",
+      "bytes": 146907,
+      "sha256": "d71b43697feb7988787bbd0ee97ea1578150123d11e7c96082936f7ce4fa278b"
+    },
+    {
+      "label": "Abbasid Scholar",
+      "file": "abbasid-scholar.png",
+      "bytes": 144879,
+      "sha256": "e0cef95f48fab82ce9a820e00d8cc3058ebeb2072e64c731d1469dfd655a9981"
+    },
+    {
+      "label": "Ottoman Janissary",
+      "file": "ottoman-janissary.png",
+      "bytes": 131824,
+      "sha256": "af0bef0a1f636057c5ca992b6ce3ed5d98662dcfe7bc588da907bcb4630cf01d"
+    },
+    {
+      "label": "Sheep Scout",
+      "file": "sheep-scout.png",
+      "bytes": 163485,
+      "sha256": "e3327ee0e32e98d99a29473bfb53621f74f6a1e0ded45fff56c25cf93871ec7e"
+    }
+  ]
+}
