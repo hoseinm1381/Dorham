@@ -10,7 +10,9 @@ const { trustedCaptureRequest } = require('./capture-origin.cjs');
 
 function createScreenCapture(app, mainWindow, language, canCapture = () => true) {
   const binary = app.isPackaged ? path.join(process.resourcesPath, 'app.asar.unpacked', 'native', 'ShareAudio.exe') : path.join(__dirname, 'native', 'ShareAudio.exe');
-  const supported = process.platform === 'win32' && Number(os.release().split('.')[2]) >= 20348 && existsSync(binary);
+  const build = Number(os.release().split('.')[2]);
+  const supported = process.platform === 'win32' && build >= 20348 && existsSync(binary);
+  const compatibilityVideo = process.platform === 'win32' && build >= 10240 && build < 22000;
   let picker, finish, listing, refreshing, selection, audio;
   const pickerUrl = pathToFileURL(path.join(__dirname, 'capture-picker.html')).href;
   const trustedPicker = event => picker && !picker.isDestroyed() && event.sender === picker.webContents && event.senderFrame === picker.webContents.mainFrame && event.senderFrame.url === pickerUrl;
@@ -36,11 +38,38 @@ function createScreenCapture(app, mainWindow, language, canCapture = () => true)
     if (!trustedPicker(event)) throw Error('Untrusted picker');
     const owned = picker, audioRequested = owned.audioRequested;
     if (!refreshing) {
-      const task = sources().then(value => { if (picker === owned) listing = value; return value.map(describe); }).finally(() => { if (refreshing === task) refreshing = undefined; });
+      const task = sources(!owned.compatibilityVideo).then(value => { if (picker === owned) listing = value; return value.map(describe); }).finally(() => { if (refreshing === task) refreshing = undefined; });
       refreshing = task;
     }
     const choices = await refreshing;
     return { sources: picker === owned ? choices : [], language: language(), audioRequested, audioSupported: supported };
+  });
+  async function choose(main, audioRequested, legacyVideo = false) {
+    return new Promise(resolve => {
+      picker = new BrowserWindow({ parent: main, modal: true, width: 920, height: 690, minWidth: 640, minHeight: 480, backgroundColor: '#171b28', title: language() === 'fa-IR' ? 'انتخاب منبع اشتراک‌گذاری' : 'Choose what to share', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'capture-picker-preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
+      const owned = picker;
+      owned.audioRequested = audioRequested;
+      owned.compatibilityVideo = legacyVideo;
+      finish = result => { finish = undefined; listing = undefined; refreshing = undefined; picker = undefined; if (!owned.isDestroyed()) owned.destroy(); resolve(result); };
+      owned.on('closed', () => { if (picker === owned) finish?.(null); });
+      owned.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      owned.webContents.on('will-navigate', event => event.preventDefault());
+      owned.once('ready-to-show', () => { if (!owned.isDestroyed()) owned.show(); });
+      void owned.loadURL(pickerUrl).catch(() => { if (picker === owned) finish?.(null); });
+    });
+  }
+  function remember(result) {
+    selection = { sourceId: result.source.id, name: result.source.name.slice(0, 160), audioScope: result.audioScope, at: Date.now(), used: false };
+  }
+  ipcMain.handle('capture:compatibility-source', async event => {
+    trustedMain(event);
+    if (!compatibilityVideo || !canCapture() || picker || audio) return null;
+    selection = undefined;
+    const result = await choose(mainWindow(), false, true);
+    if (!result || !canCapture()) return null;
+    trustedMain(event);
+    remember(result);
+    return { sourceId: result.source.id };
   });
   ipcMain.handle('capture:pick', async (event, value) => {
     if (!trustedPicker(event) || !value || !['none', 'application', 'system'].includes(value.audioScope)) throw Error('Invalid capture choice');
@@ -97,24 +126,15 @@ function createScreenCapture(app, mainWindow, language, canCapture = () => true)
   ipcMain.on('capture:audio-ack', (event, id) => { trustedMain(event); if (audio?.id === id) audio.outstanding = Math.max(0, audio.outstanding - 1); });
   ipcMain.on('capture:audio-stop', (event, id) => { trustedMain(event); if (typeof id === 'string') stopAudio(id); });
   return {
-    supported, stop,
+    supported, compatibilityVideo, stop,
     request: async (request, callback) => {
       const main = mainWindow();
       if (!canCapture() || !trustedCaptureRequest(request, main?.webContents) || picker || audio) { callback(null); return; }
       selection = undefined;
       try {
-        const result = await new Promise(resolve => {
-          picker = new BrowserWindow({ parent: main, modal: true, width: 920, height: 690, minWidth: 640, minHeight: 480, backgroundColor: '#171b28', title: language() === 'fa-IR' ? 'انتخاب منبع اشتراک‌گذاری' : 'Choose what to share', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'capture-picker-preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
-          const owned = picker; owned.audioRequested = request.audioRequested;
-          finish = result => { finish = undefined; listing = undefined; refreshing = undefined; picker = undefined; if (!owned.isDestroyed()) owned.destroy(); resolve(result); };
-          owned.on('closed', () => { if (picker === owned) finish?.(null); });
-          owned.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-          owned.webContents.on('will-navigate', event => event.preventDefault());
-          owned.once('ready-to-show', () => { if (!owned.isDestroyed()) owned.show(); });
-          void owned.loadURL(pickerUrl).catch(() => { if (picker === owned) finish?.(null); });
-        });
-        if (!result || !trustedCaptureRequest(request, main?.webContents)) { callback(null); return; }
-        selection = { sourceId: result.source.id, name: result.source.name.slice(0, 160), audioScope: result.audioScope, at: Date.now(), used: false };
+        const result = await choose(main, request.audioRequested);
+        if (!result || !canCapture() || !trustedCaptureRequest(request, main?.webContents)) { callback(null); return; }
+        remember(result);
         // Audio is authorized by the chooser and captured from the exact process
         // in a separate WASAPI stream. Never broaden a window to system sound.
         callback({ video: result.source });

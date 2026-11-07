@@ -14,6 +14,7 @@ type Service struct {
 	Notify         func(string, any)
 	OnTTS          func(string, M)
 	OnMessage      func(*DB, M)
+	DirectCallBusy func(string) bool
 	cloudflareTurn *CloudflareTurn
 }
 

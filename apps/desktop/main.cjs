@@ -44,7 +44,7 @@ app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(
 app.whenReady().then(() => {
   if (!primary) return;
   screenCapture = createScreenCapture(app, () => win, () => interfaceLanguage, () => inCall);
-  ipcMain.handle('capture:capabilities', event => { trusted(event); return { sharedAudio: screenCapture.supported }; });
+  ipcMain.handle('capture:capabilities', event => { trusted(event); return { sharedAudio: screenCapture.supported, compatibilityVideo: screenCapture.compatibilityVideo }; });
   ipcMain.handle('ui:visible', event => { trusted(event); return win.isVisible() && !win.isMinimized(); });
   ipcMain.handle('overlay:get', event => { trusted(event); return voiceOverlay.preferences(); });
   ipcMain.handle('overlay:configure', (event, value) => { trusted(event); const preferences = voiceOverlay.configure(value); win.webContents.send('overlay:preferences', preferences); return preferences; });

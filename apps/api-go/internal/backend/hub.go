@@ -38,6 +38,7 @@ type Hub struct {
 	actions        map[string]M
 	disconnects    map[string]int64
 	maintenance    M
+	directCalls    directCalls
 }
 
 func NewHub(a *App) *Hub {
@@ -244,6 +245,7 @@ func (h *Hub) disconnected(p *peer, reason string) {
 	}
 	defer h.workWG.Done()
 	h.safe(func() {
+		h.directCallDisconnected(p)
 		// A recoverable transport loss leaves the last heartbeat's existing
 		// lease in place. The normal expiry still removes abandoned calls.
 		if !preserveVoice && h.a.DB.One("SELECT channel_id FROM voice_members WHERE socket_id=?", p.id) != nil {
@@ -417,6 +419,22 @@ func (h *Hub) handle(p *peer, event string, fn func(M) any) {
 }
 func (h *Hub) handlers(p *peer) {
 	s := h.a.Service
+	h.handle(p, "dm:call", func(b M) any {
+		Check(h.a.C.MediaTransport == "livekit", 409, "CALL_UNAVAILABLE", "Direct calls are unavailable on this server.")
+		switch Str(b, "action") {
+		case "start":
+			h.startDirectCall(p, VString(b, "conversationId", 1, 80, false))
+		case "accept":
+			h.acceptDirectCall(p, VString(b, "id", 1, 80, false))
+		case "credentials":
+			return h.directCallCredentials(p, VString(b, "id", 1, 80, false))
+		case "end":
+			h.endDirectCall(p, VString(b, "id", 1, 80, false))
+		default:
+			Fail(400, "VALIDATION", "Invalid direct call action.")
+		}
+		return M{}
+	})
 	h.handle(p, "message:send", func(raw M) any {
 		b := CoreMessageBody(raw)
 		return s.Send(p.uid, Str(b, "requestId"), Str(b, "conversationId"), Str(b, "content"), coreMessageReply(b), Strings(b["attachmentIds"]), Bool(b, "tts"))

@@ -77,6 +77,7 @@ func NewApp(c Config) *App {
 	a.seedSoundboard()
 	a.Service = NewService(a.DB, c)
 	a.Hub = NewHub(a)
+	a.Service.DirectCallBusy = a.Hub.directCallBusy
 	a.DB.Tx(func(tx *DB) any {
 		tx.Run("DELETE FROM voice_members")
 		tx.Run("UPDATE coordinators SET user_id=NULL,epoch=epoch+1,expires_at=0")
@@ -414,6 +415,7 @@ func (a *App) maintenance() {
 					nextRetention = started.Add(time.Minute)
 				}
 				a.Hub.DisconnectInvalid()
+				a.Hub.maintainDirectCalls()
 				a.Hub.Notify("voice:changed", M{})
 			}()
 		}

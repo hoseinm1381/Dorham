@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   onVisibility: listener => { let active = true; const handler = (_event, visible) => { if (active) listener(visible === true); }; ipcRenderer.on('ui:visibility', handler); void ipcRenderer.invoke('ui:visible').then(visible => { if (active) listener(visible === true); }); return () => { active = false; ipcRenderer.removeListener('ui:visibility', handler); }; },
   getCaptureCapabilities: () => ipcRenderer.invoke('capture:capabilities'),
   getCaptureSelection: () => ipcRenderer.invoke('capture:selection'),
+  chooseCompatibilitySource: () => ipcRenderer.invoke('capture:compatibility-source'),
   startCaptureAudio: () => ipcRenderer.invoke('capture:audio-start'),
   stopCaptureAudio: id => ipcRenderer.send('capture:audio-stop', id),
   acknowledgeCaptureAudio: id => ipcRenderer.send('capture:audio-ack', id),

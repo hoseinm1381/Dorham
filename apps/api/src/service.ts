@@ -383,9 +383,10 @@ export class Service {
   }
   async send(userId: string, requestId: string, conversationId: string, content: string, replyTo?: string | null, attachmentIds: string[] = [], asTts = false) {
     let reopened = false, posted = false; const spoken = ttsMessage(content);
-    if (!spoken.text && !attachmentIds.length) fail(400, 'VALIDATION', 'Type a message after /tts.');
     const event = await this.mutate(userId, requestId, 'message.send', { conversationId, content, replyTo, attachmentIds, ...(asTts ? { tts: true } : {}) }, async tx => {
       const cv = await this.conversation(tx, userId, conversationId, true);
+      const text = cv.kind === 'dm' ? content.trim() : spoken.text;
+      if (!text && !attachmentIds.length) fail(400, 'VALIDATION', 'Type a message after /tts.');
       const account = await tx.one('SELECT guest FROM users WHERE id=?', [userId]);
       if (account!.guest && (await tx.one('SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND created_at>?', [userId, Date.now() - 60000]))!.count >= 20) fail(429, 'GUEST_RATE', 'Guests may send at most 20 messages per minute.');
       if (account!.guest && attachmentIds.length) fail(403, 'GUEST_UPLOAD', 'Guests cannot upload files.');
@@ -395,13 +396,13 @@ export class Service {
         await tx.run('DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY created_at LIMIT 200)');
       }
       const messageId = randomUUID();
-      await tx.run('INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)', [messageId, conversationId, Number(cv.sequence) + 1, userId, spoken.text, replyTo || null, Date.now()]);
-      await this.replaceMentions(tx, messageId, conversationId, userId, spoken.text);
+      await tx.run('INSERT INTO messages(id,conversation_id,sequence,user_id,content,reply_to,created_at) VALUES(?,?,?,?,?,?,?)', [messageId, conversationId, Number(cv.sequence) + 1, userId, text, replyTo || null, Date.now()]);
+      await this.replaceMentions(tx, messageId, conversationId, userId, text);
       for (const a of attachmentIds) await tx.run('UPDATE attachments SET message_id=? WHERE id=?', [messageId, a]);
       if (cv.kind === 'dm') { reopened = Boolean(await tx.one('SELECT user_id FROM dm_members WHERE conversation_id=? AND hidden=1', [conversationId])); await tx.run('UPDATE dm_members SET hidden=0 WHERE conversation_id=?', [conversationId]); }
       posted = true;
       return this.event(tx, conversationId, 'message', await this.messageView(tx, messageId));
-    }); if (reopened) await this.notify('state:changed', {}); if (posted) await this.notify('conversation:event', event); if ((spoken.requested || asTts) && spoken.text) this.onTts?.(userId, event.payload as Message); return event;
+    }); if (reopened) await this.notify('state:changed', {}); if (posted) await this.notify('conversation:event', event); if (!event.direct && (spoken.requested || asTts) && spoken.text) this.onTts?.(userId, event.payload as Message); return event;
   }
   async changeMessage(userId: string, requestId: string, messageId: string, body: { content?: string; delete?: boolean; emoji?: string; removeReaction?: boolean }) {
     const event = await this.mutate(userId, requestId, 'message.change', { messageId, ...body }, async tx => {

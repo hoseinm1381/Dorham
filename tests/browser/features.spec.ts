@@ -28,6 +28,39 @@ async function api(page: Page, path: string, data?: Record<string, unknown>, met
   }, { path, data, method });
 }
 
+test('Direct message voice call rings, connects both microphones and ends for both peers', async ({ browser }) => {
+  test.skip(process.env.DORHAM_SFU_ISOLATED_TEST !== '1', 'Needs an isolated LiveKit fixture');
+  const caller = await browser.newPage(), callee = await browser.newPage();
+  try {
+    const suffix = Date.now().toString().slice(-7);
+    await register(caller, 'Caller' + suffix);
+    await register(callee, 'Callee' + suffix);
+    const { user } = await api(callee, '/auth/me');
+    const dm = await api(caller, '/dms', { userId: user.id });
+    const message = await api(caller, '/messages', { conversationId: dm.id, content: '/tts private text', tts: true });
+    expect(message.payload.content).toBe('/tts private text');
+    await caller.locator('.dm-item').filter({ hasText: user.displayName }).click();
+    await expect(caller.getByRole('checkbox', { name: 'Send as TTS' })).toHaveCount(0);
+    await caller.getByRole('button', { name: 'Start voice call' }).click();
+    await expect(callee.getByText('Incoming call from Caller' + suffix)).toBeVisible();
+    await expect(caller.locator('body > audio')).toHaveCount(0);
+    await callee.getByRole('button', { name: 'Answer', exact: true }).click();
+    for (const page of [caller, callee]) {
+      await expect(page.getByText(/In a call with /)).toBeVisible();
+      await expect.poll(() => page.locator('body > audio').evaluate((audio: HTMLAudioElement) => audio.currentTime)).toBeGreaterThan(0);
+    }
+    await callee.getByRole('button', { name: 'Mute microphone', exact: true }).last().click();
+    await expect(callee.getByRole('button', { name: 'Unmute microphone', exact: true }).last()).toBeEnabled();
+    await callee.getByRole('button', { name: 'End call', exact: true }).click();
+    for (const page of [caller, callee]) {
+      await expect(page.getByRole('button', { name: 'End call', exact: true })).toHaveCount(0);
+      await expect(page.locator('body > audio')).toHaveCount(0);
+    }
+  } finally {
+    await Promise.all([caller.context().close(), callee.context().close()]);
+  }
+});
+
 test('Profile Plus avatars appear locked beside built-in pictures and can switch back', async ({ browser, baseURL }, testInfo) => {
   const admin = await browser.newPage();
   const windows = process.env.DORHAM_AVATAR_WINDOWS_EXE;

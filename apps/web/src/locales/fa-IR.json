@@ -1510,5 +1510,19 @@
   "Original sentence": "جملهٔ اولیه",
   "Players finished": "بازیکنانی که کارشان را تمام کرده‌اند",
   "Current bet": "شرط فعلی",
-  "Roll a six to bring your first token onto the board.": "شش بیاورید تا اولین مهره‌تان را وارد صفحه کنید."
+  "Roll a six to bring your first token onto the board.": "شش بیاورید تا اولین مهره‌تان را وارد صفحه کنید.",
+  "Start voice call": "شروع تماس صوتی",
+  "Incoming call from {name}": "تماس ورودی از {name}",
+  "Calling {name}…": "در حال تماس با {name}…",
+  "In a call with {name}": "در حال تماس با {name}",
+  "Connecting to {name}…": "در حال برقراری تماس با {name}…",
+  "Cancel call": "لغو تماس",
+  "End call": "پایان تماس",
+  "Enable call audio": "فعال کردن صدای تماس",
+  "End the direct call before joining voice.": "پیش از ورود به اتاق صوتی، تماس خصوصی را پایان دهید.",
+  "One of you is already in a voice chat or call.": "یکی از شما در تماس یا اتاق صوتی دیگری است.",
+  "This person is offline.": "این کاربر آفلاین است.",
+  "This call is no longer available.": "این تماس دیگر در دسترس نیست.",
+  "Direct calls are unavailable for this conversation.": "تماس صوتی برای این گفت‌وگو در دسترس نیست.",
+  "Turn on Num Lock to use a numpad digit as a Windows background talk key.": "برای استفاده از عددهای بخش عددی صفحه‌کلید به‌عنوان کلید صحبت در پس‌زمینهٔ ویندوز، Num Lock را روشن کنید."
 }

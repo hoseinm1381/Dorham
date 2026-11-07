@@ -104,6 +104,12 @@ func (m *Media) synchronizePass() {
 	for _, raw := range Arr(out["rooms"]) {
 		room := Obj(raw)
 		name := Str(room, "name")
+		if strings.HasPrefix(name, directCallPrefix) {
+			if m.a.Hub == nil || !m.a.Hub.directCallActive(name) {
+				m.deleteDirectCallRoom(name)
+			}
+			continue
+		}
 		if m.a.DB.One("SELECT id FROM channels WHERE id=? AND kind='voice'", name) == nil {
 			continue
 		}
@@ -182,6 +188,12 @@ func (m *Media) synchronizePass() {
 		}
 	}
 }
+func (m *Media) deleteDirectCallRoom(name string) {
+	_, err := m.twirp("DeleteRoom", M{"room": name}, M{"roomCreate": true})
+	if !mediaMissing(err) {
+		mediaMust(err)
+	}
+}
 func mediaSourceSet(value any) string {
 	set := map[int64]bool{}
 	switch v := value.(type) {
@@ -235,6 +247,15 @@ func (m *Media) registerAdmission() {
 			denied()
 		}
 		uid, epoch := split[0], split[1]
+		if room := Str(video, "room"); strings.HasPrefix(room, directCallPrefix) {
+			sources := Arr(video["canPublishSources"])
+			if auxiliary || room != directCallPrefix+epoch || !Bool(video, "canPublish") || !Bool(video, "canSubscribe") ||
+				Bool(video, "canPublishData") || Bool(video, "canUpdateOwnMetadata") || len(sources) != 1 || !mediaSourceIs(sources[0], "microphone", 2) ||
+				m.a.Hub == nil || !m.a.Hub.admitDirectCall(uid, epoch) {
+				denied()
+			}
+			return M{"allowed": true}
+		}
 		vm := m.a.DB.One("SELECT v.* FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.user_id=? AND v.epoch=? AND v.channel_id=? AND v.heartbeat>=? AND u.banned=0 AND u.must_change_password=0", uid, epoch, Str(video, "room"), Now()-30000)
 		session := ""
 		if vm != nil {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
+import { bindingLabel, matchesBinding, validBinding } from '../packages/contracts/src/voice-hotkeys';
 
 const require = createRequire(import.meta.url);
 const childProcess = require('node:child_process');
@@ -62,4 +63,16 @@ it.skipIf(process.platform !== 'win32')('native hotkeys reject invalid or unboun
   expect(events.slice(-2)).toEqual([{ type: 'release' }, expect.objectContaining({ type: 'error' })]);
   const count = events.length; child.emit('exit', 1); child.emit('error', new Error('already retired'));
   expect(events).toHaveLength(count); expect(vi.getTimerCount()).toBe(0);
+});
+
+it.skipIf(process.platform !== 'win32')('numpad talk keys use their own virtual keys for both input modes', () => {
+  const { spawn } = fixture();
+  const push = preferences('Numpad1');
+  hotkeys.configure(push);
+  expect(validBinding(push.binding)).toBe(true);
+  expect(bindingLabel(push.binding)).toBe('Numpad 1');
+  expect(spawn.mock.calls.at(-1)?.[1]).toEqual(['97', '0', String(process.pid)]);
+  expect(matchesBinding(push.binding, { code: 'Digit1', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false })).toBe(false);
+  hotkeys.configure({ ...preferences('NumpadDivide'), mode: 'toggle' });
+  expect(spawn.mock.calls.at(-1)?.[1]).toEqual(['111', '0', String(process.pid)]);
 });

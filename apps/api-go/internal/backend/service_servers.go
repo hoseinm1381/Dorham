@@ -81,7 +81,7 @@ func (s *Service) Bootstrap(uid string) M {
 		for _, u := range tx.All("SELECT id FROM users WHERE deleted_at IS NOT NULL") {
 			deletedUsers = append(deletedUsers, Str(u, "id"))
 		}
-		return M{"me": PublicUser(me), "servers": servers, "channels": channels, "voicePresence": s.VoiceDirectory(uid, tx), "dms": dms, "blockedUsers": blocked, "users": users, "deletedUserIds": deletedUsers, "unread": unread, "mediaTransport": s.C.MediaTransport, "screenPolicy": M{"maxBitrate": s.C.ScreenMaxBitrate, "maxFrameRate": s.C.ScreenMaxFrameRate}, "limits": M{"users": s.C.MaxUsers, "online": s.C.MaxOnline, "voice": s.C.MaxVoice, "roomShares": s.C.RoomShares, "globalShares": s.C.GlobalShares}}
+		return M{"me": PublicUser(me), "servers": servers, "channels": channels, "voicePresence": s.VoiceDirectory(uid, tx), "dms": dms, "blockedUsers": blocked, "users": users, "deletedUserIds": deletedUsers, "unread": unread, "mediaTransport": s.C.MediaTransport, "directCalls": s.C.MediaTransport == "livekit", "screenPolicy": M{"maxBitrate": s.C.ScreenMaxBitrate, "maxFrameRate": s.C.ScreenMaxFrameRate}, "limits": M{"users": s.C.MaxUsers, "online": s.C.MaxOnline, "voice": s.C.MaxVoice, "roomShares": s.C.RoomShares, "globalShares": s.C.GlobalShares}}
 	}))
 }
 func (s *Service) InsertChannel(tx *DB, server, name, kind string) M {

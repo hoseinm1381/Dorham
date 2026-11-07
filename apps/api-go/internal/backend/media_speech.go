@@ -249,7 +249,7 @@ func (s *mediaSpeech) recycleIdleWorker(before time.Time) bool {
 	// Serialize the occupancy check and retirement with voice joins. Model
 	// loading runs separately in the existing prewarm loop after the lock is released.
 	return s.m.a.DB.Tx(func(tx *DB) any {
-		if tx.One("SELECT 1 FROM voice_members LIMIT 1") != nil {
+		if tx.One("SELECT 1 FROM voice_members LIMIT 1") != nil || (s.m.a.Hub != nil && s.m.a.Hub.directCallActive("")) {
 			return false
 		}
 		s.mu.Lock()

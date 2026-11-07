@@ -18,6 +18,7 @@ import { RecoverySetup, rememberRecoveryCodes, takeInviteLanding } from './Recov
 import { readVoiceClarity } from './voice-clarity-preferences';
 import { ServerIconControl } from './ServerIconControl';
 import { DirectMessagesHome, orderedDirectChats } from './DirectMessagesHome';
+import { DirectCallBanner, useDirectCall } from './DirectCall';
 import { ScreenShareSetup } from './ScreenShareSetup';
 import './update-075.css';
 import { GamesProvider, GamesButton, VoiceGames } from './ChessLauncher';
@@ -42,7 +43,7 @@ import './social.css';
 import { t as tr } from './i18n';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { PanelRightClose, PanelRightOpen, MessageCircle, Plus, Hash, Volume2, Settings, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, AudioLines, PhoneOff, X, ChevronDown, Users, Search, Reply, Pencil, Trash2, Copy, Check, ArrowRight, LogOut, Radio, ShieldCheck, Menu, Activity, Download, Globe, Sparkles } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, MessageCircle, Plus, Hash, Volume2, Settings, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, AudioLines, Phone, PhoneOff, X, ChevronDown, Users, Search, Reply, Pencil, Trash2, Copy, Check, ArrowRight, LogOut, Radio, ShieldCheck, Menu, Activity, Download, Globe, Sparkles } from 'lucide-react';
 import type { Channel, Server, PublicUser, Message, ConversationEvent, VoiceRoom, VoicePresence, ServerMember } from '@dorham/contracts';
 import { DeferredTransport } from '../../../packages/media/src/deferred';
 import { ack } from '../../../packages/media/src/signaling';
@@ -59,7 +60,7 @@ import './expansion.css';
 import { channelLink } from '../../../packages/contracts/src/links';
 import { readScreenPreferences, saveScreenPreferences, screenSummary } from './ScreenShareSettings';
 
-type Snapshot = { me: PublicUser; servers: Server[]; channels: Channel[]; dms: { id: string; user: PublicUser; lastMessageAt?: number; blocked?: boolean; blockedByMe?: boolean }[]; blockedUsers?: PublicUser[]; users: PublicUser[]; deletedUserIds?: string[]; unread: Record<string, { sequence: number; readSequence: number }>; mediaTransport: 'mesh' | 'livekit'; screenPolicy?: { maxBitrate: number; maxFrameRate: number }; voicePresence?: VoicePresence[] };
+type Snapshot = { me: PublicUser; servers: Server[]; channels: Channel[]; dms: { id: string; user: PublicUser; lastMessageAt?: number; blocked?: boolean; blockedByMe?: boolean }[]; blockedUsers?: PublicUser[]; users: PublicUser[]; deletedUserIds?: string[]; unread: Record<string, { sequence: number; readSequence: number }>; mediaTransport: 'mesh' | 'livekit'; directCalls?: boolean; screenPolicy?: { maxBitrate: number; maxFrameRate: number }; voicePresence?: VoicePresence[] };
 const deletedAuthor = (id: string): PublicUser => ({ id, username: '', displayName: tr('Deleted account'), bio: '', avatar: null, status: 'offline', deleted: true });
 type ModalType = 'server' | 'join' | 'settings' | 'manage' | 'people' | 'diagnostics' | null;
 
@@ -116,7 +117,16 @@ export function App() {
   function error(e: any) { setToast(translatedError(e)); }
   const [audioTesting, setAudioTesting] = useState(false);
   useEffect(() => { const changed = (e: Event) => setAudioTesting(Boolean((e as CustomEvent).detail)); window.addEventListener('dorham-audio-test', changed); return () => window.removeEventListener('dorham-audio-test', changed); }, []);
-  const voiceInput = useVoiceInput(media, Boolean(room), error, setToast), muted = voiceInput.muted || audioTesting || listenOnly;
+  const direct = useDirectCall(error);
+  const directActive = direct.call?.phase === 'active';
+  const voiceTarget = useRef<Pick<MediaTransport, 'setMuted'>>(null);
+  voiceTarget.current = { setMuted: async value => {
+    if (direct.isActive()) await direct.setMuted(value);
+    else await media.current?.setMuted(value);
+  } };
+  const voiceInput = useVoiceInput(voiceTarget, Boolean(room) || directActive, error, setToast), muted = voiceInput.muted || audioTesting || listenOnly;
+  const inCall = Boolean(room) || directActive;
+  useEffect(() => { window.desktop?.setInCall(inCall); }, [inCall]);
   useEffect(() => {
     if (modal !== 'diagnostics') return;
     let stopped = false;
@@ -197,10 +207,11 @@ export function App() {
     if (!userId || snapshotRef.current?.me.mustChangePassword) return;
     setDeafened(false); setVolumes(readAudioChoices(userId).levels);
     const s = connectSocket(); socket.current = s;
+    const detachDirectCall = direct.attach(s, userId);
     const emit = <K extends keyof MediaEvents>(kind: K, payload: MediaEvents[K]) => {
       if (kind === 'room') { const value = payload as VoiceRoom | null;
         for (const cue of voiceCues.current.transition(value?.channelId || null, value?.members.map(m => m.user.id))) playCue(cue, snapshotRef.current?.me.status === 'busy');
-        setRoom(value); if (value && snapshotRef.current?.me.id) { const levels = readAudioChoices(snapshotRef.current.me.id).levels; for (const member of value.members) if (levels[member.user.id] !== undefined) media.current?.setVolume(member.user.id, levels[member.user.id] / 100); } window.desktop?.setInCall(Boolean(value)); if (!value) { setListenOnly(false); setLocalScreen(null); setScreens({}); setSpeaking({}); } else setScreens(old => Object.fromEntries(Object.entries(old).filter(([key]) => value.shares.some(share => share.id === key)))); }
+        setRoom(value); if (value && snapshotRef.current?.me.id) { const levels = readAudioChoices(snapshotRef.current.me.id).levels; for (const member of value.members) if (levels[member.user.id] !== undefined) media.current?.setVolume(member.user.id, levels[member.user.id] / 100); } if (!value) { setListenOnly(false); setLocalScreen(null); setScreens({}); setSpeaking({}); } else setScreens(old => Object.fromEntries(Object.entries(old).filter(([key]) => value.shares.some(share => share.id === key)))); }
       if (kind === 'listenOnly') setListenOnly(payload as boolean);
       if (kind === 'notice') setToast(payload as string);
       if (kind === 'localScreen') setLocalScreen(payload as RemoteScreen | null);
@@ -236,7 +247,7 @@ export function App() {
     const meter = setInterval(() => { setTyping(old => Object.values(old).some(expiry => expiry <= Date.now()) ? Object.fromEntries(Object.entries(old).filter(([, expiry]) => expiry > Date.now())) : old); }, 5000);
     const pulse = () => { void maintainSession().catch(error); };
     const authTimer = setInterval(pulse, 60000); window.addEventListener('dorham-native-pulse', pulse);
-    return () => { clearInterval(authTimer); window.removeEventListener('dorham-native-pulse', pulse); clearInterval(meter); void transport.destroy(); s.removeAllListeners(); s.disconnect(); socket.current = null; media.current = null; };
+    return () => { clearInterval(authTimer); window.removeEventListener('dorham-native-pulse', pulse); clearInterval(meter); detachDirectCall(); void transport.destroy(); s.removeAllListeners(); s.disconnect(); socket.current = null; media.current = null; };
   }, [userId, snapshot?.me.mustChangePassword]);
   useEffect(() => { setTyping({}); setMessages([]); setHasMore(false); if (conversationId) void loadHistory(conversationId); return () => historyRequest.current?.abort(); }, [conversationId]);
   useEffect(() => { if (serverId && snapshot && !snapshot.servers.some(s => s.id === serverId)) { setServerId(null); setConversationId(null); } if (conversationId && snapshot && !snapshot.channels.some(c => c.conversationId === conversationId) && !snapshot.dms.some(d => d.id === conversationId)) setConversationId(null); }, [snapshot, serverId, conversationId]);
@@ -272,8 +283,8 @@ export function App() {
   async function send(e?: Pick<FormEvent, 'preventDefault'>, retry = false) {
     e?.preventDefault(); const { text: draft, reply, editing, files: pendingFiles, pending: pendingSend } = readDraft(); if (!conversationId || !snapshot || sending || snapshot.dms.some(dm => dm.id === conversationId && dm.user.deleted) || (!retry && !draft.trim() && !pendingFiles.length)) return;
     const cv = conversationId, account = snapshot.me.id, key = draftStore().key(account, serverUrl() || location.origin, cv), original = draftStore().get(key);
-    const same = pendingSend && pendingSend.content === draft.trim() && Boolean(pendingSend.tts) === Boolean(ttsSend && !editing) && pendingSend.replyTo === (reply?.id || null) && JSON.stringify(pendingSend.attachmentIds) === JSON.stringify(pendingFiles.map(f => f.id)) && pendingSend.editMessageId === editing?.id;
-    const pending = (retry || same) && pendingSend ? pendingSend : { requestId: crypto.randomUUID(), content: draft.trim(), tts: Boolean(ttsSend && !editing), replyTo: reply?.id || null, attachmentIds: pendingFiles.map(f => f.id), createdAt: Date.now(), status: 'sending' as const, editMessageId: editing?.id };
+    const same = pendingSend && pendingSend.content === draft.trim() && Boolean(pendingSend.tts) === Boolean(activeChannel && ttsSend && !editing) && pendingSend.replyTo === (reply?.id || null) && JSON.stringify(pendingSend.attachmentIds) === JSON.stringify(pendingFiles.map(f => f.id)) && pendingSend.editMessageId === editing?.id;
+    const pending = (retry || same) && pendingSend ? pendingSend : { requestId: crypto.randomUUID(), content: draft.trim(), tts: Boolean(activeChannel && ttsSend && !editing), replyTo: reply?.id || null, attachmentIds: pendingFiles.map(f => f.id), createdAt: Date.now(), status: 'sending' as const, editMessageId: editing?.id };
     if (Date.now() - pending.createdAt >= 86400000) { error(new Error('Retry expired. Check the conversation before sending again.')); return; }
     setSending(true); setPendingSend({ ...pending, status: 'sending', error: undefined }); draftStore().flush();
     try {
@@ -299,7 +310,7 @@ export function App() {
     const back = (event: Event) => { if (event.defaultPrevented) return; if (membersOpen || voicePreview || mobileNav || modal || profile || soundboardOpen) { event.preventDefault(); if (soundboardOpen) setSoundboardOpen(false); else if (membersOpen) setMembersOpen(false); else if (voicePreview) setVoicePreview(null); else if (profile) setProfile(null); else if (modal) setModal(null); else setMobileNav(false); } };
     window.addEventListener('dorham-back', back); return () => window.removeEventListener('dorham-back', back);
   }, [android, membersOpen, voicePreview, mobileNav, modal, profile, soundboardOpen]);
-  async function joinVoice(channel: Channel) { if (!media.current || joining.current || media.current.room?.channelId === channel.id) return; joining.current = true; setVoiceBusy(true); try { await voiceInput.prepare(); await media.current.join(channel.id); setMobileNav(false); } finally { joining.current = false; setVoiceBusy(false); } }
+  async function joinVoice(channel: Channel) { if (direct.call) { error('End the direct call before joining voice.'); return; } if (!media.current || joining.current || media.current.room?.channelId === channel.id) return; joining.current = true; setVoiceBusy(true); try { await voiceInput.prepare(); await media.current.join(channel.id); setMobileNav(false); } finally { joining.current = false; setVoiceBusy(false); } }
   if (loading) return <div className="loading"><img src="./icon.svg" alt=""/><span>{tr("Finding your people…")}</span></div>;
   const activeServer = snapshot?.servers.find(s => s.id === serverId), activeChannel = conversationId ? snapshot?.channels.find(c => c.conversationId === conversationId) : undefined, activeDM = snapshot?.dms.find(d => d.id === conversationId), voiceChannel = snapshot?.channels.find(c => c.id === room?.channelId), self = room?.members.find(m => m.user.id === userId), ownShare = room?.shares.find(s => s.userId === userId);
   const recentDMs = orderedDirectChats(snapshot?.dms || []);
@@ -332,8 +343,9 @@ export function App() {
       </div></div>}
       <div className="account-bar"><button {...moderation.bind(snapshot.me)} className="account-info" onClick={() => setModal('settings')}><Avatar user={snapshot.me} online small/><span><strong>{snapshot.me.displayName}</strong><small>{tr(snapshot.me.status)}</small></span></button><IconButton title={listenOnly ? tr('Microphone unavailable. Rejoin to try again.') : voiceInput.preferences.mode === 'push' ? tr(voiceInput.locked ? "Enable push to talk" : muted ? "Push to talk ready" : "Mute microphone") : muted ? tr("Unmute microphone") : tr("Mute microphone")} active={muted} disabled={!room || audioTesting || listenOnly} onClick={voiceInput.toggle}>{muted ? <MicOff/> : <Mic/>}</IconButton><IconButton title={deafened || audioTesting ? tr("Undeafen") : tr("Deafen")} active={deafened || audioTesting} disabled={!room || audioTesting} onClick={() => { const next = !deafened; setDeafened(next); void run(() => media.current!.setDeafened(next)); }}>{deafened || audioTesting ? <HeadphoneOff/> : <Headphones/>}</IconButton><IconButton title={tr("Account settings")} onClick={() => setModal('settings')}><Settings/></IconButton></div>
     </aside>
-    <main className={`main ${focusScreens ? 'stream-viewer-active' : ''} ${chatOpen ? 'chat-drawer-open' : ''}`}><header className="topbar"><IconButton title={tr("Toggle navigation")} onClick={() => setMobileNav(!mobileNav)}><Menu/></IconButton><span className="topbar-symbol">{conversationId ? activeDM ? <MessageCircle/> : <Hash/> : <Users/>}</span><strong>{activeChannel?.name || activeDM?.user.displayName || tr("People")}</strong><span className="topbar-divider"/><span className="topbar-description">{activeDM ? tr("A conversation just for you two") : conversationId ? tr("A little conversation goes a long way.") : tr("Your people, all in one place.")}</span><div className="topbar-actions">{conversationId && <AndroidChatNotifications accountId={snapshot.me.id} conversationId={conversationId}/>}<ReleaseActions inCall={Boolean(room)}/>{activeDM && <><IconButton title={tr('Close chat')} onClick={() => { void run(async () => { await request(`/dms/${activeDM.id}/close`, {}); setMessageNotice(old => old?.conversationId === activeDM.id ? null : old); await refresh(); }); }}><X/></IconButton>{!activeDM.user.deleted && <button className="chat-block-button" onClick={() => { void run(async () => { await request(`/users/${activeDM.user.id}/block`, { blocked: !activeDM.blockedByMe }); await refresh(); }); }}>{tr(activeDM.blockedByMe ? 'Unblock person' : 'Block person')}</button>}</>}<span className={`connection-pill ${connected ? '' : 'disconnected'}`}><i/>{connected ? tr("All connected") : tr("Reconnecting")}{connected && pingFor(snapshot.me)}</span><IconButton title={tr(membersCollapsed ? 'Show members panel' : 'Minimize members panel')} onClick={toggleMembers}>{membersCollapsed ? <PanelRightOpen/> : <PanelRightClose/>}</IconButton></div></header>
+    <main className={`main ${focusScreens ? 'stream-viewer-active' : ''} ${chatOpen ? 'chat-drawer-open' : ''}`}><header className="topbar"><IconButton title={tr("Toggle navigation")} onClick={() => setMobileNav(!mobileNav)}><Menu/></IconButton><span className="topbar-symbol">{conversationId ? activeDM ? <MessageCircle/> : <Hash/> : <Users/>}</span><strong>{activeChannel?.name || activeDM?.user.displayName || tr("People")}</strong><span className="topbar-divider"/><span className="topbar-description">{activeDM ? tr("A conversation just for you two") : conversationId ? tr("A little conversation goes a long way.") : tr("Your people, all in one place.")}</span><div className="topbar-actions">{conversationId && <AndroidChatNotifications accountId={snapshot.me.id} conversationId={conversationId}/>}<ReleaseActions inCall={inCall}/>{activeDM && <>{snapshot.directCalls && !snapshot.me.guest && !activeDM.user.guest && !activeDM.user.deleted && !activeDM.blocked && <IconButton title={tr('Start voice call')} disabled={!connected || !online.has(activeDM.user.id) || inCall || voiceBusy || Boolean(direct.call)} onClick={() => { if (socket.current) void run(() => direct.start(socket.current!, activeDM.id)); }}><Phone/></IconButton>}<IconButton title={tr('Close chat')} onClick={() => { void run(async () => { await request(`/dms/${activeDM.id}/close`, {}); setMessageNotice(old => old?.conversationId === activeDM.id ? null : old); await refresh(); }); }}><X/></IconButton>{!activeDM.user.deleted && <button className="chat-block-button" onClick={() => { void run(async () => { await request(`/users/${activeDM.user.id}/block`, { blocked: !activeDM.blockedByMe }); await refresh(); }); }}>{tr(activeDM.blockedByMe ? 'Unblock person' : 'Block person')}</button>}</>}<span className={`connection-pill ${connected ? '' : 'disconnected'}`}><i/>{connected ? tr("All connected") : tr("Reconnecting")}{connected && pingFor(snapshot.me)}</span><IconButton title={tr(membersCollapsed ? 'Show members panel' : 'Minimize members panel')} onClick={toggleMembers}>{membersCollapsed ? <PanelRightOpen/> : <PanelRightClose/>}</IconButton></div></header>
       <FeatureAnnouncements/>
+      <DirectCallBanner direct={direct} socket={socket.current} muted={voiceInput.muted} toggle={voiceInput.toggle} run={run}/>
       {activeDM?.blocked && <p className="blocked-chat-note" role="status">{tr('Direct messaging is blocked between these accounts. Existing history is kept.')}</p>}
       {invitedVoice && serverId === invitedVoice.serverId && room?.channelId !== invitedVoice.id && snapshot.channels.some(channel => channel.id === invitedVoice.id) && <div className="invite-voice-landing" role="status"><span>{tr('Invited to {name}', { name: invitedVoice.name })}</span><button className="primary" disabled={voiceBusy || !connected} onClick={() => { void run(async () => { await joinVoice(invitedVoice); setInvitedVoice(null); }); }}>{tr('Join voice')}</button><IconButton title={tr('Dismiss notification')} onClick={() => setInvitedVoice(null)}><X/></IconButton></div>}
       {messageNotice && <div className="message-notice" role="status"><button onClick={() => { setServerId(messageNotice.serverId || null); setConversationId(messageNotice.conversationId); setMessageNotice(null); setMobileNav(false); }}>{messageNotice.channel ? tr('{name} mentioned you in #{channel}', { name: messageNotice.author, channel: messageNotice.channel }) : tr('New message from {name}', { name: messageNotice.author })}</button><IconButton title={tr('Dismiss notification')} onClick={() => setMessageNotice(null)}><X/></IconButton></div>}

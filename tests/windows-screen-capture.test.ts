@@ -1,6 +1,8 @@
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
+import { captureScreen, setDesktopCaptureCapabilities } from '../packages/media/src/screen-capture';
 const { trustedCaptureRequest } = createRequire(import.meta.url)('../apps/desktop/capture-origin.cjs');
+afterEach(() => { vi.unstubAllGlobals(); setDesktopCaptureCapabilities({ sharedAudio: false }); });
 function fixture() {
   const frame = { url: 'dorham://app/index.html', detached: false };
   const contents = { mainFrame: frame, isDestroyed: () => false };
@@ -27,4 +29,20 @@ it('requires the live trusted main frame even when the supplied origin matches',
   expect(trustedCaptureRequest(request, contents)).toBe(false);
   frame.detached = false; frame.url = 'https://example.invalid/';
   expect(trustedCaptureRequest(request, contents)).toBe(false);
+});
+
+it('captures only the source selected in the Windows 10 picker, without requiring sound', async () => {
+  const stream = { getVideoTracks: () => [] };
+  const getUserMedia = vi.fn().mockResolvedValue(stream), getDisplayMedia = vi.fn();
+  const choose = vi.fn().mockResolvedValue({ sourceId: 'screen:0:0' });
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia, getDisplayMedia } });
+  vi.stubGlobal('desktop', { chooseCompatibilitySource: choose });
+  setDesktopCaptureCapabilities({ sharedAudio: false, compatibilityVideo: true });
+  const settings = { width: 1280, height: 720, fps: 15 };
+  expect(await captureScreen(settings, false)).toBe(stream);
+  expect(getUserMedia).toHaveBeenCalledWith({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: 'screen:0:0', maxWidth: 1280, maxHeight: 720, maxFrameRate: 15 } } });
+  expect(getDisplayMedia).not.toHaveBeenCalled();
+  choose.mockResolvedValue(null);
+  await expect(captureScreen(settings, false)).rejects.toMatchObject({ name: 'NotAllowedError' });
+  expect(getUserMedia).toHaveBeenCalledOnce();
 });

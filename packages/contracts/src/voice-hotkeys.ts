@@ -7,7 +7,7 @@ export function validBinding(value: unknown): value is VoiceBinding {
   if (!value || typeof value !== 'object') return false; const b = value as VoiceBinding;
   return Object.hasOwn(keys, b.code) && ['ctrl', 'alt', 'shift'].every(k => typeof b[k as keyof VoiceBinding] === 'boolean') && !(b.alt && b.code === 'F4');
 }
-export function bindingLabel(b: VoiceBinding) { return [b.ctrl && 'Ctrl', b.alt && 'Alt', b.shift && 'Shift', b.code.replace(/^Key|^Digit/, '')].filter(Boolean).join(' + '); }
+export function bindingLabel(b: VoiceBinding) { return [b.ctrl && 'Ctrl', b.alt && 'Alt', b.shift && 'Shift', b.code.replace(/^Key|^Digit/, '').replace(/^Numpad/, 'Numpad ')].filter(Boolean).join(' + '); }
 export function matchesBinding(b: VoiceBinding, event: { code: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }) { return !event.metaKey && event.code === b.code && event.ctrlKey === b.ctrl && event.altKey === b.alt && event.shiftKey === b.shift; }
 // Function keys and explicit command combinations do not type message content.
 // Plain text/navigation bindings remain suppressed while composing a message.

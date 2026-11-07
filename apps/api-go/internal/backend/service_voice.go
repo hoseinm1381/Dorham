@@ -158,6 +158,7 @@ func (s *Service) JoinVoice(uid, socket, id string, eligible bool, session ...st
 		ice = s.cloudflareTurn.ForUser(uid)
 	}
 	result := serviceResult(s.DB.Tx(func(tx *DB) any {
+		Check(s.DirectCallBusy == nil || !s.DirectCallBusy(uid), 409, "CALL_BUSY", "End the direct call before joining voice.")
 		if len(session) > 0 {
 			Check(voiceSessionActive(tx, session[0], Now()), 401, "UNAUTHENTICATED", "Session expired.")
 		}

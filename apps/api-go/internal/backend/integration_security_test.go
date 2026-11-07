@@ -18,10 +18,13 @@ import (
 
 // These tests cross the actual HTTP and Engine.IO v4 boundaries, rather than
 // replacing authentication or realtime handlers with test doubles.
-func integrationApp(t *testing.T) (*App, *httptest.Server) {
+func integrationApp(t *testing.T, configure ...func(*Config)) (*App, *httptest.Server) {
 	t.Helper()
 	dir := t.TempDir()
 	c := Config{DataDir: dir, AttachmentDir: filepath.Join(dir, "attachments"), PublicURL: "https://dorham.example", Origins: []string{"https://dorham.example", "capacitor://localhost", "dorham://app"}, MaxDatabaseMiB: 32, MaxUsers: 100, MaxOnline: 20, MaxVoice: 16, StandardShareSlots: 3, ScreenMaxFrameRate: 30, ScreenMaxBitrate: 1500000, RetentionDays: 90, MaxMessages: 50000, MediaTransport: "mesh", RegistrationOpen: true, GuestsEnabled: true, TTSIdleSeconds: 180, TTSAudioCacheMiB: 8}
+	for _, apply := range configure {
+		apply(&c)
+	}
 	a := NewApp(c)
 	srv := httptest.NewServer(a.HTTP.Handler)
 	t.Cleanup(func() { srv.Close(); a.Close() })

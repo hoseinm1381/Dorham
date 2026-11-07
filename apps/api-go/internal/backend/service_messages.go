@@ -226,7 +226,6 @@ type ServiceUndefined struct{}
 func (s *Service) Send(uid, rid, conversation, content string, replyTo any, attachmentIDs []string, asTTS bool) M {
 	reopened, posted := false, false
 	requested, text := TTSMessage(content)
-	Check(text != "" || len(attachmentIDs) > 0, 400, "VALIDATION", "Type a message after /tts.")
 	if attachmentIDs == nil {
 		attachmentIDs = []string{}
 	}
@@ -241,6 +240,10 @@ func (s *Service) Send(uid, rid, conversation, content string, replyTo any, atta
 	}
 	event := serviceResult(s.Mutate(uid, rid, "message.send", payload, func(tx *DB) any {
 		cv := s.Conversation(tx, uid, conversation, true)
+		if S(cv["kind"]) == "dm" {
+			text = strings.TrimSpace(content)
+		}
+		Check(text != "" || len(attachmentIDs) > 0, 400, "VALIDATION", "Type a message after /tts.")
 		validateCustomEmoji(tx, uid, text, cv)
 		guest := B(tx.One("SELECT guest FROM users WHERE id=?", uid)["guest"])
 		if guest {
@@ -283,7 +286,7 @@ func (s *Service) Send(uid, rid, conversation, content string, replyTo any, atta
 	if posted {
 		s.Notify("conversation:event", event)
 	}
-	if (requested || asTTS) && text != "" && s.OnTTS != nil {
+	if !Bool(event, "direct") && (requested || asTTS) && text != "" && s.OnTTS != nil {
 		s.OnTTS(uid, Obj(event["payload"]))
 	}
 	return event

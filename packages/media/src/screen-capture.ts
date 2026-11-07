@@ -4,13 +4,20 @@
 export type ScreenCaptureSettings = { width: number; height: number; fps: number };
 type Selection = { sourceName: string; audioScope: 'none' | 'application' | 'system' };
 type CaptureAudio = { id: string; pcm?: Uint8Array; error?: string };
-type DesktopCapture = { systemAudioSafe?: boolean; getCaptureSelection?(): Promise<Selection | null>; startCaptureAudio?(): Promise<Selection & { id: string }>; stopCaptureAudio?(id: string): void; acknowledgeCaptureAudio?(id: string): void; onCaptureAudio?(listener: (packet: CaptureAudio) => void): () => void };
+type DesktopCapture = { systemAudioSafe?: boolean; chooseCompatibilitySource?(): Promise<{ sourceId: string } | null>; getCaptureSelection?(): Promise<Selection | null>; startCaptureAudio?(): Promise<Selection & { id: string }>; stopCaptureAudio?(id: string): void; acknowledgeCaptureAudio?(id: string): void; onCaptureAudio?(listener: (packet: CaptureAudio) => void): () => void };
 let desktopSound: boolean | undefined;
+let compatibilityVideo = false;
 const desktop = () => (globalThis as typeof globalThis & { desktop?: DesktopCapture }).desktop;
-export function setDesktopCaptureCapabilities(value: { sharedAudio: boolean }) { desktopSound = value.sharedAudio === true; }
+export function setDesktopCaptureCapabilities(value: { sharedAudio: boolean; compatibilityVideo?: boolean }) { desktopSound = value.sharedAudio === true; compatibilityVideo = value.compatibilityVideo === true; }
 export function sharedSoundSupported() { return !desktop() || (desktopSound ?? Boolean(desktop()?.systemAudioSafe)); }
 const cleanups = new WeakMap<MediaStream, () => void>(), selections = new WeakMap<MediaStream, Selection>();
 export function stopScreenCapture(stream?: MediaStream | null) { if (!stream) return; cleanups.get(stream)?.(); cleanups.delete(stream); stream.getTracks().forEach(track => track.stop()); }
+async function captureCompatibilityScreen(choose: NonNullable<DesktopCapture['chooseCompatibilitySource']>, settings: ScreenCaptureSettings) {
+  const selection = await choose();
+  if (!selection) throw new DOMException('Screen sharing was cancelled.', 'NotAllowedError');
+  const video = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selection.sourceId, maxWidth: settings.width, maxHeight: settings.height, maxFrameRate: settings.fps } };
+  return navigator.mediaDevices.getUserMedia({ audio: false, video: video as MediaTrackConstraints });
+}
 export async function captureScreen(settings: ScreenCaptureSettings, includeAudio: boolean): Promise<MediaStream> {
   const options: DisplayMediaStreamOptions & { windowAudio: 'window' | 'exclude'; systemAudio: 'include' | 'exclude'; selfBrowserSurface: 'exclude' } = {
     video: { width: { ideal: settings.width, max: settings.width }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } },
@@ -19,7 +26,10 @@ export async function captureScreen(settings: ScreenCaptureSettings, includeAudi
     systemAudio: includeAudio ? 'include' : 'exclude',
     selfBrowserSurface: 'exclude',
   };
-  const stream = await navigator.mediaDevices.getDisplayMedia(options), native = desktop();
+  const native = desktop();
+  const stream = compatibilityVideo && !includeAudio && native?.chooseCompatibilitySource
+    ? await captureCompatibilityScreen(native.chooseCompatibilitySource, settings)
+    : await navigator.mediaDevices.getDisplayMedia(options);
   if (!native?.getCaptureSelection) return stream;
   let context: AudioContext | undefined, node: AudioWorkletNode | undefined, remove: (() => void) | undefined, id: string | undefined, closed = false;
   const close = () => { if (closed) return; closed = true; remove?.(); if (id) native.stopCaptureAudio?.(id); node?.port.postMessage('destroy'); node?.port.close(); node?.disconnect(); void context?.close().catch(() => {}); };
