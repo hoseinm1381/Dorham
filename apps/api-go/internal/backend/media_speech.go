@@ -40,6 +40,7 @@ type mediaSpeech struct {
 	reuseBytes     int64
 	cacheHits      int
 	queued         int
+	plusPending    int
 	started        int64
 	closed         bool
 	jobs           chan mediaSpeechJob
@@ -61,6 +62,9 @@ func newMediaSpeech(m *Media) *mediaSpeech {
 		defer close(s.plusDone)
 		for job := range s.plusJobs {
 			s.runPlus(job)
+			s.mu.Lock()
+			s.plusPending--
+			s.mu.Unlock()
 		}
 	}()
 	go s.loop()
@@ -178,6 +182,7 @@ func (s *mediaSpeech) enqueue(uid string, msg M) {
 	if plusSelected {
 		select {
 		case s.plusJobs <- job:
+			s.plusPending++
 			s.mu.Unlock()
 			return
 		default:
@@ -231,6 +236,38 @@ func (s *mediaSpeech) audience(job mediaSpeechJob) []M {
 	}
 	return out
 }
+func nextSpeechRecycle(now time.Time) time.Time {
+	year, month, day := now.UTC().Date()
+	slot := time.Date(year, month, day, 1, 30, 0, 0, time.UTC) // 05:00 Tehran
+	if !slot.After(now) {
+		slot = slot.AddDate(0, 0, 1)
+	}
+	return slot
+}
+
+func (s *mediaSpeech) recycleIdleWorker(before time.Time) bool {
+	// Serialize the occupancy check and retirement with voice joins. Model
+	// loading runs separately in the existing prewarm loop after the lock is released.
+	return s.m.a.DB.Tx(func(tx *DB) any {
+		if tx.One("SELECT 1 FROM voice_members LIMIT 1") != nil {
+			return false
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed || s.queued != 0 || s.plusPending != 0 {
+			return false
+		}
+		w := s.worker
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if !w.keepWarm || w.closed || w.busy || w.cmd == nil || !time.Now().Before(before) {
+			return false
+		}
+		w.retireLocked()
+		return true
+	}).(bool)
+}
+
 func (s *mediaSpeech) loop() {
 	defer close(s.done)
 	ticker := time.NewTicker(5 * time.Second)

@@ -140,6 +140,56 @@ func TestSpeechPrewarmKeepsBothModelsReadyAndUsesOneProcess(t *testing.T) {
 	}
 }
 
+func TestNextSpeechRecycle(t *testing.T) {
+	tehran := time.FixedZone("Tehran", 3*60*60+30*60)
+	now := time.Date(2026, 11, 7, 4, 59, 59, 0, tehran)
+	slot := time.Date(2026, 11, 7, 1, 30, 0, 0, time.UTC)
+	if got := nextSpeechRecycle(now); !got.Equal(slot) {
+		t.Fatalf("next cleanup = %s, want %s", got, slot)
+	}
+	if got := nextSpeechRecycle(slot); !got.Equal(slot.Add(24 * time.Hour)) {
+		t.Fatalf("cleanup slot was repeated: %s", got)
+	}
+}
+
+func TestDailySpeechRecycleRequiresEmptyVoiceAndIdleSpeech(t *testing.T) {
+	m, _, _ := mediaTestStore(t)
+	db := m.a.DB
+	db.Run("INSERT INTO servers(id,name,owner_id,created_at) VALUES('server','Server','owner',?)", Now())
+	db.Run("INSERT INTO channels(id,server_id,name,kind,created_at) VALUES('voice','server','Voice','voice',?)", Now())
+	db.Run("INSERT INTO voice_members(user_id,channel_id,socket_id,epoch,heartbeat,joined_at) VALUES('owner','voice','socket','epoch',?,?)", Now(), Now())
+	w := mediaFixtureWorker()
+	w.keepWarm = true
+	w.memory = func() (int64, int64, bool) { return 1200 * mediaMiB, 800 * mediaMiB, true }
+	defer w.close()
+	w.prewarm()
+	s := &mediaSpeech{m: m, worker: w}
+	deadline := time.Now().Add(time.Minute)
+	if s.recycleIdleWorker(deadline) || !Bool(w.metrics(), "modelsReady") {
+		t.Fatal("recycled with a voice member present")
+	}
+	db.Run("DELETE FROM voice_members")
+	s.queued = 1
+	if s.recycleIdleWorker(deadline) {
+		t.Fatal("recycled with local speech pending")
+	}
+	s.queued, s.plusPending = 0, 1
+	if s.recycleIdleWorker(deadline) {
+		t.Fatal("recycled with Speech Plus pending")
+	}
+	s.plusPending = 0
+	if s.recycleIdleWorker(time.Now()) {
+		t.Fatal("recycled outside the cleanup window")
+	}
+	if !s.recycleIdleWorker(deadline) || Bool(w.metrics(), "running") {
+		t.Fatal("idle worker was not retired")
+	}
+	w.prewarm()
+	if !Bool(w.metrics(), "modelsReady") || Num(w.metrics(), "starts") != 2 {
+		t.Fatal("both voices did not prewarm again", w.metrics())
+	}
+}
+
 func TestSpeechWholeMessageWaitsForCompletionAndReuseGetsFreshAuthorization(t *testing.T) {
 	m, _, _ := mediaTestStore(t)
 	db := m.a.DB

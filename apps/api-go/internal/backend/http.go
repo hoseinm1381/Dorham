@@ -380,6 +380,7 @@ func (a *App) maintenance() {
 	defer ticker.Stop()
 	next := time.Now().Add(5 * time.Second)
 	nextRetention := time.Time{}
+	nextRecycle := nextSpeechRecycle(time.Now())
 	for {
 		select {
 		case <-a.stop:
@@ -395,6 +396,13 @@ func (a *App) maintenance() {
 						log.Printf("maintenance failed: %T", v)
 					}
 				}()
+				if !started.Before(nextRecycle) {
+					deadline := nextRecycle.Add(time.Minute)
+					nextRecycle = nextSpeechRecycle(started)
+					if started.Before(deadline) && a.Media.speech.recycleIdleWorker(deadline) {
+						log.Print("daily TTS worker recycle completed")
+					}
+				}
 				retention := !started.Before(nextRetention)
 				a.DB.TunePageCache()
 				a.Media.speech.cleanup()
