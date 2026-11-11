@@ -10,8 +10,12 @@ export function WindowsOverlayBridge({ room, name, language }: { room: VoiceRoom
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
     let live = true;
-    void window.desktop?.getOverlay?.().then(value => { if (live) setEnabled(value.enabled); }).catch(() => {});
-    const remove = window.desktop?.onOverlayPreferences?.(value => setEnabled(value.enabled));
+    let receivedPreference = false;
+    const remove = window.desktop?.onOverlayPreferences?.(value => {
+      receivedPreference = true;
+      setEnabled(value.enabled);
+    });
+    void window.desktop?.getOverlay?.().then(value => { if (live && !receivedPreference) setEnabled(value.enabled); }).catch(() => {});
     return () => { live = false; remove?.(); };
   }, []);
   const speaking = useSyncExternalStore(enabled && room ? speakingStore.subscribeAll : noSubscription, enabled && room ? speakingStore.snapshot : emptySnapshot);

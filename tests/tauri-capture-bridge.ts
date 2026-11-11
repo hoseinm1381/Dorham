@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import path from 'node:path';
 
 export async function proveCaptureBridge(page: Page, fixture: string) {
-  const source = spawn(path.resolve(fixture), ['selected'], { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
+  const source = spawn(path.resolve(fixture), ['selected'], { stdio: ['ignore', 'pipe', 'inherit'] });
   try {
     await once(source.stdout, 'data', { signal: AbortSignal.timeout(10000) });
     const denied = await page.evaluate(async () => {

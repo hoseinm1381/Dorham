@@ -71,3 +71,30 @@ Use `scripts/tauri-windows-build.ps1 -Release` with the x64 MSVC and Windows SDK
 4. Compare Electron's original profile with the preserved migration backup. Changes created in Tauri belong to its separate profile. Record which settings and drafts are visible after downgrade and subsequent upgrade before approving the recovery procedure.
 
 An isolated installed rollback rehearsal is pending.
+
+## Overlay and capture follow-up
+
+The pre-fix development build saved the overlay preference and then stopped answering a desktop command in the Windows 11 regression. The preference event led to the renderer's first overlay state update, which invoked synchronous WebView2 window creation. The corrected implementation builds one hidden window on a worker and reconciles the current preference, participant state and call state on the UI thread before showing it. The native smoke test covers enabling during a call, joining with the preference enabled, rapid toggles, disabling during creation, leave and rejoin, the participant row, click-through styles, focus and the Windows lock and unlock messages. It checks the message handler with a targeted test message to the owned window.
+
+The earlier application-audio sample attributed 53.76% of one logical core to WebView2, 26.54% to the Dorham host, 2.03% to `CaptureVideo.exe`, and 1.36% to `ShareAudio.exe`. The capture helper still reads and scales the same BGRA frames at the selected quality. The host and trusted main WebView now reuse a read-only shared mapping for video. The existing binary response is the compatibility path when shared buffers are unavailable. Stop releases the mapping and aborts in-flight renderer requests. [WebView2 shared buffers](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/javascript/sharedbufferreceivedevent)
+
+The matched Windows 11 development runs used the same animated window and mesh backend with audio disabled. The picker IDs matched the owned HWND on both runs. CPU is percent of one logical core. Memory values sum the private bytes or working set for the publisher process tree. Active sharing shows the mean of two start/stop cycles per build. The other rows are individual observations.
+
+| Workload | CPU before → after | Private MiB before → after | Working set MiB before → after |
+|---|---:|---:|---:|
+| Signed-out idle | 3.6 → 2.3 | 220.6 → 223.4 | 416.0 → 418.1 |
+| Signed-in idle | 0.2 → 0.2 | 275.2 → 269.3 | 482.9 → 473.3 |
+| One-client voice | 5.4 → 2.1 | 283.5 → 284.7 | 523.3 → 517.6 |
+| Two-client listen-only voice | 3.8 → 2.9 | 267.8 → 266.7 | 518.3 → 513.0 |
+| Video-only sharing | 34.7 → 32.0 | 520.1 → 393.6 | 771.1 → 666.7 |
+| Voice after 30-second cooldown | 3.2 → 3.4 | 472.2 → 274.3 | 725.2 → 525.7 |
+
+At 502 × 315, the old build delivered 10.6 fps in both cycles and reported zero drops. The new build delivered 10.3 and 10.4 fps with zero and nine reported drops. Dorham host CPU averaged 17.5% before and 3.0% after. The renderer and encoder accounted for more CPU in the new samples. The new run transferred all 339 frames through the shared mapping with zero video HTTP body bytes, compared with 176.5 MB in the old run. Private memory after cooldown was 204.4 MiB above the pre-share voice sample before the change and 7.6 MiB above it afterward. These two cycles establish memory recovery for this workload. Long-run retention and screen sharing with audio on the new build remain open. The raw evidence and per-process timings are in `before/video-only-before.json`, `before/video-only-after.json`, and `video-only-summary.jsonl` under the benchmark directory.
+
+The separate unsigned x64 test installer is `artifacts/v1.3.0/overlay-perf/windows/Dorham-1.3.0-Windows-x64.exe`. Its SHA-256 is `3d5e27457fdcda54b96eca06630255e7dddcbb76ffa1299e08cf292f21d2e741`. It is 12,185,542 bytes versus 122,764,753 bytes for the public Electron installer. The extracted runtime is 15,107,584 bytes versus 378,286,696 bytes for Electron. All four packaged binaries matched the release build inventory. There are no new runtime dependencies.
+
+The benchmark files and native smoke logs are under `artifacts/v1.3.0/overlay-perf`. Audio testing was paused at the operator's request. The Windows 10 video-only check and full release-executable and installer checks in a separate Windows user or VM remain pending.
+
+The main WebView2 runs while the app is idle. The overlay and picker WebViews are created on demand. Screen video and audio polling start with a share and the capture helpers are absent from the post-share samples. The renderer collects call diagnostics only while the Diagnostics panel is open and visible. During a background call the main WebView and media connection stay active.
+
+The Windows 11 development build passed silent second-client video decoding over mesh and LiveKit, with picker cancellation and two share cycles on each transport. It also passed the binary-response video path and stopped its track on source closure. The release executable extracted from the installer validated the protected export from the public 1.2.8 runtime. The development executable then restored the same account, draft and settings and retained the login after restart.

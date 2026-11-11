@@ -32,7 +32,7 @@ export async function exportOwnedElectronProfile(
   const expected: Record<string, string> = { ...migratedValues };
   const previous = await _electron.launch({
     executablePath: path.resolve(previousExecutable),
-    args: [`--user-data-dir=${legacyProfile}`],
+    args: [`--user-data-dir=${legacyProfile}`, ...(process.env.DORHAM_TEST_SILENT === '1' ? ['--mute-audio'] : [])],
     timeout: 30000,
   });
   try {

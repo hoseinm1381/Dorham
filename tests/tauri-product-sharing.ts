@@ -5,10 +5,11 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { completeRecovery } from './browser/recovery-helper';
 
-export async function proveProductSharing(host: Page, server: string, ownerToken: string, fixture: string, transport: string) {
+export async function proveProductSharing(host: Page, server: string, ownerToken: string, fixture: string, transport: string, videoOnly = false) {
   const args = transport === 'livekit' ? ['--disable-features=WebRtcHideLocalIpsWithMdns'] : [];
+  if (videoOnly) args.push('--mute-audio');
   const viewer = await chromium.launch({ channel: 'msedge', headless: true, args });
-  const source = spawn(path.resolve(fixture), ['selected', 'tones'], { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
+  const source = spawn(path.resolve(fixture), videoOnly ? ['selected'] : ['selected', 'tones'], { stdio: ['ignore', 'pipe', 'inherit'] });
   try {
     await once(source.stdout, 'data', { signal: AbortSignal.timeout(10000) });
     const receiver = await viewer.newPage();
@@ -65,7 +66,7 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
     await host.getByRole('button', { name: 'Share screen', exact: true }).click();
     const dialog = host.getByRole('dialog', { name: 'Screen sharing', exact: true });
     const choose = async () => {
-      await dialog.getByRole('checkbox', { name: 'Share sound', exact: true }).check();
+      if (!videoOnly) await dialog.getByRole('checkbox', { name: 'Share sound', exact: true }).check();
       const opening = host.context().waitForEvent('page', { timeout: 15000 });
       await dialog.getByRole('button', { name: 'Choose screen', exact: true }).click();
       return opening;
@@ -77,14 +78,14 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
     for (let attempt = 0; attempt < 2; attempt++) {
       picker = await choose();
       await picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true }).click();
-      await picker.locator('#scope').selectOption('application');
+      if (!videoOnly) await picker.locator('#scope').selectOption('application');
       await picker.getByRole('button', { name: 'Share', exact: true }).click();
       await expect(dialog).toBeHidden({ timeout: 15000 });
-      await expect(host.getByText('Selected application sound', { exact: false })).toBeVisible();
+      if (!videoOnly) await expect(host.getByText('Selected application sound', { exact: false })).toBeVisible();
       await receiver.getByRole('button', { name: 'Watch stream', exact: true }).click();
       const video = receiver.locator('.screen video');
       await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.getVideoPlaybackQuality().totalVideoFrames), { timeout: 20000 }).toBeGreaterThan(5);
-      await expect.poll(() => receiver.evaluate(async () => {
+      if (!videoOnly) await expect.poll(() => receiver.evaluate(async () => {
         const tracks = (window as unknown as { __ownedDecodedAudio: Set<MediaStreamTrack> }).__ownedDecodedAudio;
         const track = [...tracks].filter(track => track.readyState === 'live' && !track.muted).at(-1);
         if (!track) return -Infinity;
@@ -104,12 +105,12 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
           await context.close();
         }
       }), { timeout: 20000 }).toBeGreaterThan(-65);
-      console.log(JSON.stringify({ transport, attempt: attempt + 1, receiverDecodedVideo: true, receiverDecodedSelectedAppTone: true }));
+      console.log(JSON.stringify({ transport, attempt: attempt + 1, receiverDecodedVideo: true, ...(!videoOnly && { receiverDecodedSelectedAppTone: true }) }));
       await host.getByRole('button', { name: 'Stop sharing', exact: true }).click();
       await expect(video).toHaveCount(0);
       if (attempt === 0) await host.getByRole('button', { name: 'Share screen', exact: true }).click();
     }
-    console.log(JSON.stringify({ transport, realOwnedWindow: true, receiverDecodedVideo: true, receiverDecodedSelectedAppTone: true, cancel: true, stopRestart: true, permissionDeniedListenOnly: true }));
+    console.log(JSON.stringify({ transport, realOwnedWindow: true, receiverDecodedVideo: true, ...(!videoOnly && { receiverDecodedSelectedAppTone: true }), cancel: true, stopRestart: true, permissionDeniedListenOnly: true }));
   } finally {
     if (source.exitCode === null) source.kill();
     await viewer.close();

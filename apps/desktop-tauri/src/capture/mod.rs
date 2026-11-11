@@ -160,6 +160,7 @@ pub fn stop_all(app: &AppHandle) {
     if let Ok(mut capture) = app.state::<Host>().capture.lock() {
         capture.stop();
     }
+    assets::clear_shared_video(None);
     close_picker(app);
 }
 
@@ -496,6 +497,7 @@ pub fn capture_stop(window: WebviewWindow, id: u64) -> Result<(), String> {
         .map_err(|_| "Screen capture unavailable")?;
     if capture.video.as_ref().is_some_and(|video| video.id == id) {
         capture.stop();
+        assets::clear_shared_video(Some(id));
     }
     Ok(())
 }

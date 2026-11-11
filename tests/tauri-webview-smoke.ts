@@ -11,15 +11,18 @@ import { createGoApp } from './go-harness';
 import { proveCaptureBridge } from './tauri-capture-bridge';
 import { proveAudioScopes } from './tauri-audio-scope';
 import { proveProductSharing } from './tauri-product-sharing';
+import { proveOverlay } from './tauri-overlay';
 import { exportOwnedElectronProfile } from './tauri-legacy-profile';
 
-const executable = path.resolve('apps/desktop-tauri/target/debug/Dorham.exe');
+const executable = path.resolve(process.env.DORHAM_TAURI_SMOKE_EXECUTABLE || 'apps/desktop-tauri/target/debug/Dorham.exe');
 const owned = await mkdtemp(path.join(os.tmpdir(), 'dorham-tauri-smoke-'));
 const profile = path.join(owned, 'profile');
 const origin = 'https://localhost';
 const legacy = process.env.DORHAM_LEGACY_EXECUTABLE;
 const validator = path.resolve(process.env.DORHAM_TEST_MIGRATION_VALIDATOR || executable);
 const product = process.env.DORHAM_PRODUCT_CAPTURE_FIXTURE;
+const overlay = process.env.DORHAM_TEST_OVERLAY === '1';
+const silent = process.env.DORHAM_TEST_SILENT === '1';
 const localIce = product && process.env.MEDIA_TRANSPORT === 'livekit' ? ' --disable-features=WebRtcHideLocalIpsWithMdns' : '';
 const fixtureConfig = config({
   dataDir: path.join(owned, 'dorham-server'), databaseUrl: '',
@@ -57,8 +60,8 @@ async function startDorham() {
     cwd: path.dirname(executable), windowsHide: true, stdio: 'inherit',
     env: {
       ...process.env, DORHAM_TEST_PROFILE_ROOT: profile,
-      ...(product ? { DORHAM_TEST_DENY_MICROPHONE: '1' } : {}),
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1${localIce}`,
+      ...(product || overlay ? { DORHAM_TEST_DENY_MICROPHONE: '1' } : {}),
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1${localIce}${silent ? ' --mute-audio' : ''}`,
     },
   });
   return { child, endpoint: `http://127.0.0.1:${port}` };
@@ -71,11 +74,12 @@ async function connectDorham({ child, endpoint }: Awaited<ReturnType<typeof star
   return chromium.connectOverCDP(endpoint, { noDefaults: true, timeout: 45000 });
 }
 async function stopDorham({ child }: Awaited<ReturnType<typeof startDorham>>, browser?: Browser) {
+  if (child.exitCode === null && child.signalCode === null) {
+    const stopped = new Promise(resolve => child.once('exit', resolve));
+    child.kill();
+    await stopped;
+  }
   await browser?.close().catch(() => {});
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  const stopped = new Promise(resolve => child.once('exit', resolve));
-  child.kill();
-  await stopped;
 }
 await mkdir(profile);
 let migration: Awaited<ReturnType<typeof exportOwnedElectronProfile>> | undefined;
@@ -97,7 +101,7 @@ try {
   browser = await connectDorham(app);
   const context = browser.contexts()[0];
   const page = context.pages()[0] ?? await context.waitForEvent('page', { timeout: 15000 });
-  await expect(page).toHaveURL(origin + '/index.html');
+  await expect(page).toHaveURL(origin + '/index.html', { timeout: 25000 });
   if (legacy) await expect(page.locator('.connection-light.connected')).toBeVisible({ timeout: 20000 });
   else await expect(page.getByRole('heading', { name: 'Welcome back.' })).toBeVisible({ timeout: 20000 });
   const identity = await page.evaluate(async () => ({
@@ -128,9 +132,22 @@ try {
   await expect(page.locator('.connection-light.connected')).toBeVisible({ timeout: 20000 });
   await expect(page.getByLabel('Username', { exact: true })).toHaveCount(0);
   console.log(JSON.stringify({ version: identity.app?.version, origin, secureContext: true, httpLogin: true, socketConnected: true, loginRetainedOnReload: true }));
-  if (process.env.DORHAM_CAPTURE_WINDOW_FIXTURE) await proveCaptureBridge(page, process.env.DORHAM_CAPTURE_WINDOW_FIXTURE);
+  if (overlay) await proveOverlay(page, backend.url, ownerToken, displayName, app.child.pid!);
+  if (process.env.DORHAM_CAPTURE_WINDOW_FIXTURE) {
+    const compatibility = process.env.DORHAM_TEST_VIDEO_COMPATIBILITY === '1';
+    if (compatibility) {
+      await page.addInitScript(() => {
+        const fetchFrame = window.fetch;
+        window.fetch = (input, init) => fetchFrame(typeof input === 'string' && input.startsWith('/__dorham_media/video/') ? input.replace(/\?shared=1$/, '') : input, init);
+      });
+      await page.reload();
+      await expect(page.locator('.connection-light.connected')).toBeVisible({ timeout: 20000 });
+    }
+    await proveCaptureBridge(page, process.env.DORHAM_CAPTURE_WINDOW_FIXTURE);
+    if (compatibility) console.log(JSON.stringify({ videoBinaryResponseFallback: true }));
+  }
   if (process.env.DORHAM_CAPTURE_AUDIO_FIXTURE) await proveAudioScopes(page, process.env.DORHAM_CAPTURE_AUDIO_FIXTURE);
-  if (product) await proveProductSharing(page, backend.url, ownerToken, product, fixtureConfig.mediaTransport);
+  if (product) await proveProductSharing(page, backend.url, ownerToken, product, fixtureConfig.mediaTransport, silent);
   if (migration) {
     await stopDorham(app, browser);
     browser = undefined;

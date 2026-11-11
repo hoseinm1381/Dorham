@@ -111,8 +111,20 @@ fn render(window: &WebviewWindow, packet: Value, position: OverlayPosition) -> t
     window.show()
 }
 
-pub fn sync(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub fn request_sync(app: &AppHandle) -> tauri::Result<()> {
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Err(error) = reconcile(&handle) {
+            eprintln!("Could not update voice overlay: {error}");
+        }
+    })
+}
+
+fn reconcile(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let host = app.state::<Host>();
+    if host.overlay_creating.load(Ordering::Acquire) {
+        return Ok(());
+    }
     let preferences = host
         .settings
         .lock()
@@ -135,16 +147,44 @@ pub fn sync(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     });
     let Some(packet) = packet else {
         if let Some(overlay) = app.get_webview_window(WINDOW) {
+            host.overlay_ready.store(false, Ordering::Release);
+            overlay.hide()?;
             overlay.destroy()?;
         }
         return Ok(());
     };
     if let Some(window) = app.get_webview_window(WINDOW) {
-        if window.url().is_ok_and(|url| url.as_str() == DOCUMENT) {
+        if host.overlay_ready.load(Ordering::Acquire) {
             render(&window, packet, preferences.position)?;
         }
         return Ok(());
     }
+    // WebView2 must be able to dispatch messages on the UI thread during build.
+    // Keep the new window hidden until creation finishes and reconcile current state.
+    host.overlay_creating.store(true, Ordering::Release);
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let created = create(&handle).map_err(|error| error.to_string());
+        let completion = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            let host = completion.state::<Host>();
+            host.overlay_creating.store(false, Ordering::Release);
+            if let Err(error) = created {
+                host.overlay_ready.store(false, Ordering::Release);
+                if let Some(window) = completion.get_webview_window(WINDOW) {
+                    let _ = window.destroy();
+                }
+                eprintln!("Could not create voice overlay: {error}");
+            } else if let Err(error) = reconcile(&completion) {
+                eprintln!("Could not update voice overlay: {error}");
+            }
+        });
+    });
+    Ok(())
+}
+
+fn create(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let host = app.state::<Host>();
     let app_handle = app.clone();
     let window = WebviewWindowBuilder::new(
         app,
@@ -170,7 +210,8 @@ pub fn sync(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         if page.url().as_str() == DOCUMENT
             && page.event() == tauri::webview::PageLoadEvent::Finished
         {
-            let _ = sync(&app_handle);
+            app_handle.state::<Host>().overlay_ready.store(true, Ordering::Release);
+            let _ = request_sync(&app_handle);
         }
     })
     .build()?;

@@ -45,6 +45,8 @@ struct Host {
     updater: updater::Updater,
     browser_process: AtomicU32,
     overlay: Mutex<Option<Value>>,
+    overlay_creating: AtomicBool,
+    overlay_ready: AtomicBool,
     persian: AtomicBool,
     in_call: AtomicBool,
     locked: AtomicBool,
@@ -62,7 +64,7 @@ fn sync_call_resources(app: &AppHandle) {
     if !active {
         capture::stop_all(app);
     }
-    let _ = overlay::sync(app);
+    let _ = overlay::request_sync(app);
     render_tray(app);
 }
 
@@ -152,6 +154,9 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
             Ok(Value::Null)
         }
         DesktopRequest::UpdateOverlay(value) => {
+            if !host.in_call.load(Ordering::Acquire) {
+                return Ok(Value::Null);
+            }
             let mut current = host
                 .overlay
                 .lock()
@@ -160,7 +165,7 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
             if next != *current {
                 *current = next;
                 drop(current);
-                overlay::sync(window.app_handle()).map_err(|_| "Could not update voice overlay")?;
+                overlay::request_sync(window.app_handle()).map_err(|_| "Could not update voice overlay")?;
             }
             Ok(Value::Null)
         }
@@ -194,7 +199,7 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
                         Ok(())
                     })?;
                     drop(store);
-                    overlay::sync(window.app_handle())
+                    overlay::request_sync(window.app_handle())
                         .map_err(|_| "Could not update voice overlay")?;
                     window
                         .emit_to(MAIN, "desktop-overlay-preferences", preferences)
@@ -307,6 +312,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         updater: updater::Updater::new(profile.join("updates"))?,
         browser_process: AtomicU32::new(0),
         overlay: Mutex::new(None),
+        overlay_creating: AtomicBool::new(false),
+        overlay_ready: AtomicBool::new(false),
         persian: AtomicBool::new(false),
         in_call: AtomicBool::new(false),
         locked: AtomicBool::new(false),
