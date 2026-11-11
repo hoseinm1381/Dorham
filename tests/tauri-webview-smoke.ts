@@ -223,7 +223,7 @@ try {
       await page.reload();
       await expect(page.locator('.connection-light.connected')).toBeVisible({ timeout: 20000 });
     }
-    await proveCaptureBridge(page, process.env.DORHAM_CAPTURE_WINDOW_FIXTURE);
+    await proveCaptureBridge(page, process.env.DORHAM_CAPTURE_WINDOW_FIXTURE, app.child.pid!);
     if (compatibility) console.log(JSON.stringify({ videoBinaryResponseFallback: true }));
   }
   if (process.env.DORHAM_CAPTURE_AUDIO_FIXTURE) await proveAudioScopes(page, process.env.DORHAM_CAPTURE_AUDIO_FIXTURE);

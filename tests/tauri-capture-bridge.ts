@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
@@ -6,16 +6,43 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
-export async function proveCaptureBridge(page: Page, fixture: string) {
+export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid: number) {
   const source = spawn(path.resolve(fixture), ['selected'], { stdio: ['ignore', 'pipe', 'inherit'] });
   const previews = process.env.DORHAM_TEST_PICKER_PREVIEWS === '1';
+  const second = previews ? spawn(path.resolve(fixture), ['unrelated'], { stdio: ['ignore', 'pipe', 'inherit'] }) : undefined;
+  let sourceHandle = '';
+  let secondHandle = '';
   const sourceWindow = async (action: 'minimize' | 'inspect') => {
-    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.resolve('tests/fixtures/tauri-picker-source.ps1'), String(source.pid), action], { windowsHide: true });
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.resolve('tests/fixtures/tauri-picker-source.ps1'), String(source.pid), sourceHandle, action], { windowsHide: true });
     return JSON.parse(stdout) as { minimized: boolean };
   };
+  const previewHelpers = async () => {
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `@(Get-CimInstance Win32_Process -Filter "Name='CaptureVideo.exe' AND ParentProcessId=${dorhamPid}" | Where-Object CommandLine -match ' previews ').Count`,
+    ], { windowsHide: true });
+    return Number(stdout.trim());
+  };
+  const fingerprint = (preview: Locator) => preview.evaluate(element => {
+    const image = element.querySelector('img');
+    if (!image?.complete || !image.naturalWidth) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return context.getImageData(0, 0, canvas.width, canvas.height).data.reduce((hash, value) => Math.imul(hash ^ value, 16777619), 0);
+  });
   try {
-    await once(source.stdout, 'data', { signal: AbortSignal.timeout(10000) });
-    if (previews) expect(await sourceWindow('minimize')).toEqual({ minimized: true });
+    const [ready, secondReady] = await Promise.all((second ? [source, second] : [source]).map(child =>
+      once(child.stdout, 'data', { signal: AbortSignal.timeout(10000) }),
+    ));
+    if (previews) {
+      sourceHandle = String(ready[0]).match(/^\d+/m)?.[0] ?? '';
+      secondHandle = String(secondReady?.[0]).match(/^\d+/m)?.[0] ?? '';
+      expect(sourceHandle).not.toBe('');
+      expect(secondHandle).not.toBe('');
+      expect(await sourceWindow('minimize')).toEqual({ minimized: true });
+    }
     const denied = await page.evaluate(async () => {
       try { await window.desktop!.captureNativeVideo!({ width: 400, height: 220, fps: 15 }, false); return false; }
       catch { return true; }
@@ -63,37 +90,52 @@ export async function proveCaptureBridge(page: Page, fixture: string) {
     void capture.catch(() => {});
     const picker = await pickerEvent;
     await expect(picker).toHaveURL('https://localhost/capture-picker.html');
-    const option = picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true });
+    let option = picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true });
     if (previews) {
       const search = picker.getByRole('searchbox', { name: 'Search sources' });
-      await search.fill('Dorham owned capture fixture selected');
-      await expect(option.locator('.preview')).toHaveText('Window minimized');
-      await option.click();
+      await search.fill('Dorham owned capture fixture');
+      const minimized = option.filter({ hasText: 'Window minimized' });
+      await expect(minimized).toBeVisible();
+      await minimized.click();
       await picker.getByRole('button', { name: 'Restore window', exact: true }).click();
       await expect(picker.getByRole('button', { name: 'Share', exact: true })).toBeEnabled();
       expect(await sourceWindow('inspect')).toEqual({ minimized: false });
-      await expect.poll(() => option.locator('.preview').evaluate(preview => {
-        const image = preview.querySelector('img');
-        if (!image?.naturalWidth) return false;
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = 1;
-        const context = canvas.getContext('2d')!;
-        context.drawImage(image, image.naturalWidth / 2, image.naturalHeight / 2, 1, 1, 0, 0, 1, 1);
-        const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
-        return red > 90 && green < 75 && blue > 120;
-      }), { timeout: 15000 }).toBe(true);
+      option = picker.locator(`button:has([data-preview="window:${sourceHandle}:${source.pid}"])`);
+      await expect.poll(() => fingerprint(option.locator('.preview')), { timeout: 15000 }).not.toBeNull();
+      const other = picker.locator(`button:has([data-preview="window:${secondHandle}:${second?.pid}"])`);
+      await expect.poll(() => fingerprint(other.locator('.preview')), { timeout: 10000 }).not.toBeNull();
+      let lastFrame = await fingerprint(option.locator('.preview'));
+      let changes = 0;
+      await expect.poll(async () => {
+        const pixels = await fingerprint(option.locator('.preview'));
+        if (pixels !== null) {
+          if (lastFrame !== null && pixels !== lastFrame) changes++;
+          lastFrame = pixels;
+        }
+        return changes;
+      }, { timeout: 12000, intervals: [120, 200, 300] }).toBeGreaterThanOrEqual(3);
+      await expect.poll(previewHelpers).toBe(1);
       await picker.getByRole('tab', { name: 'Screens', exact: true }).click();
       await search.clear();
       const screen = picker.getByRole('option', { name: /^Screen / }).first();
       await expect.poll(() => screen.locator('.preview').evaluate(preview => preview.querySelector('img')?.naturalWidth || 0), { timeout: 12000 }).toBeGreaterThan(0);
+      const screenBefore = await fingerprint(screen.locator('.preview'));
+      await picker.evaluate("document.querySelector('main').style.backgroundColor = '#35785c'");
+      await expect.poll(async () => {
+        const current = await fingerprint(screen.locator('.preview'));
+        return current !== null && current !== screenBefore;
+      }, { timeout: 10000 }).toBe(true);
+      await search.fill('No matching fixture source');
+      await expect.poll(previewHelpers).toBe(0);
       await search.fill('Dorham owned capture fixture selected');
       await picker.getByRole('tab', { name: 'Applications', exact: true }).click();
       await expect(option.locator('.preview img')).toBeVisible();
-      console.log(JSON.stringify({ minimizedApplicationRestored: true, applicationPreviewPixels: true, screenPreviewDecoded: true }));
+      console.log(JSON.stringify({ minimizedApplicationRestored: true, simultaneousApplicationPreviews: 2, applicationFrameChanges: changes, changingScreenPreview: true, stoppedWhenNoSourcesVisible: true }));
     }
     await option.click();
     await picker.getByRole('button', { name: 'Share', exact: true }).click();
     const captured = await capture;
+    if (previews) await expect.poll(previewHelpers).toBe(0);
     expect(captured.selection).toMatchObject({
       sourceName: 'Dorham owned capture fixture selected', audioScope: 'none', surface: 'window',
     });
@@ -113,6 +155,7 @@ export async function proveCaptureBridge(page: Page, fixture: string) {
     console.log(JSON.stringify({ webviewCaptureBridge: true, decodedWebRTCVideo: true, selectedScope: 'window', deniedOutsideCall: true, sourceClosureStopsTrack: true }));
   } finally {
     if (source.exitCode === null) source.kill();
+    if (second?.exitCode === null) second.kill();
     await page.evaluate(() => { window.desktop?.setInCall(false); }).catch(() => {});
   }
 }

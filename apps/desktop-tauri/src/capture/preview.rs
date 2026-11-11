@@ -1,37 +1,113 @@
-use super::{Settings, Source, read_frame, start_video_helper};
+use super::{Kind, NO_CONSOLE, Settings, Source, read_frame};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use std::collections::HashMap;
+use std::io::{self, Read};
+use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const SIZE: Settings = Settings {
-    width: 240,
-    height: 135,
-    fps: 10,
+    width: 192,
+    height: 108,
+    fps: 4,
 };
 
-pub fn capture(binary: &Path, source: &Source, stopped: &AtomicBool) -> Option<String> {
-    if stopped.load(Ordering::Acquire) {
-        return None;
-    }
-    let mut helper = start_video_helper(binary, source, &SIZE, true).ok()?;
-    let mut stdout = helper.stdout.take().expect("piped preview output");
-    let reader = thread::spawn(move || read_frame(&mut stdout, &SIZE));
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while let Ok(None) = helper.try_wait() {
-        if stopped.load(Ordering::Acquire) || Instant::now() >= deadline {
-            break;
+pub const MAX_SOURCES: usize = 6;
+
+#[derive(Default)]
+struct Slot {
+    frame: Option<(Vec<u8>, u32, u32)>,
+    changed: bool,
+    reported_unavailable: bool,
+}
+
+pub struct Batch {
+    ids: Vec<String>,
+    revision: u64,
+    child: Child,
+    latest: Arc<Mutex<Vec<Slot>>>,
+    started: Instant,
+}
+
+impl Batch {
+    pub fn start(binary: &Path, sources: &[&Source], revision: u64) -> io::Result<Self> {
+        let mut command = Command::new(binary);
+        command.arg("previews").arg(std::process::id().to_string());
+        for source in sources {
+            command.args([
+                if source.kind == Kind::Window { "window" } else { "monitor" }.into(),
+                source.handle.to_string(),
+                source.pid.to_string(),
+            ]);
         }
-        thread::sleep(Duration::from_millis(20));
+        let mut child = command
+            .creation_flags(NO_CONSOLE)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let stdout = child.stdout.take().expect("piped preview output");
+        let latest = Arc::new(Mutex::new((0..sources.len()).map(|_| Slot::default()).collect()));
+        let output = latest.clone();
+        thread::spawn(move || {
+            let _ = read_previews(stdout, output);
+        });
+        Ok(Self {
+            ids: sources.iter().map(|source| source.id.clone()).collect(),
+            revision,
+            child,
+            latest,
+            started: Instant::now(),
+        })
     }
-    let _ = helper.kill();
-    let _ = helper.wait();
-    let (frame, width, height) = reader.join().ok()?.ok()?;
-    if stopped.load(Ordering::Acquire) {
-        return None;
+
+    pub fn matches(&self, sources: &[&Source], revision: u64) -> bool {
+        self.revision == revision
+            && self.ids.iter().map(String::as_str)
+                .eq(sources.iter().map(|source| source.id.as_str()))
     }
-    Some(bitmap_url(&frame[8..], width, height))
+
+    pub fn frames(&self) -> HashMap<String, Option<String>> {
+        let mut result = HashMap::new();
+        let Ok(mut latest) = self.latest.lock() else { return result };
+        for (id, slot) in self.ids.iter().zip(latest.iter_mut()) {
+            if let Some((frame, width, height)) = slot.frame.as_ref().filter(|_| slot.changed) {
+                result.insert(id.clone(), Some(bitmap_url(&frame[8..], *width, *height)));
+                slot.changed = false;
+            } else if slot.frame.is_none()
+                && !slot.reported_unavailable
+                && self.started.elapsed() >= Duration::from_secs(2)
+            {
+                result.insert(id.clone(), None);
+                slot.reported_unavailable = true;
+            }
+        }
+        result
+    }
+}
+
+impl Drop for Batch {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn read_previews(mut pipe: impl Read, latest: Arc<Mutex<Vec<Slot>>>) -> io::Result<()> {
+    let mut header = [0; 4];
+    loop {
+        pipe.read_exact(&mut header)?;
+        let frame = read_frame(&mut pipe, &SIZE)?;
+        let Ok(mut slots) = latest.lock() else { return Ok(()) };
+        let Some(slot) = slots.get_mut(u32::from_le_bytes(header) as usize) else { return Ok(()) };
+        if slot.frame.as_ref() != Some(&frame) {
+            slot.frame = Some(frame);
+            slot.changed = true;
+        }
+    }
 }
 
 fn bitmap_url(pixels: &[u8], width: u32, height: u32) -> String {

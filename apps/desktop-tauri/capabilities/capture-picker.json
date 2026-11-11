@@ -4,5 +4,5 @@
   "windows": ["capture-picker"],
   "local": false,
   "remote": { "urls": ["https://localhost/capture-picker.html"] },
-  "permissions": ["allow-capture-picker-model", "allow-capture-picker-thumbnail", "allow-capture-picker-restore", "allow-capture-picker-select"]
+  "permissions": ["allow-capture-picker-model", "allow-capture-picker-previews", "allow-capture-picker-restore", "allow-capture-picker-select"]
 }

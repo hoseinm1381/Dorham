@@ -1,25 +1,32 @@
-param([int]$ProcessId, [ValidateSet('minimize','inspect')][string]$Action)
+param([int]$ProcessId, [long]$WindowHandle, [ValidateSet('minimize','inspect')][string]$Action)
 
 $ErrorActionPreference = 'Stop'
-$process = Get-Process -Id $ProcessId
-if ($process.MainWindowTitle -cne 'Dorham owned capture fixture selected' -or !$process.MainWindowHandle) {
-  throw 'Expected the owned capture fixture window'
-}
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class PickerFixtureWindow {
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int show);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, StringBuilder text, int capacity);
 }
 '@
-if ($Action -eq 'minimize' -and ![PickerFixtureWindow]::ShowWindowAsync($process.MainWindowHandle, 7)) {
+$window = [IntPtr]::new($WindowHandle)
+$owner = [uint32]0
+$title = [Text.StringBuilder]::new(120)
+[void][PickerFixtureWindow]::GetWindowThreadProcessId($window, [ref]$owner)
+[void][PickerFixtureWindow]::GetWindowText($window, $title, $title.Capacity)
+if ($owner -ne $ProcessId -or $title.ToString() -cne 'Dorham owned capture fixture selected') {
+  throw 'Expected the owned capture fixture window'
+}
+if ($Action -eq 'minimize' -and ![PickerFixtureWindow]::ShowWindowAsync($window, 7)) {
   throw 'Could not minimize the owned capture fixture window'
 }
 if ($Action -eq 'minimize') {
   $deadline = [DateTime]::UtcNow.AddSeconds(2)
-  while (![PickerFixtureWindow]::IsIconic($process.MainWindowHandle) -and [DateTime]::UtcNow -lt $deadline) {
+  while (![PickerFixtureWindow]::IsIconic($window) -and [DateTime]::UtcNow -lt $deadline) {
     Start-Sleep -Milliseconds 25
   }
 }
-@{minimized = [PickerFixtureWindow]::IsIconic($process.MainWindowHandle)} | ConvertTo-Json -Compress
+@{minimized = [PickerFixtureWindow]::IsIconic($window)} | ConvertTo-Json -Compress

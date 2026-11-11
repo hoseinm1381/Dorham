@@ -6,6 +6,7 @@ use crate::{Host, assets, overlay, trusted_main_url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sources::{Kind, Source};
+use std::collections::HashMap;
 use std::io::{self, Read};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -29,7 +30,7 @@ const BRIDGE: &str = r#"
 if (location.href === "https://localhost/capture-picker.html" && window.top === window) {
   Object.defineProperty(window, "capturePicker", { value: Object.freeze({
     model: () => window.__TAURI_INTERNALS__.invoke("capture_picker_model"),
-    thumbnail: id => window.__TAURI_INTERNALS__.invoke("capture_picker_thumbnail", { id }),
+    previewFrames: (ids, revision) => window.__TAURI_INTERNALS__.invoke("capture_picker_previews", { ids, revision }),
     restore: id => window.__TAURI_INTERNALS__.invoke("capture_picker_restore", { id }),
     choose: choice => window.__TAURI_INTERNALS__.invoke("capture_picker_select", { choice })
   }) });
@@ -68,14 +69,7 @@ struct Picker {
     sources: Vec<Source>,
     audio: bool,
     result: Option<mpsc::SyncSender<Option<Selection>>>,
-    preview_stopped: Arc<AtomicBool>,
-    preview_pending: bool,
-}
-
-impl Drop for Picker {
-    fn drop(&mut self) {
-        self.preview_stopped.store(true, Ordering::Release);
-    }
+    previews: Option<preview::Batch>,
 }
 
 type LatestFrame = Arc<Mutex<Option<Vec<u8>>>>;
@@ -286,54 +280,55 @@ pub fn capture_picker_model(window: WebviewWindow) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub async fn capture_picker_thumbnail(
+pub fn capture_picker_previews(
     window: WebviewWindow,
-    id: String,
-) -> Result<Option<String>, String> {
+    ids: Vec<String>,
+    revision: u64,
+) -> Result<HashMap<String, Option<String>>, String> {
     picker_window(&window)?;
+    if ids.len() > preview::MAX_SOURCES {
+        return Err("Too many screen previews".into());
+    }
     let host = window.state::<Host>();
-    let (source, binary, generation, stopped) = {
-        let mut capture = host
-            .capture
-            .lock()
-            .map_err(|_| "Screen capture unavailable")?;
-        let binary = capture.binary.clone();
-        let picker = capture
-            .picker
-            .as_mut()
-            .filter(|picker| allowed(&host) && picker.result.is_some() && !picker.preview_pending)
-            .ok_or("Screen preview unavailable")?;
-        let source = picker
-            .sources
-            .iter()
-            .find(|source| source.id == id)
-            .ok_or("Unknown capture source")?
-            .clone();
-        if source.minimized {
-            return Ok(None);
-        }
-        picker.preview_pending = true;
-        (source, binary, picker.generation, picker.preview_stopped.clone())
-    };
-    let thumbnail = tauri::async_runtime::spawn_blocking(move || {
-        preview::capture(&binary, &source, &stopped)
-    })
-    .await
-    .ok()
-    .flatten();
     let mut capture = host
         .capture
         .lock()
         .map_err(|_| "Screen capture unavailable")?;
-    let Some(picker) = capture
+    let binary = capture.binary.clone();
+    let picker = capture
         .picker
         .as_mut()
-        .filter(|picker| picker.generation == generation)
-    else {
-        return Ok(None);
-    };
-    picker.preview_pending = false;
-    Ok(thumbnail.filter(|_| allowed(&host) && picker.result.is_some()))
+        .filter(|picker| allowed(&host) && picker.result.is_some())
+        .ok_or("Screen preview unavailable")?;
+    let mut frames = HashMap::new();
+    let mut sources = Vec::new();
+    for id in ids {
+        let source = picker
+            .sources
+            .iter()
+            .find(|source| source.id == id)
+            .ok_or("Unknown capture source")?;
+        if source.minimized || source.is_minimized() {
+            frames.insert(id, None);
+        } else if !sources.iter().any(|previous: &&Source| previous.id == id) {
+            sources.push(source);
+        }
+    }
+    if sources.is_empty() {
+        picker.previews = None;
+        return Ok(frames);
+    }
+    if !picker.previews.as_ref().is_some_and(|batch| batch.matches(&sources, revision)) {
+        picker.previews = None;
+        picker.previews = Some(
+            preview::Batch::start(&binary, &sources, revision)
+                .map_err(|_| "Windows could not start the screen previews")?,
+        );
+    }
+    if let Some(batch) = &picker.previews {
+        frames.extend(batch.frames());
+    }
+    Ok(frames)
 }
 
 #[tauri::command]
@@ -419,7 +414,7 @@ pub fn capture_picker_select(window: WebviewWindow, choice: Choice) -> Result<()
         .picker
         .as_mut()
         .ok_or("Screen sharing was cancelled")?;
-    picker.preview_stopped.store(true, Ordering::Release);
+    picker.previews = None;
     let result = picker.result.take().ok_or("Screen sharing was cancelled")?;
     result
         .try_send(selection)
@@ -463,8 +458,7 @@ pub async fn capture_video(
             sources: Vec::new(),
             audio,
             result: Some(sender),
-            preview_stopped: Arc::new(AtomicBool::new(false)),
-            preview_pending: false,
+            previews: None,
         });
         generation
     };
@@ -516,7 +510,7 @@ pub async fn capture_video(
         return Ok(None);
     }
     capture.picker.take();
-    let mut helper = start_video_helper(&capture.binary, &selected.source, &settings, false)
+    let mut helper = start_video_helper(&capture.binary, &selected.source, &settings)
         .map_err(|_| "Windows could not start screen capture")?;
     let stdout = helper.stdout.take().expect("piped capture output");
     let latest = Arc::new(Mutex::new(None));
@@ -548,10 +542,8 @@ fn start_video_helper(
     binary: &Path,
     source: &Source,
     settings: &Settings,
-    thumbnail: bool,
 ) -> io::Result<Child> {
-    let mut command = Command::new(binary);
-    command
+    Command::new(binary)
         .args([
             (if source.kind == Kind::Window {
                 "window"
@@ -569,11 +561,8 @@ fn start_video_helper(
         .creation_flags(NO_CONSOLE)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    if thumbnail {
-        command.arg("thumbnail");
-    }
-    command.spawn()
+        .stderr(Stdio::null())
+        .spawn()
 }
 
 fn read_frames(mut source: impl Read, latest: LatestFrame, settings: Settings) -> io::Result<()> {
