@@ -68,6 +68,20 @@ export async function proveOverlay(main: Page, server: string, token: string, di
   // The preference event triggers a renderer overlay update on a short timer.
   await expect.poll(async () => { await responsive(); return overlays().length; }, { timeout: 15000 }).toBe(1);
   await assertShown();
+  const pickerOpened = main.context().waitForEvent('page', { timeout: 15000 });
+  const share = main.evaluate(async () => {
+    try {
+      await window.desktop!.captureNativeVideo!({ width: 400, height: 220, fps: 15 }, false);
+      return 'shared';
+    } catch (error) { return (error as Error).name; }
+  });
+  void share.catch(() => {});
+  const picker = await pickerOpened;
+  await expect(picker).toHaveURL('https://localhost/capture-picker.html');
+  await expect.poll(async () => (await native()).visible, { timeout: 6000 }).toBe(false);
+  await picker.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(share).resolves.toBe('NotAllowedError');
+  await assertShown();
   await configure([false]);
   await assertClosed();
   await configure([true, false, true, false, true, false]);
@@ -90,5 +104,5 @@ export async function proveOverlay(main: Page, server: string, token: string, di
   await leave();
   await assertClosed();
   await configure([false]);
-  console.log(JSON.stringify({ overlayDuringCall: true, preferenceEvent: true, rapidToggle: true, rejoinEnabled: true, sameParticipant: true, desktopCommandsResponsive: true, clickThroughStyles: true, nonActivating: true, windowsSessionMessage: true }));
+  console.log(JSON.stringify({ overlayDuringCall: true, hiddenDuringPicker: true, restoredAfterPicker: true, preferenceEvent: true, rapidToggle: true, rejoinEnabled: true, sameParticipant: true, desktopCommandsResponsive: true, clickThroughStyles: true, nonActivating: true, windowsSessionMessage: true }));
 }

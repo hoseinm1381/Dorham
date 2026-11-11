@@ -7,6 +7,9 @@ const translations = { 'Choose what to share': 'انتخاب منبع اشترا
 const text = value => model?.language === 'fa-IR' ? translations[value] || value : value;
 translations['Loading preview…'] = 'در حال بارگیری پیش‌نمایش…';
 translations['Preview unavailable'] = 'پیش‌نمایش در دسترس نیست';
+translations['Window minimized'] = 'پنجره کوچک شده است';
+translations['Restore window'] = 'بازگرداندن پنجره';
+translations['Open the window from the taskbar, then select Refresh.'] = 'پنجره را از نوار وظیفه باز کنید، سپس فهرست را تازه‌سازی کنید.';
 const previewObserver = new window.IntersectionObserver(entries => {
   for (const { target, isIntersecting } of entries) target.toggleAttribute('data-visible', isIntersecting);
   void loadPreview();
@@ -53,6 +56,12 @@ function audioScope() {
   if (scope.value === 'application' && source?.kind !== 'window') scope.value = model.audioRequested && model.audioSupported ? 'system' : 'none';
   byId('scope-description').textContent = text(scope.value === 'application' ? 'Only sound from the selected application is shared.' : scope.value === 'system' ? 'Other apps may be audible. Dorham call audio is excluded.' : 'Video only. No application or computer sound is shared.');
 }
+function updateShareButton() {
+  const source = model.sources.find(item => item.id === selected);
+  const button = byId('share');
+  button.textContent = text(source?.minimized ? 'Restore window' : 'Share');
+  button.disabled = !source || busy;
+}
 function render() {
   const list = byId('sources'), query = byId('search').value.trim().toLocaleLowerCase();
   previewObserver.disconnect();
@@ -60,8 +69,9 @@ function render() {
   for (const source of model.sources.filter(item => item.kind === tab && item.name.toLocaleLowerCase().includes(query))) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'source'; button.setAttribute('role', 'option'); button.setAttribute('aria-selected', String(source.id === selected)); button.setAttribute('aria-label', source.name);
     const preview = document.createElement('span'); preview.className = 'preview';
-    const pending = !source.thumbnail && Boolean(window.capturePicker.thumbnail) && !previews.has(source.id);
-    showPreview(preview, source.thumbnail || previews.get(source.id), pending);
+    const pending = !source.minimized && !source.thumbnail && Boolean(window.capturePicker.thumbnail) && !previews.has(source.id);
+    if (source.minimized) preview.textContent = text('Window minimized');
+    else showPreview(preview, source.thumbnail || previews.get(source.id), pending);
     const label = document.createElement('span'); label.className = 'source-name';
     if (source.icon) { const icon = document.createElement('img'); icon.src = source.icon; icon.alt = ''; label.append(icon); }
     const name = document.createElement('span'); name.textContent = source.name; label.append(name); button.append(preview, label);
@@ -69,13 +79,13 @@ function render() {
       const changed = selected !== source.id; selected = source.id;
       if (changed && model.audioRequested && model.audioSupported) byId('scope').value = source.kind === 'window' ? 'application' : 'system';
       for (const item of list.children) item.setAttribute('aria-selected', String(item === button));
-      byId('status').textContent = ''; byId('share').disabled = busy; audioScope();
+      byId('status').textContent = ''; updateShareButton(); audioScope();
     };
     list.append(button);
     if (pending) { preview.dataset.preview = source.id; previewObserver.observe(preview); }
   }
   byId('status').textContent = text(!list.childElementCount ? 'No matching sources. Try Refresh.' : selected ? '' : 'Choose a source to continue.');
-  byId('share').disabled = !selected || busy; audioScope();
+  updateShareButton(); audioScope();
 }
 async function refresh() {
   if (busy) return; busy = true; byId('refresh').disabled = true;
@@ -98,10 +108,29 @@ async function choose(id) {
   if (busy) return; busy = true; byId('share').disabled = true;
   try { await window.capturePicker.choose({ id, audioScope: byId('scope').value }); }
   catch { byId('status').textContent = text('The source could not be shared. Refresh and choose again.'); }
-  finally { busy = false; byId('share').disabled = !selected; }
+  finally { busy = false; updateShareButton(); void loadPreview(); }
+}
+async function actOnSelection() {
+  if (busy || !selected) return;
+  const source = model.sources.find(item => item.id === selected);
+  if (!source?.minimized) { await choose(selected); return; }
+  busy = true;
+  updateShareButton();
+  try {
+    await window.capturePicker.restore(source.id);
+  } catch {
+    byId('status').textContent = text('Open the window from the taskbar, then select Refresh.');
+    return;
+  } finally {
+    busy = false;
+    updateShareButton();
+    void loadPreview();
+  }
+  await refresh();
+  byId('sources').querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest' });
 }
 for (const [id, kind] of [['windows', 'window'], ['screens', 'screen']]) byId(id).onclick = () => { tab = kind; for (const key of ['windows', 'screens']) byId(key).setAttribute('aria-selected', String(key === id)); render(); };
 byId('search').oninput = render; byId('scope').onchange = audioScope; byId('refresh').onclick = refresh;
-byId('cancel').onclick = () => { void choose(''); }; byId('share').onclick = () => { void choose(selected); };
+byId('cancel').onclick = () => { void choose(''); }; byId('share').onclick = () => { void actOnSelection(); };
 document.addEventListener('keydown', event => { if (event.key === 'Escape') void choose(''); });
 void refresh();

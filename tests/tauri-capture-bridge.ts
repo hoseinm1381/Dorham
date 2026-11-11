@@ -1,12 +1,21 @@
 import { expect, type Page } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
 
 export async function proveCaptureBridge(page: Page, fixture: string) {
   const source = spawn(path.resolve(fixture), ['selected'], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const previews = process.env.DORHAM_TEST_PICKER_PREVIEWS === '1';
+  const sourceWindow = async (action: 'minimize' | 'inspect') => {
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.resolve('tests/fixtures/tauri-picker-source.ps1'), String(source.pid), action], { windowsHide: true });
+    return JSON.parse(stdout) as { minimized: boolean };
+  };
   try {
     await once(source.stdout, 'data', { signal: AbortSignal.timeout(10000) });
+    if (previews) expect(await sourceWindow('minimize')).toEqual({ minimized: true });
     const denied = await page.evaluate(async () => {
       try { await window.desktop!.captureNativeVideo!({ width: 400, height: 220, fps: 15 }, false); return false; }
       catch { return true; }
@@ -55,9 +64,14 @@ export async function proveCaptureBridge(page: Page, fixture: string) {
     const picker = await pickerEvent;
     await expect(picker).toHaveURL('https://localhost/capture-picker.html');
     const option = picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true });
-    if (process.env.DORHAM_TEST_PICKER_PREVIEWS === '1') {
+    if (previews) {
       const search = picker.getByRole('searchbox', { name: 'Search sources' });
       await search.fill('Dorham owned capture fixture selected');
+      await expect(option.locator('.preview')).toHaveText('Window minimized');
+      await option.click();
+      await picker.getByRole('button', { name: 'Restore window', exact: true }).click();
+      await expect(picker.getByRole('button', { name: 'Share', exact: true })).toBeEnabled();
+      expect(await sourceWindow('inspect')).toEqual({ minimized: false });
       await expect.poll(() => option.locator('.preview').evaluate(preview => {
         const image = preview.querySelector('img');
         if (!image?.naturalWidth) return false;
@@ -75,7 +89,7 @@ export async function proveCaptureBridge(page: Page, fixture: string) {
       await search.fill('Dorham owned capture fixture selected');
       await picker.getByRole('tab', { name: 'Applications', exact: true }).click();
       await expect(option.locator('.preview img')).toBeVisible();
-      console.log(JSON.stringify({ applicationPreviewPixels: true, screenPreviewDecoded: true }));
+      console.log(JSON.stringify({ minimizedApplicationRestored: true, applicationPreviewPixels: true, screenPreviewDecoded: true }));
     }
     await option.click();
     await picker.getByRole('button', { name: 'Share', exact: true }).click();

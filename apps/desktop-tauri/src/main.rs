@@ -481,6 +481,7 @@ fn main() {
             capture::capture_stop,
             capture::capture_picker_model,
             capture::capture_picker_thumbnail,
+            capture::capture_picker_restore,
             capture::capture_picker_select,
             capture::capture_audio_start,
             capture::capture_audio_stop,

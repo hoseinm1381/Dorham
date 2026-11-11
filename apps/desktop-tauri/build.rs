@@ -6,6 +6,7 @@ fn main() {
             "capture_stop",
             "capture_picker_model",
             "capture_picker_thumbnail",
+            "capture_picker_restore",
             "capture_picker_select",
             "capture_audio_start",
             "capture_audio_stop",

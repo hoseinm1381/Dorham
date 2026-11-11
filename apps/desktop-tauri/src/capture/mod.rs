@@ -2,7 +2,7 @@ mod audio;
 mod preview;
 mod sources;
 
-use crate::{Host, assets, trusted_main_url};
+use crate::{Host, assets, overlay, trusted_main_url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sources::{Kind, Source};
@@ -30,6 +30,7 @@ if (location.href === "https://localhost/capture-picker.html" && window.top === 
   Object.defineProperty(window, "capturePicker", { value: Object.freeze({
     model: () => window.__TAURI_INTERNALS__.invoke("capture_picker_model"),
     thumbnail: id => window.__TAURI_INTERNALS__.invoke("capture_picker_thumbnail", { id }),
+    restore: id => window.__TAURI_INTERNALS__.invoke("capture_picker_restore", { id }),
     choose: choice => window.__TAURI_INTERNALS__.invoke("capture_picker_select", { choice })
   }) });
 }
@@ -137,6 +138,12 @@ impl Capture {
     pub fn shared_audio(&self) -> bool {
         OsVersion::current().build >= 20348 && self.audio_binary.is_file()
     }
+
+    pub fn picker_open(&self) -> bool {
+        self.picker
+            .as_ref()
+            .is_some_and(|picker| picker.result.is_some())
+    }
 }
 
 fn allowed(host: &Host) -> bool {
@@ -168,6 +175,7 @@ fn close_picker(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_enabled(true);
     }
+    let _ = overlay::request_sync(app);
 }
 
 pub fn stop_all(app: &AppHandle) {
@@ -190,6 +198,7 @@ fn open_picker(app: &AppHandle, generation: u64) -> Result<(), Box<dyn std::erro
     if !pending || !allowed(&host) {
         return Ok(());
     }
+    let _ = overlay::request_sync(app);
     let main = app
         .get_webview_window("main")
         .ok_or("Missing screen-sharing window")?;
@@ -235,6 +244,7 @@ fn open_picker(app: &AppHandle, generation: u64) -> Result<(), Box<dyn std::erro
             if let Some(main) = app_handle.get_webview_window("main") {
                 let _ = main.set_enabled(true);
             }
+            let _ = overlay::request_sync(&app_handle);
         }
     });
     let app = app.clone();
@@ -299,6 +309,9 @@ pub async fn capture_picker_thumbnail(
             .find(|source| source.id == id)
             .ok_or("Unknown capture source")?
             .clone();
+        if source.minimized {
+            return Ok(None);
+        }
         picker.preview_pending = true;
         (source, binary, picker.generation, picker.preview_stopped.clone())
     };
@@ -321,6 +334,46 @@ pub async fn capture_picker_thumbnail(
     };
     picker.preview_pending = false;
     Ok(thumbnail.filter(|_| allowed(&host) && picker.result.is_some()))
+}
+
+#[tauri::command]
+pub async fn capture_picker_restore(window: WebviewWindow, id: String) -> Result<(), String> {
+    picker_window(&window)?;
+    let host = window.state::<Host>();
+    let source = {
+        let capture = host
+            .capture
+            .lock()
+            .map_err(|_| "Screen capture unavailable")?;
+        let previous = capture
+            .picker
+            .as_ref()
+            .filter(|picker| allowed(&host) && picker.result.is_some())
+            .and_then(|picker| {
+                picker.sources.iter().find(|source| source.id == id && source.minimized)
+            })
+            .ok_or("Unknown minimized window")?;
+        sources::enumerate()
+            .into_iter()
+            .find(|source| source.same_source(previous) && source.restore())
+            .ok_or("Windows could not restore this application")?
+    };
+    let restored = tauri::async_runtime::spawn_blocking(move || {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while source.is_minimized() {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        true
+    })
+    .await
+    .unwrap_or(false);
+    if !restored {
+        return Err("Windows could not restore this application".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -349,8 +402,11 @@ pub fn capture_picker_select(window: WebviewWindow, choice: Choice) -> Result<()
             .ok_or("Unknown capture source")?;
         let fresh = sources::enumerate()
             .into_iter()
-            .find(|source| source == previous)
+            .find(|source| source.same_source(previous))
             .ok_or("Capture source closed. Refresh and choose again.")?;
+        if fresh.minimized {
+            return Err("Restore the window before sharing".into());
+        }
         if choice.audio_scope == AudioScope::Application && fresh.kind != Kind::Window {
             return Err("Choose a window for application audio".into());
         }

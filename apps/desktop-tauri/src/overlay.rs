@@ -7,8 +7,8 @@ use tauri::{
     WebviewWindowBuilder,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WS_EX_NOACTIVATE,
+    GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_HIDEWINDOW,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WS_EX_NOACTIVATE,
 };
 use windows_core::{HSTRING, w};
 
@@ -109,9 +109,15 @@ fn render(window: &WebviewWindow, packet: Value, position: OverlayPosition) -> R
             let _ = core.PostWebMessageAsJson(&payload);
         }
     })?;
+    set_visible(window, true)?;
+    Ok(())
+}
+
+fn set_visible(window: &WebviewWindow, visible: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let action = if visible { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW };
     unsafe {
         SetWindowPos(window.hwnd()?, None, 0, 0, 0, 0,
-            SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)?;
+            action | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)?;
     }
     Ok(())
 }
@@ -158,6 +164,13 @@ fn reconcile(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     };
+    let picker_open = host.capture.lock().map_err(|_| "Capture state unavailable")?.picker_open();
+    if picker_open {
+        if let Some(window) = app.get_webview_window(WINDOW) {
+            set_visible(&window, false)?;
+        }
+        return Ok(());
+    }
     if let Some(window) = app.get_webview_window(WINDOW) {
         if host.overlay_ready.load(Ordering::Acquire) {
             render(&window, packet, preferences.position)?;
