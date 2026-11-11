@@ -25,6 +25,7 @@ app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false } });
   await window.loadURL('dorham://app/index.html');
   const localStorage = await window.webContents.executeJavaScript(`(() => { const values = {}; for (let i=0;i<localStorage.length;i++) { const key=localStorage.key(i); if (/^dorham[.-]/.test(key) && key.length<=256) { const value=localStorage.getItem(key); if (value.length>2097152) throw Error('Preference exceeds supported size'); values[key]=value; } } return values; })()`);
+  if (Object.entries(localStorage).some(([key, value]) => Buffer.byteLength(key, 'utf8') > 512 || Buffer.byteLength(value, 'utf8') > 2097152)) throw Error('Preference exceeds supported size');
   const preferences = {};
   if (typeof settings.server === 'string') preferences.server = settings.server;
   if (settings.voiceOverlay && typeof settings.voiceOverlay === 'object') preferences.voiceOverlay = settings.voiceOverlay;

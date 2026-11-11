@@ -1,14 +1,17 @@
 import { readFile, mkdir, copyFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+const windowsOnly = process.argv.includes('--windows-only');
+const tauri = process.argv.includes('--windows-tauri');
+if (tauri && !windowsOnly) throw Error('Use --windows-only with --windows-tauri');
+const { version } = JSON.parse(await readFile(tauri ? 'apps/desktop-tauri/tauri.conf.json' : 'package.json', 'utf8'));
 if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw Error('Invalid release version');
 const root = path.resolve(`artifacts/v${version}`), output = path.join(root, 'downloads', version);
 await mkdir(output, { recursive: true });
-if (process.argv.includes('--windows-only')) {
+if (windowsOnly) {
   if (!process.env.DORHAM_PREVIOUS_MANIFEST) throw Error('Set DORHAM_PREVIOUS_MANIFEST to the currently published Android manifest before a Windows-only release.');
   const previous = JSON.parse(await readFile(process.env.DORHAM_PREVIOUS_MANIFEST, 'utf8'));
-  const { default: contracts } = await import('../apps/desktop/release-contract.cjs'); const { releaseFile } = contracts;
+  const { releaseFile } = await import('../packages/contracts/src/releases.ts');
   releaseFile(previous, 'android');
   const name = `Dorham-${version}-Windows-x64.exe`, file = path.join(root, 'windows', name), bytes = await readFile(file);
   const windows = { schema: 1, version, publishedAt: new Date().toISOString(), windows: { version, appId: 'com.dorham.chat', url: `https://dorhamapp.ir/downloads/${version}/${name}`, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') } };

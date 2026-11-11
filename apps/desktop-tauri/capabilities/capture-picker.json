@@ -1,0 +1,8 @@
+{
+  "identifier": "capture-picker",
+  "description": "Source selection in the bundled Windows capture picker.",
+  "windows": ["capture-picker"],
+  "local": false,
+  "remote": { "urls": ["https://localhost/capture-picker.html"] },
+  "permissions": ["allow-capture-picker-model", "allow-capture-picker-select"]
+}

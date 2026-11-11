@@ -59,9 +59,9 @@ func validateGameCommand(b M) {
 	if v, ok := b["action"]; ok {
 		a := Obj(v)
 		Check(a != nil, 400, "VALIDATION", "Invalid game action.")
-		gameKeys(a, "type", "token", "piece", "column", "tile", "end", "to", "index", "count", "text", "stroke")
-		Check(gameOne(a["type"], "drop", "tile", "draw", "pass", "next", "roll", "token", "fold", "check", "call", "raise", "stroke", "clear", "undo", "guess", "submit", "clue", "word"), 400, "VALIDATION", "Invalid game action.")
-		for k, bounds := range map[string][2]int{"piece": {0, 3}, "column": {0, 6}, "tile": {0, 27}, "to": {0, 1000000}, "index": {0, 24}, "count": {1, 9}} {
+		gameKeys(a, "type", "token", "piece", "column", "tile", "end", "to", "index", "count", "text", "stroke", "choice")
+		Check(gameOne(a["type"], "drop", "tile", "draw", "pass", "next", "roll", "token", "fold", "check", "call", "raise", "stroke", "clear", "undo", "guess", "submit", "clue", "word", "quick-pick"), 400, "VALIDATION", "Invalid game action.")
+		for k, bounds := range map[string][2]int{"piece": {0, 3}, "column": {0, 6}, "tile": {0, 27}, "to": {0, 1000000}, "index": {0, 24}, "count": {1, 9}, "choice": {0, 50}} {
 			if v, ok := a[k]; ok {
 				Check(gameValidInt(v, bounds[0], bounds[1]), 400, "VALIDATION", "Invalid game action number.")
 			}

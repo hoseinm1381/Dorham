@@ -1,0 +1,117 @@
+.app.phone-web {
+  grid-template-columns:minmax(0,1fr);
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.phone-web>.main { height:auto; }
+.phone-web>.members-sidebar { display:none; }
+.phone-web>:is(.server-rail,.sidebar) {
+  position:fixed;
+  top:auto;
+  bottom:auto;
+  left:auto;
+  right:auto;
+  inset-block:env(safe-area-inset-top) env(safe-area-inset-bottom);
+  visibility:hidden;
+  transition:none;
+}
+.phone-web.nav-open>:is(.server-rail,.sidebar) { visibility:visible; }
+.phone-web.nav-open>.server-rail { inset-inline-start:env(safe-area-inset-left); }
+.phone-web.nav-open>.sidebar { inset-inline-start:calc(62px + env(safe-area-inset-left)); }
+[dir="rtl"] .phone-web.nav-open>.server-rail { inset-inline-start:env(safe-area-inset-right); }
+[dir="rtl"] .phone-web.nav-open>.sidebar { inset-inline-start:calc(62px + env(safe-area-inset-right)); }
+.phone-web>.server-rail { width:62px; z-index:52; padding-block:8px; }
+.phone-web>.sidebar { width:min(220px,calc(100% - 88px)); z-index:51; }
+.phone-web.nav-open>.mobile-scrim { display:block; position:fixed; inset:0; background:#050910a6; z-index:49; }
+.phone-web .nav-item,.phone-web .voice-panel-actions>.icon-button,.phone-web .account-bar>.icon-button { min-height:44px; }
+.phone-web .topbar { height:auto; min-height:50px; padding-inline:8px; gap:6px; }
+.phone-web .topbar>.icon-button:first-child { display:inline-flex; margin:0; }
+.phone-web .topbar :is(.topbar-symbol,.topbar-divider,.topbar-description) { display:none; }
+.phone-web .topbar strong { min-width:0; }
+.phone-web .topbar-actions { flex-shrink:0; margin-inline-start:auto; gap:4px; }
+.phone-web .topbar .icon-button,.phone-web .screen-controls button { flex:none; min-width:44px; min-height:44px; }
+.phone-web .topbar .connection-pill { white-space:nowrap; }
+.phone-web .topbar:has(.chat-block-button) .connection-pill { display:none; }
+.phone-web .composer textarea { font-size:16px; }
+.phone-web .modal { max-width:100%; max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+.phone-web dialog.modal-backdrop {
+  padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));
+}
+@media(pointer:coarse) {
+  .phone-web-auth { padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .phone-web-auth input,.phone-web .modal :is(input:not([type=checkbox],[type=radio]),select,textarea) { font-size:16px; }
+}
+@media(pointer:coarse) and (orientation:landscape) and (max-height:600px) {
+  .phone-web-auth { display:flex; flex-direction:column; }
+  .phone-web-auth .auth-story { padding:12px 20px 0; background:none; }
+  .phone-web-auth .auth-story :is(.story-copy,footer) { display:none; }
+  .phone-web-auth .auth-form-wrap { padding:12px 20px 24px; }
+  .phone-web-auth .auth-form>h2 { margin-block-start:12px; }
+}
+
+/* Keep the same grid item and video element when the dialog moves to the top layer. */
+.web-stream-dialog[open]:not(:modal) { display:contents; }
+.gaming-voice .web-stream-dialog>.stream-view>.screen { flex:1 1 0; height:auto; }
+.gaming-voice .web-stream-dialog .screen-controls { gap:8px; }
+.web-stream-dialog .screen-controls bdi { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.web-stream-dialog .screen-controls>span { flex:none; }
+.screen-video-only { display:none; }
+.phone-web .web-stream-dialog .screen-controls bdi { flex:1; font-size:12px; }
+.phone-web .screen-video-only { display:inline; font-size:11px; }
+.phone-web .web-stream-dialog .screen:has(.screen-video-only) + .stream-no-audio { display:none; }
+.gaming-voice .web-stream-dialog:modal,
+.gaming-voice .web-stream-dialog>.stream-view:fullscreen {
+  position:fixed;
+  inset:0;
+  margin:0;
+  border:0;
+  width:100%;
+  height:100dvh;
+  max-width:none;
+  max-height:none;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow:hidden;
+  background:#0b0d12;
+  color:#e7e8f0;
+}
+.gaming-voice .web-stream-dialog:is(:modal,:has(>.stream-view:fullscreen)) .screen { border:0; border-radius:0; }
+.gaming-voice .web-stream-dialog:is(:modal,:has(>.stream-view:fullscreen)) .screen-controls button { min-width:44px; min-height:44px; }
+.phone-web .gaming-voice-header button,.phone-web .gaming-voice .watch-stream { min-height:44px; }
+.phone-web .gaming-voice-header>span:first-child { min-width:0; }
+.phone-web .viewer-open>.mobile-voice-people { display:none; }
+.phone-web .gaming-voice-header strong,.phone-web .gaming-voice .share-list bdi { min-width:0; overflow-wrap:anywhere; }
+.phone-web .gaming-voice .share-list { max-height:110px; overflow:auto; }
+.phone-web .gaming-voice .share-list>div { max-width:100%; }
+.phone-web .stream-volume { flex-shrink:0; }
+.phone-web .stream-volume input { flex:1 1 90px; min-width:0; }
+.phone-web .stream-volume button { min-height:44px; }
+.phone-web .stream-connecting button { min-height:44px; padding-inline:8px; }
+
+.phone-web-landscape .topbar { min-height:44px; }
+.phone-web-landscape .voice-stage.gaming-voice { padding:4px 8px; }
+.phone-web-landscape .voice-stage.gaming-voice:not(.viewer-open) { max-height:46%; }
+.phone-web-landscape .gaming-voice .share-list { flex-wrap:nowrap; margin-block-start:3px; }
+.phone-web-landscape .gaming-voice .share-list>div { flex:0 0 auto; width:auto; flex-wrap:nowrap; padding:2px 8px; }
+.phone-web-landscape .viewer-open>.share-list:has(>div:only-child>.watch-stream[data-watching=true]) { display:none; }
+.phone-web-landscape .gaming-voice .screens { margin-block-start:4px; }
+.phone-web-landscape .gaming-voice .screens.multi-streams {
+  grid-template-columns:repeat(auto-fit,minmax(min(225px,100%),1fr));
+  grid-auto-rows:minmax(150px,1fr);
+}
+.phone-web-landscape .gaming-voice .screen-controls { padding-block:0; }
+.phone-web-landscape .main.stream-viewer-active.chat-drawer-open:has(>.message-scroll) {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) clamp(200px,36%,340px);
+  grid-template-rows:auto auto auto auto minmax(0,1fr) auto;
+}
+.phone-web-landscape .chat-drawer-open>.topbar { grid-area:1 / 1 / 2 / -1; }
+.phone-web-landscape .chat-drawer-open>.gaming-voice { grid-area:2 / 1 / -1 / 2; }
+.phone-web-landscape .chat-drawer-open>.blocked-chat-note { grid-area:2 / 2; }
+.phone-web-landscape .chat-drawer-open>.invite-voice-landing { grid-area:3 / 2; }
+.phone-web-landscape .chat-drawer-open>.message-notice { grid-area:4 / 2; }
+.phone-web-landscape .main.stream-viewer-active.chat-drawer-open>.message-scroll {
+  grid-area:5 / 2;
+  min-height:0;
+  border-block-start:0;
+  border-inline-start:1px solid #ffffff20;
+}
+.phone-web-landscape .chat-drawer-open>.composer-wrap { grid-area:6 / 2; min-width:0; padding-inline:8px; }

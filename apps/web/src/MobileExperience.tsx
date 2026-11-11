@@ -21,8 +21,31 @@ export function MobileSheet({ title, close, children }: { title: string; close: 
   return <dialog ref={dialog} className="mobile-sheet" aria-label={title} onCancel={e => { e.preventDefault(); close(); }} onClick={e => { if (e.target === e.currentTarget) close(); }}><section><header><h2>{title}</h2><button aria-label={t('Close dialog')} onClick={close}><X/></button></header>{children}</section></dialog>;
 }
 
-export function ParticipantList({ members, actions }: { members: (Pick<VoiceMember, 'user' | 'muted' | 'deafened' | 'serverMuted'> & Partial<VoiceMember>)[]; actions: (user: PublicUser, event: React.MouseEvent<HTMLElement>) => void }) {
-  return <div className="mobile-participants">{members.length ? members.map(member => <SpeakingButton key={member.user.id} userId={member.user.id} onClick={e => actions(member.user, e)}><Avatar user={member.user} small/><span><bdi>{member.user.displayName}<RankBadge user={member.user}/></bdi><small>{t(member.serverMuted ? 'Server muted' : member.deafened || member.serverDeafened ? 'Deafened' : member.muted ? 'Muted' : 'In voice')}</small></span>{member.muted || member.serverMuted ? <MicOff size={17}/> : member.deafened || member.serverDeafened ? <HeadphoneOff size={17}/> : null}<span className="participant-more" aria-hidden="true">⋯</span></SpeakingButton>) : <p>{t('No one is in this voice channel yet.')}</p>}</div>;
+type Participant = Pick<VoiceMember, 'user' | 'muted' | 'deafened' | 'serverMuted' | 'serverDeafened'>;
+
+export function voiceMemberStatus(member: Participant) {
+  if (member.deafened || member.serverDeafened) return 'Deafened';
+  if (member.serverMuted) return 'Server muted';
+  return member.muted ? 'Muted' : 'In voice';
+}
+
+export function VoiceMemberStatusIcon({ status, size }: { status: ReturnType<typeof voiceMemberStatus>; size: number }) {
+  if (status === 'In voice') return null;
+  const Icon = status === 'Deafened' ? HeadphoneOff : MicOff;
+  const label = t(status);
+  return <Icon size={size} role="img" aria-label={label}><title>{label}</title></Icon>;
+}
+
+export function ParticipantList({ members, actions }: { members: Participant[]; actions: (user: PublicUser, event: React.MouseEvent<HTMLElement>) => void }) {
+  return <div className="mobile-participants">{members.length ? members.map(member => {
+    const status = voiceMemberStatus(member);
+    return <SpeakingButton key={member.user.id} userId={member.user.id} onClick={e => actions(member.user, e)}>
+      <Avatar user={member.user} small/>
+      <span><bdi>{member.user.displayName}<RankBadge user={member.user}/></bdi><small aria-hidden={status !== 'In voice'}>{t(status)}</small></span>
+      <VoiceMemberStatusIcon status={status} size={17}/>
+      <span className="participant-more" aria-hidden="true">⋯</span>
+    </SpeakingButton>;
+  }) : <p>{t('No one is in this voice channel yet.')}</p>}</div>;
 }
 
 export function MobileCallBar({ name, count, muted, deafened, listenOnly, sharing, busy, status, participants, mute, deafen, share, soundboard, leave }: { name: string; count: number; muted: boolean; deafened: boolean; listenOnly: boolean; sharing: boolean; busy: boolean; status: string; participants: () => void; mute: () => void; deafen: () => void; share: () => void; soundboard?: ReactNode; leave: () => void }) {

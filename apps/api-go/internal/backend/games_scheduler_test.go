@@ -14,7 +14,7 @@ func TestGamesSchedulerHeavyAlbumWakesUseCompactMetadata(t *testing.T) {
 		g.a.DB.Run("INSERT INTO members(server_id,user_id,role,joined_at) VALUES('server',?,'member',?)", uid, *now)
 		g.a.DB.Run("INSERT INTO voice_members(user_id,channel_id,socket_id,epoch,heartbeat,joined_at) VALUES(?,'voice',?,?,?,?)", uid, "socket-"+uid, ID(), *now, *now)
 	}
-	s := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": "telephone", "settings": M{"maxPlayers": 8}}))
+	s := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "telephone", "settings": M{"maxPlayers": 8}}))
 	for _, uid := range []string{"b", "c", "d", "e", "f", "g", "h"} {
 		s = gamesTestCommand(g, uid, s, "join", nil)
 	}
@@ -84,7 +84,7 @@ func TestGamesSchedulerHeavyAlbumWakesUseCompactMetadata(t *testing.T) {
 
 func TestGamesSchedulerCommittedSameMillisecondSavesRollbackAndFKCleanup(t *testing.T) {
 	g, now, _ := gamesTestFixture(t)
-	s := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
+	s := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
 	id := S(s["id"])
 	c := Obj(g.chessCreate("c", M{"requestId": ID(), "serverId": "server", "channelId": "voice", "openSeat": true, "mode": "standard", "minutes": 5, "increment": 0}))
 	cid := S(c["id"])
@@ -166,7 +166,7 @@ func TestGamesSchedulerCommittedSameMillisecondSavesRollbackAndFKCleanup(t *test
 
 func TestGamesSchedulerFreshDueStateAndActualTimerShutdown(t *testing.T) {
 	g, _, _ := gamesTestFixture(t)
-	s := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
+	s := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
 	id := S(s["id"])
 	g.now = Now
 	g.mu.Lock()

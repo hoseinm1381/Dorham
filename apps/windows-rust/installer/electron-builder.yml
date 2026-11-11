@@ -17,10 +17,10 @@ win:
   icon: apps/desktop/icon.ico
 nsis:
   guid: 26094eeb-aead-5f8d-b988-ece04b473a4b
-  script: installer.nsi
   include: migration.nsh
-  oneClick: false
+  oneClick: true
   perMachine: false
+  packElevateHelper: false
   allowToChangeInstallationDirectory: false
   createDesktopShortcut: true
   createStartMenuShortcut: true

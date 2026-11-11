@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GameKind, GameView } from '../../../packages/contracts/src/games';
+import { isQuickGame } from '../../../packages/contracts/src/games';
 import { t } from './i18n';
 import { useGameCue, type GameSound } from './game-sound';
 
@@ -11,7 +12,15 @@ export const gameGuide: Record<GameKind|'chess', {tag:string;goal:string;steps:s
   drawing:{tag:'Drawing',goal:'Draw a secret word while your friends race to guess it.',steps:['The drawer sees the word. Everyone else types guesses below the canvas.','Faster correct guesses earn more points. The drawer earns points for each correct guess.','Use the eraser or Undo to fix a drawing. Keep the word secret in voice chat.']},
   words:{tag:'Teams',goal:'Help your team find all its words without choosing the danger word.',steps:['Seats alternate teams. The first player in each team is captain and sees the secret key.','The captain gives one word and a number. Teammates get that number plus one guesses.','A neutral or opposing word ends the turn. The danger word immediately loses.']},
   ludo:{tag:'Strategy',goal:'Race all four tokens into your home lane before the other players.',steps:['Roll a six to bring a token out. Select a highlighted token or its larger button below the board.','Six grants another roll; three consecutive sixes lose the turn. Stars are safe from capture.','Land on an opponent to send it home. You need an exact roll to finish.']},
-  four:{tag:'Quick play',goal:'Connect four counters horizontally, vertically, or diagonally.',steps:['Choose a column. Your counter falls to the lowest empty space.','Block your opponent’s lines while building your own.','A full board without four in a row is a draw.']}
+  four:{tag:'Quick play',goal:'Connect four counters horizontally, vertically, or diagonally.',steps:['Choose a column. Your counter falls to the lowest empty space.','Block your opponent’s lines while building your own.','A full board without four in a row is a draw.']},
+  rps:{tag:'Party',goal:'Score a point for each other hand yours beats.',steps:['Choose rock, paper, or scissors in secret.','Rock beats scissors, scissors beat paper, and paper beats rock.','The highest score after five rounds wins.']},
+  'high-low':{tag:'Cards',goal:'Predict the next card’s rank.',steps:['Everyone sees the same starting card. Ace is low and king is high.','Choose Higher or Lower. The two ranks always differ.','Each correct guess earns a point. Play five rounds.']},
+  'target-dice':{tag:'Quick play',goal:'Get as close to 12 as you can without going over.',steps:['Everyone starts with the same two dice.','Bank that total or roll one more die just for you.','The closest valid totals earn one point each. Play five rounds.']},
+  'odd-one':{tag:'Quick play',goal:'Pick the only symbol that differs from the rest.',steps:['Tap or click the odd tile before time runs out.','Every correct choice earns a point. Play five rounds.']},
+  'color-sequence':{tag:'Memory',goal:'Remember the colors and numbers in order.',steps:['Watch the pattern before it disappears.','Tap the numbered colors in the same order, then submit.','Each correct sequence earns a point. The pattern gets longer over five rounds.']},
+  'memory-match':{tag:'Memory',goal:'Find the most matching pairs.',steps:['On your turn, flip two cards. Matching cards stay open and earn one point.','Remember the symbols when cards turn back over. The turn passes after each try.']},
+  'number-hunt':{tag:'Quick play',goal:'Be the first to guess the secret number.',steps:['Take turns guessing a number from 1 to 50.','Use the higher or lower clue and the updated range to choose your next guess.']},
+  'treasure-grid':{tag:'Strategy',goal:'Dig up the most gems on a shared board.',steps:['On your turn, dig one unopened square. Each gem is worth one point.','A number counts gems in the eight surrounding squares, including gems already found.','The game ends when all five gems have been found.']},
 };
 export function GameGuide({kind, expanded}:{kind:GameKind|'chess';expanded?:boolean}){const guide=gameGuide[kind];return <details className="game-guide" open={expanded}><summary>{t('How to play')}</summary><p>{t(guide.goal)}</p><ol>{guide.steps.map(step=><li key={step}>{t(step)}</li>)}</ol></details>;}
 export function seatName(view:GameView,index:number){return view.seats[index]?.name||t('Player {number}',{number:index+1});}
@@ -25,6 +34,9 @@ export function isYourAction(view: GameView) {
   if (view.kind === 'words') {
     return view.self % 2 === s.team && (s.phase === 'clue' ? s.captains[s.team] === view.self : !s.captains.includes(view.self));
   }
+  if (isQuickGame(view.kind)) {
+    return s.phase === 'quick-pick' ? !s.submitted[view.self] : s.phase === 'quick-turn' && view.self === s.turn;
+  }
   return view.self === s.turn;
 }
 
@@ -35,6 +47,12 @@ function clockDetails(view: GameView): [string, number] {
   if (view.kind === 'drawing' && view.state.phase === 'reveal') return ['Next drawing in', 5];
   if (view.kind === 'drawing' || view.kind === 'telephone') return ['Round time remaining', view.settings.seconds];
   if (view.kind === 'words') return [view.state.phase === 'clue' ? 'Clue time remaining' : 'Guess time remaining', view.settings.seconds];
+  if (isQuickGame(view.kind)) {
+    if (view.state.phase === 'quick-watch') return ['Memorize the sequence', 6];
+    if (view.state.phase === 'quick-pair') return ['Pair reveal', 2];
+    if (view.state.phase === 'quick-reveal') return ['Next round in', 5];
+    return [view.state.phase === 'quick-pick' ? 'Round time remaining' : 'Turn time remaining', 20];
+  }
   return ['Turn time remaining', view.kind === 'poker' ? 30 : 60];
 }
 
@@ -79,6 +97,19 @@ export function useArcadeCue(view: GameView | null, sound: GameSound, connected:
       case 'telephone': event = `page-${s.step}-${s.submitted}`; cue = s.submitted ? 'success' : 'turn'; break;
       case 'drawing': event = `drawing-${s.token}-${s.guessed.length}`; cue = s.phase === 'reveal' || s.guessed.length ? 'success' : 'turn'; break;
       case 'words': event = `words-${s.phase}-${s.team}-${s.revealed.filter(Boolean).length}`; cue = 'turn'; break;
+      default:
+        if (isQuickGame(view.kind)) {
+          if (s.round) {
+            event = `${s.token}-${s.phase}-${s.ownEntry ?? ''}`;
+            cue = s.phase === 'quick-reveal'
+              ? s.gains?.[view.self] > 0 ? 'success' : view.kind === 'target-dice' ? 'roll' : 'card'
+              : s.ownEntry !== null ? 'move' : 'turn';
+          } else {
+            event = `quick-${s.move}-${s.phase}-${s.turn}`;
+            cue = view.kind === 'memory-match' ? 'card' : 'move';
+          }
+        }
+        break;
     }
   }
   useGameCue(sound, connected ? view?.id : undefined, event, cue);
@@ -94,6 +125,14 @@ export function TurnPrompt({view}:{view:GameView}){
   else if(view.kind==='telephone'){mine=view.self>=0&&!s.submitted;message=view.self<0?t('Watch the group’s progress. The albums stay private until the reveal.'):s.submitted?t('Submitted. Waiting for the other players.'):t(s.phase==='draw'?'Your turn: draw the sentence you received.':s.phase==='write'?'Your turn: write a funny sentence.':'Your turn: describe the drawing you received.');}
   else if(view.kind==='drawing'){mine=s.phase==='drawing'&&view.self===s.drawer;message=s.phase==='reveal'?t('The word is revealed. The next drawing starts shortly.'):mine?t('Your turn: draw your secret word.'):s.guessed.includes(view.self)?t('You guessed it. Wait for the next drawing.'):t('{name} is drawing. Type your guess below.',{name:seatName(view,s.drawer)});}
   else if(view.kind==='words'){mine=isYourAction(view);message=mine?t(s.phase==='clue'?'Your turn: give a one-word clue and a count.':'Your turn: discuss the clue, then choose a word.'):t(s.phase==='clue'?'Team {number}: waiting for the captain’s clue.':'Team {number}: discuss the clue, then choose a word.',{number:s.team+1});}
+  else if(isQuickGame(view.kind)){
+    mine=isYourAction(view);
+    if(s.phase==='quick-watch')message=t('Memorize the sequence');
+    else if(s.phase==='quick-reveal')message=t('Round results');
+    else if(s.phase==='quick-pair')message=t('Pair reveal');
+    else if(s.phase==='quick-pick')message=view.self<0?t('Watch the group’s progress.'):mine?t('Make your choice before time runs out.'):t('Choice locked. Waiting for the other players.');
+    else message=mine?t('Your turn'):t('Waiting for {name}',{name:seatName(view,s.turn)});
+  }
   else{mine=view.self===s.turn;message=mine?t(view.kind==='ludo'?(s.phase==='roll'?'Your turn: roll the dice.':'Your turn: choose a token to move.'):view.kind==='poker'?'Your turn: check, call, raise, or fold.':view.kind==='domino'?'Your turn: play a matching tile, draw, or pass.':'Your turn: choose a column.'):t('Waiting for {name}',{name:seatName(view,s.turn)});}
   return <p className={`game-turn-prompt ${mine&&!view.pausedUntil?'your-turn':''}`} role="status">{message}</p>;
 }

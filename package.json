@@ -1,6 +1,6 @@
 {
   "name": "dorham",
-  "version": "1.2.7",
+  "version": "1.2.9",
   "private": true,
   "overrides": {
     "xcode": {
@@ -80,6 +80,7 @@
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.64.1",
     "@sapphi-red/web-noise-suppressor": "0.4.1",
+    "@tauri-apps/api": "2.12.4",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.6.5",
     "@types/pg": "8.23.1",

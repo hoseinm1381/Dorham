@@ -3,11 +3,11 @@ import { compareRank, pokerAction, pokerHand, pokerStart, pokerTimeout, pokerVie
 import { dominoAction, dominoLegal, dominoStart, dominoTiles, dominoView, fourAction, fourStart, ludoAction, ludoStart } from '../apps/api/src/games/boards';
 import { act, depart, project, startEngine, timeout } from '../apps/api/src/games/engine';
 import { normalizeAnswer, stroke, freshPicture } from '../apps/api/src/games/common';
-import { definition, gameCatalog, playerLabel, type GameSettings, type GameKind } from '../packages/contracts/src/games';
+import { definition, gameCatalog, playerLabel, quickGameCatalog, type GameSettings, type GameKind } from '../packages/contracts/src/games';
 const settings:GameSettings={maxPlayers:8,seconds:60,rounds:1,language:'en',domino:'draw',chips:1000,blind:20};
 const card=(rank:number,suit=0)=>suit*13+rank-2;
 it('has explicit seat limits for every catalog game, including existing Chess',()=>{
-  expect(gameCatalog).toHaveLength(8);expect(new Set(gameCatalog.map(g=>g.id)).size).toBe(8);expect(definition('telephone')).toMatchObject({min:3,max:8});expect(definition('domino')).toMatchObject({min:2,max:4});expect(playerLabel(2,8)).toBe('2–8 players');expect(playerLabel(2,2)).toBe('2 players');
+  expect(gameCatalog).toHaveLength(16);expect(new Set(gameCatalog.map(g=>g.id)).size).toBe(16);expect(quickGameCatalog.map(g=>[g.min,g.max])).toEqual([[2,16],[2,16],[2,16],[2,16],[2,16],[2,8],[2,8],[2,4]]);expect(definition('telephone')).toMatchObject({min:3,max:8});expect(definition('domino')).toMatchObject({min:2,max:4});expect(playerLabel(2,8)).toBe('2–8 players');expect(playerLabel(2,2)).toBe('2 players');
 });
 it('ranks poker categories, wheel straights, kickers and best five out of seven without suit tie-breaks',()=>{
   const categories=[

@@ -4,7 +4,7 @@ type UpdateInfo = { current: string; latest: string; available: boolean };
 type UpdateStatus = { state: string; progress: number };
 export type WindowsUpdateState = UpdateInfo & { phase: string; progress: number };
 const android = registerPlugin<{ check(): Promise<UpdateInfo>; install(): Promise<{started: boolean}>; prepare(options: { automatic: boolean }): Promise<unknown>; cancel(): Promise<void>; getStatus(): Promise<UpdateStatus>; addListener(name: string, listener: (status: UpdateStatus) => void): Promise<{ remove(): Promise<void> }> }>('DorhamUpdates');
-export const releasePlatform = window.desktop ? 'windows' : Capacitor.getPlatform() === 'android' ? 'android' : null;
+export const releasePlatform = typeof window !== 'undefined' && window.desktop ? 'windows' : Capacitor.getPlatform() === 'android' ? 'android' : null;
 const Releases = createContext<{ info: UpdateInfo | null; status: UpdateStatus; refresh(): Promise<void>; install(): Promise<void>; prepare(): Promise<void>; cancel(): Promise<void> }>({ info: null, status: { state: 'idle', progress: 0 }, refresh: async () => {}, install: async () => {}, prepare: async () => {}, cancel: async () => {} });
 export const useRelease = () => useContext(Releases);
 export function ReleaseProvider({ children }: { children: ReactNode }) {

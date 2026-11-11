@@ -1,5 +1,5 @@
 import { completeRecovery } from './recovery-helper';
-import {test,expect,type Page} from '@playwright/test';
+import {devices,test,expect,type Page} from '@playwright/test';
 import {writeFile} from 'node:fs/promises';
 test.use({trace:'off',actionTimeout:12000});
 async function register(p:Page,name:string){await p.goto('/');await p.getByRole('button',{name:'Create an account',exact:true}).click();await p.getByLabel('Display name',{exact:true}).fill(name);await p.getByLabel('Username',{exact:true}).fill(name);await p.getByLabel('Password',{exact:true}).fill('Synthetic-sharing-2026');await p.getByRole('button',{name:'Create account',exact:true}).click();await completeRecovery(p); await expect(p.locator('.app')).toBeVisible();}
@@ -48,4 +48,85 @@ test('sharing popup applies every bandwidth live without recapture and preserves
     await a.evaluate(()=>(window as any).__cancelCapture=true);await a.getByRole('button',{name:'Choose screen',exact:true}).click();await expect(a.getByRole('button',{name:'Choose screen',exact:true})).toBeEnabled();await expect.poll(async()=>(await api(a,`/voice/${channel.id}`)).shares.length).toBe(0);
     expect(errors).toEqual([]);await writeFile(`artifacts/evidence/v075-screen-sharing-${withAudio?'sfu':'mesh'}-browser.json`,JSON.stringify({transport:process.env.MEDIA_TRANSPORT||'mesh',popupOnly:true,startingChoiceHonored:true,bandwidths:results,sharedAudioWithinBudget:withAudio,liveChangesNoRecapture:true,sameLease:true,rewatchKeepsLimit:true,persisted:true,cancelReleasesLease:true,mobileNoOverflow:true,errors},null,2));
   }finally{await Promise.allSettled(contexts.map(c=>c.close()));}
+});
+
+test('phone web viewer keeps playing across rotation and expands without browser fullscreen', async ({ browser }) => {
+  const publisher = await browser.newContext({ permissions: ['microphone'] });
+  const viewer = await browser.newContext({ ...devices['iPhone 13'], permissions: ['microphone'] });
+  const a = await publisher.newPage(), b = await viewer.newPage();
+  const portrait = { width: 390, height: 664 }, landscape = { width: 844, height: 390 };
+  const errors: string[] = [];
+  b.on('pageerror', error => errors.push(error.message));
+  try {
+    await instrument(a);
+    await b.setViewportSize(landscape);
+    const suffix = Date.now().toString().slice(-7);
+    await register(a, 'PhoneHost' + suffix);
+    await register(b, 'PhoneViewer' + suffix);
+    await expect(b.locator('.main')).toHaveJSProperty('clientWidth', landscape.width);
+    await b.setViewportSize(portrait);
+    const server = await api(a, '/servers', { name: 'Phone viewing' });
+    const invite = await api(a, `/servers/${server.id}/invites`, { uses: 5 });
+    await api(b, '/invites/join', { code: invite.code });
+    const navigation = b.getByRole('button', { name: 'Toggle navigation', exact: true });
+    await navigation.tap();
+    for (const page of [a, b]) {
+      await page.getByRole('button', { name: 'Open Phone viewing', exact: true }).click();
+      await page.getByRole('button', { name: 'Lounge', exact: true }).click();
+    }
+    await configure(a, '720p15', 900000, true);
+    await b.getByRole('button', { name: 'Watch stream', exact: true }).tap();
+    const video = b.locator('.screen video');
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.getVideoPlaybackQuality().totalVideoFrames)).toBeGreaterThan(5);
+    const original = await video.elementHandle();
+    await b.setViewportSize(landscape);
+    await expect(navigation).toBeVisible();
+    await expect(b.locator('.main')).toHaveJSProperty('clientWidth', landscape.width);
+    const fullscreen = b.getByRole('button', { name: 'Fullscreen stream', exact: true });
+    const exit = b.getByRole('button', { name: 'Exit fullscreen stream', exact: true });
+    await b.bringToFront();
+    await fullscreen.tap();
+    await expect(b.locator('.stream-view:fullscreen')).toBeVisible();
+    await exit.tap();
+    await expect(b.locator('.stream-view:fullscreen')).toHaveCount(0);
+    await b.evaluate(() => {
+      Object.defineProperty(Document.prototype, 'fullscreenEnabled', { configurable: true, get: () => false });
+      Object.defineProperty(Element.prototype, 'requestFullscreen', { configurable: true, value: undefined });
+    });
+    await fullscreen.tap();
+    await expect(exit).toBeVisible();
+    expect((await video.boundingBox())!.height).toBeGreaterThan(landscape.height * 0.85);
+    const frames = await video.evaluate((v: HTMLVideoElement) => v.getVideoPlaybackQuality().totalVideoFrames);
+    await b.setViewportSize(portrait);
+    await expect(exit).toBeInViewport();
+    expect((await video.boundingBox())!.width).toBeGreaterThan(portrait.width * 0.95);
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.getVideoPlaybackQuality().totalVideoFrames)).toBeGreaterThan(frames);
+    expect(await video.evaluate((element, initial) => element === initial, original)).toBe(true);
+    await b.keyboard.press('Escape');
+    await expect(fullscreen).toBeVisible();
+    await b.evaluate(() => {
+      Object.defineProperty(Document.prototype, 'fullscreenEnabled', { configurable: true, get: () => true });
+      Object.defineProperty(Element.prototype, 'requestFullscreen', { configurable: true, value: () => Promise.reject(new DOMException('Fullscreen unavailable', 'NotAllowedError')) });
+    });
+    await fullscreen.tap();
+    await expect(exit).toBeInViewport();
+    await exit.tap();
+    await expect(fullscreen).toBeVisible();
+    await b.setViewportSize(landscape);
+    await b.getByRole('button', { name: 'Show chat', exact: true }).tap();
+    await expect(b.getByRole('textbox', { name: 'Message', exact: true })).toBeInViewport();
+    await expect(video).toBeInViewport();
+    await b.getByRole('button', { name: 'Stop watching stream', exact: true }).tap();
+    await expect(video).toHaveCount(0);
+    await navigation.tap();
+    await expect(b.getByRole('button', { name: 'Disconnect voice', exact: true })).toBeInViewport();
+    await b.setViewportSize({ width: 320, height: 568 });
+    await expect(b.getByRole('button', { name: 'Account settings', exact: true })).toBeInViewport();
+    await b.getByRole('button', { name: 'Close navigation', exact: true }).tap({ position: { x: 304, y: 140 } });
+    await expect(b.locator('.main')).toHaveJSProperty('clientWidth', 320);
+    await expect.poll(() => b.locator('.topbar').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(errors).toEqual([]);
+  } finally {
+    await Promise.allSettled([publisher.close(), viewer.close()]);
+  }
 });

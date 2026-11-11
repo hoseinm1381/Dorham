@@ -1,8 +1,9 @@
 import { completeRecovery } from './recovery-helper';
 import { test, expect, type Page, type Browser } from '@playwright/test';
 import { io, type Socket } from 'socket.io-client';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { definition, type GameKind, type GameView } from '../../packages/contracts/src/games';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { definition, isQuickGame, quickGameCatalog, type GameKind, type GameView } from '../../packages/contracts/src/games';
+const { version } = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
 test.use({trace:'off',actionTimeout:12000});
 test('administrator without explicit membership joins Poker and hosts Chess with a second browser account',async({browser})=>{
   const contexts=await Promise.all([browser.newContext({permissions:['microphone']}),browser.newContext({permissions:['microphone']})]);
@@ -24,7 +25,7 @@ test('administrator without explicit membership joins Poker and hosts Chess with
   }finally{await Promise.allSettled(contexts.map(c=>c.close()));}
 });
 async function register(p:Page,name:string){await p.goto('/');await p.getByRole('button',{name:'Create an account',exact:true}).click();await p.getByLabel('Display name',{exact:true}).fill(name);await p.getByLabel('Username',{exact:true}).fill(name);await p.getByLabel('Password',{exact:true}).fill('correct-horse-123');await p.getByRole('button',{name:'Create account',exact:true}).click(); await completeRecovery(p);await expect(p.locator('.app')).toBeVisible();}
-async function api(p:Page,route:string,body?:any,method=body?'POST':'GET'){return p.evaluate(async({route,body,method})=>{const me=await(await fetch('/api/v1/auth/me')).json();const r=await fetch('/api/v1'+route,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf},body:body?JSON.stringify({requestId:crypto.randomUUID(),...body}):undefined});if(!r.ok)throw Error(await r.text());return r.json();},{route,body,method});}
+async function api(p:Page,route:string,body?:any,method=body?'POST':'GET'){if(/^\/games(?:[/?]|$)/.test(route)&&!route.includes('clientVersion='))route+=`${route.includes('?')?'&':'?'}clientVersion=${version}`;return p.evaluate(async({route,body,method})=>{const me=await(await fetch('/api/v1/auth/me')).json();const r=await fetch('/api/v1'+route,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf},body:body?JSON.stringify({requestId:crypto.randomUUID(),...body}):undefined});if(!r.ok)throw Error(await r.text());return r.json();},{route,body,method});}
 async function fixture(browser:Browser,baseURL:string,kind:GameKind,extra=0){
   const contexts=await Promise.all([browser.newContext({permissions:['microphone']}),browser.newContext({permissions:['microphone']})]),[a,b]=await Promise.all(contexts.map(c=>c.newPage())),suffix=Date.now().toString().slice(-7),host='ArcadeA'+suffix,nodes:{id:string;token:string;socket:Socket}[]=[],errors:string[]=[];
   for(const p of [a,b])p.on('pageerror',e=>errors.push(e.message));await register(a,host);await register(b,'ArcadeB'+suffix);
@@ -40,14 +41,89 @@ async function fixture(browser:Browser,baseURL:string,kind:GameKind,extra=0){
   if(kind==='telephone')await nodeCommand(0,'join');if(kind==='words')await nodeCommand(1,'join');
   await a.getByRole('button',{name:'Start game',exact:true}).click();await expect(a.locator('.game-status')).toContainText('Game in progress');
   const get=(p=a)=>api(p,`/games/${g.id}`) as Promise<GameView>;
-  await expect(a.locator('.game-seats + section')).toBeVisible();await a.screenshot({path:`artifacts/evidence/v072-${kind}-desktop.png`});await a.setViewportSize({width:390,height:844});expect(await a.locator('.arcade-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);await a.screenshot({path:`artifacts/evidence/v072-${kind}-mobile.png`});await a.setViewportSize({width:1280,height:900});
+  await expect(a.locator(isQuickGame(kind)?'.quick-game':'.game-seats + section')).toBeVisible();await a.screenshot({path:`artifacts/evidence/v072-${kind}-desktop.png`});await a.setViewportSize({width:390,height:844});expect(await a.locator('.arcade-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);await a.screenshot({path:`artifacts/evidence/v072-${kind}-mobile.png`});await a.setViewportSize({width:1280,height:900});
   return {a,b,get,nodeCommand,native,nodes,host,errors,server,channel,close:async()=>{nodes.forEach(n=>n.socket.disconnect());await Promise.allSettled(contexts.map(c=>c.close()));}};
 }
 test('arcade catalog shows every game player identifier in English and Persian mobile',async({browser})=>{
-  const c=await browser.newContext({permissions:['microphone']}),p=await c.newPage();try{await register(p,'Catalog'+Date.now().toString().slice(-7));await api(p,'/servers',{name:'Catalog lounge'});await p.getByRole('button',{name:'Open Catalog lounge',exact:true}).click();await p.getByRole('button',{name:'Lounge',exact:true}).click();await p.getByRole('button',{name:'Games',exact:true}).click();const cards=p.locator('.arcade-catalog [data-game]');await expect(cards).toHaveCount(8);for(const [id,range] of [['chess','2 players'],['poker','2–8 players'],['domino','2–4 players'],['telephone','3–8 players'],['drawing','2–8 players'],['words','4–8 players'],['ludo','2–4 players'],['four','2 players']])await expect(p.locator(`[data-game="${id}"] .game-player-badge`)).toHaveText(range);
-    await mkdir('artifacts/evidence',{recursive:true});await p.screenshot({path:'artifacts/evidence/v072-catalog-desktop.png'});await p.getByRole('button',{name:'Back to chat',exact:true}).click();const me=(await api(p,'/auth/me')).user;await api(p,'/profile',{displayName:me.displayName,bio:me.bio,status:'online',language:'fa-IR'},'PATCH');await p.reload();await p.setViewportSize({width:390,height:844});await p.getByRole('button',{name:'باز و بسته کردن فهرست',exact:true}).click();await p.getByTitle('Catalog lounge',{exact:true}).click();await p.getByRole('button',{name:'Lounge',exact:true}).click();await p.getByRole('button',{name:'باز و بسته کردن فهرست',exact:true}).click();await p.getByRole('button',{name:'بازی‌ها',exact:true}).click();await expect(p.locator('.arcade-catalog [data-game]')).toHaveCount(8);await expect(p.locator('[data-game="poker"] .game-player-badge')).toHaveText('2 تا 8 بازیکن');expect(await p.locator('.catalog-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);await p.screenshot({path:'artifacts/evidence/v072-catalog-mobile-fa.png'});await writeFile('artifacts/evidence/v072-catalog-browser.json',JSON.stringify({cards:8,allPlayerRanges:true,persianMobile:true,noHorizontalOverflow:true},null,2));
+  const c=await browser.newContext({permissions:['microphone']}),p=await c.newPage();try{await register(p,'Catalog'+Date.now().toString().slice(-7));await api(p,'/servers',{name:'Catalog lounge'});await p.getByRole('button',{name:'Open Catalog lounge',exact:true}).click();await p.getByRole('button',{name:'Lounge',exact:true}).click();await p.getByRole('button',{name:'Games',exact:true}).click();const cards=p.locator('.arcade-catalog [data-game]');await expect(cards).toHaveCount(16);for(const [id,range] of [['chess','2 players'],['poker','2–8 players'],['domino','2–4 players'],['telephone','3–8 players'],['drawing','2–8 players'],['words','4–8 players'],['ludo','2–4 players'],['four','2 players'],...quickGameCatalog.map(g=>[g.id,`${g.min}–${g.max} players`])])await expect(p.locator(`[data-game="${id}"] .game-player-badge`)).toHaveText(range);
+    await mkdir('artifacts/evidence',{recursive:true});await p.screenshot({path:'artifacts/evidence/v072-catalog-desktop.png'});await p.getByRole('button',{name:'Back to chat',exact:true}).click();const me=(await api(p,'/auth/me')).user;await api(p,'/profile',{displayName:me.displayName,bio:me.bio,status:'online',language:'fa-IR'},'PATCH');await p.reload();await p.setViewportSize({width:390,height:844});await p.getByRole('button',{name:'باز و بسته کردن فهرست',exact:true}).click();await p.getByTitle('Catalog lounge',{exact:true}).click();await p.getByRole('button',{name:'Lounge',exact:true}).click();await p.getByRole('button',{name:'باز و بسته کردن فهرست',exact:true}).click();await p.getByRole('button',{name:'بازی‌ها',exact:true}).click();await expect(p.locator('.arcade-catalog [data-game]')).toHaveCount(16);await expect(p.locator('[data-game="poker"] .game-player-badge')).toHaveText('2 تا 8 بازیکن');expect(await p.locator('.catalog-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);await p.screenshot({path:'artifacts/evidence/v072-catalog-mobile-fa.png'});await writeFile('artifacts/evidence/v072-catalog-browser.json',JSON.stringify({cards:16,allPlayerRanges:true,persianMobile:true,noHorizontalOverflow:true},null,2));
   }finally{await c.close();}
 });
+for(const {id} of quickGameCatalog){
+  test(`arcade quick game ${id} opens and accepts a move from the browser`,async({browser,baseURL})=>{
+    const f=await fixture(browser,baseURL!,id);
+    try{
+      const game=f.a.locator('.quick-game'),board=game.locator('.quick-board');
+      const other=f.b.locator('.quick-game');
+      await expect(other).toBeVisible();
+      if(id==='rps'){
+        const started=await f.get();
+        const legacy=await api(f.b,`/games?channelId=${f.channel.id}&clientVersion=`);
+        expect(legacy.games).toEqual([]);
+        await expect(api(f.b,`/games/${started.id}?clientVersion=1.2.7`)).rejects.toThrow('APP_UPDATE_REQUIRED');
+        const notices=await api(f.b,'/features?platform=android&version=1.2.5');
+        expect(notices.announcements).toEqual(expect.arrayContaining([expect.objectContaining({id:'client-update:arcade.quick-games',en:expect.stringContaining('1.2.8')})]));
+        const music=game.getByRole('button',{name:'Game music'});
+        await expect(music).toHaveAttribute('aria-pressed','false');
+        await music.click();
+        await expect.poll(()=>game.locator('audio').evaluate((audio:HTMLAudioElement)=>audio.currentTime)).toBeGreaterThan(0);
+        await music.click();
+        await expect.poll(()=>game.locator('audio').evaluate((audio:HTMLAudioElement)=>audio.paused)).toBe(true);
+        await Promise.all([board.getByRole('button',{name:'Rock',exact:true}).click(),other.getByRole('button',{name:'Scissors',exact:true}).click()]);
+        await expect(game.getByRole('region',{name:'Scores'})).toContainText('Rock');
+        await expect(other.getByRole('region',{name:'Scores'})).toContainText('+1');
+        await f.a.route(/\/api\/v1\/games\?/,async route=>{
+          const response=await route.fetch();
+          const payload=await response.json();
+          payload.clientFeatures=payload.clientFeatures.map((feature:any)=>({...feature,minVersion:'1.2.9'}));
+          await route.fulfill({response,json:payload});
+        });
+        const catalogRefresh=f.a.waitForResponse(response=>response.url().includes('/api/v1/games?')&&response.ok());
+        f.b.once('dialog',dialog=>dialog.accept());
+        await f.b.getByRole('button',{name:'Leave game',exact:true}).click();
+        await catalogRefresh;
+        await f.a.getByRole('button',{name:'All games',exact:true}).click();
+        const catalog=f.a.getByRole('dialog',{name:'Games',exact:true});
+        await expect(catalog.locator('[data-feature="arcade.quick-games"]')).toContainText('1.2.9');
+        await expect(catalog.getByRole('button',{name:'Rock Paper Scissors',exact:true})).toBeDisabled();
+        await expect(catalog.getByRole('button',{name:'Four in a Row',exact:true})).toBeEnabled();
+      }else if(id==='color-sequence'){
+        await expect(board.getByText('Remember this order')).toBeVisible();
+        const sequence=(await f.get()).state.sequence as string;
+        expect(sequence).toMatch(/^[1-4]{3}$/);
+        for(const color of sequence)await board.getByRole('button',{name:new RegExp(`^${color} · `)}).click();
+        await board.getByRole('button',{name:'Submit',exact:true}).click();
+        await expect(game).toContainText('1/2 locked in');
+        expect((await f.get(f.b)).state).not.toHaveProperty('sequence');
+      }else if(id==='number-hunt'){
+        await board.getByLabel('Your number').fill('۲۵');
+        await board.getByRole('button',{name:'Guess',exact:true}).click();
+        await expect(other.locator('.quick-board')).toContainText('guessed 25');
+        expect((await f.get(f.b)).state).not.toHaveProperty('secret');
+      }else if(id==='memory-match'){
+        await board.getByRole('button',{name:'Flip card 1',exact:true}).click();
+        await expect(other.getByRole('button',{name:/^Card 1:/})).toBeVisible();
+        await expect(other.getByRole('button',{name:'Flip card 2',exact:true})).toBeDisabled();
+      }else if(id==='treasure-grid'){
+        await board.getByRole('button',{name:'Dig tile 1',exact:true}).click();
+        await expect(other.getByRole('button',{name:/^Tile 1:/})).toBeVisible();
+        expect((await f.get(f.b)).state).not.toHaveProperty('treasures');
+      }else{
+        const move=id==='high-low'?board.getByRole('button',{name:'Higher',exact:true})
+          :id==='target-dice'?board.getByRole('button',{name:'Bank',exact:true})
+          :board.getByRole('button',{name:/^Tile 1:/});
+        await move.click();
+        await expect(game).toContainText('1/2 locked in');
+        expect((await f.get(f.b)).state.ownEntry).toBeNull();
+        if(id==='target-dice'){
+          await other.getByRole('button',{name:'Roll one more',exact:true}).click();
+          await expect(game.locator('.quick-scores [aria-label^="Die "]')).toBeVisible();
+        }
+      }
+      expect(f.errors).toEqual([]);
+    }finally{await f.close();}
+  });
+}
 test('arcade Four in a Row plays a complete win through both browser controls',async({browser,baseURL})=>{const f=await fixture(browser,baseURL!,'four');try{
   await expect(f.a.getByRole('progressbar',{name:'Turn time remaining'})).toBeVisible();
   const toggle = f.a.getByRole('button',{name:'Game sounds'});

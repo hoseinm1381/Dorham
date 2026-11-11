@@ -19,18 +19,23 @@
       Abort
     ${EndIf}
   ${EndIf}
+  !insertmacro exportPreviousProfile
 !macroend
 
-# The vendored installSection invokes this AFTER CHECK_APP_RUNNING and BEFORE
-# the old uninstaller executes. A failed export aborts without removing old app.
-!macro customBeforeUninstall
+# NSIS initializes the current user's install path before customInit.
+!macro exportPreviousProfile
   ${If} ${FileExists} "$INSTDIR\resources\app.asar"
     InitPluginsDir
     SetOutPath $PLUGINSDIR
     File "${BUILD_RESOURCES_DIR}\migrate-electron.ps1"
     File "${BUILD_RESOURCES_DIR}\export-electron.cjs"
     File "${BUILD_RESOURCES_DIR}\protect-export.ps1"
-    nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\migrate-electron.ps1" -InstallDir "$INSTDIR" -ProfileDir "$APPDATA\@dorhamdesktop" -MigrationDir "$LOCALAPPDATA\Dorham\migration"'
+    !if /FileExists "$%DORHAM_PROFILE_VALIDATOR%"
+      File /oname=ValidateDorham.exe "$%DORHAM_PROFILE_VALIDATOR%"
+      nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\migrate-electron.ps1" -InstallDir "$INSTDIR" -ProfileDir "$APPDATA\@dorhamdesktop" -MigrationDir "$LOCALAPPDATA\Dorham\migration" -Validator "$PLUGINSDIR\ValidateDorham.exe"'
+    !else
+      nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\migrate-electron.ps1" -InstallDir "$INSTDIR" -ProfileDir "$APPDATA\@dorhamdesktop" -MigrationDir "$LOCALAPPDATA\Dorham\migration"'
+    !endif
     Pop $R0
     Pop $R1
     ${If} $R0 != 0

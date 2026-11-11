@@ -96,7 +96,7 @@ func (c *FixtureControls) Handle(b M) any {
 		}
 		return M{"online": c.a.Hub.Users(), "viewers": c.a.Hub.Viewers()}
 	case "games.get":
-		return c.a.Games.View(Str(b, "uid"), Str(b, "id"))
+		return c.a.Games.View(Str(b, "uid"), Str(b, "id"), Str(b, "clientVersion"))
 	case "chess.get":
 		return c.a.Games.ChessView(Str(b, "uid"), Str(b, "id"))
 	case "games.tick", "chess.tick":

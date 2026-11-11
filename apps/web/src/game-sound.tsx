@@ -63,7 +63,7 @@ export function useGameSound(silenced: boolean) {
       oscillator.stop(start + 0.11);
     });
   }
-  return { enabled, toggle, play, unlock: () => { if (enabled && !silenced) void unlock(); } };
+  return { enabled, silenced, toggle, play, unlock: () => { if (enabled && !silenced) void unlock(); } };
 }
 
 export type GameSound = ReturnType<typeof useGameSound>;

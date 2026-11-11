@@ -5,9 +5,11 @@ import type { PublicUser } from '@dorham/contracts';
 import { assetUrl, request, serverUrl } from './api';
 import { currentLanguage, t } from './i18n';
 import { catalogEmojiShortcodes } from './emojis';
+import { supportsClientFeature, type ClientFeature } from '../../../packages/contracts/src/client-features';
+import { ClientFeatureNotice } from './ClientFeatureNotice';
+import { clientVersion } from './client-version';
 import './features.css';
 
-declare const __APP_VERSION__: string;
 export type CatalogItem = {
   id: string;
   kind: 'avatar' | 'badge' | 'frame' | 'banner' | 'emoji' | 'sticker' | 'sound';
@@ -30,6 +32,7 @@ type FeatureState = {
   announcementBoundary: number;
   communityBoundary: number;
   catalogVersion: string;
+  clientFeatures?: ClientFeature[];
 };
 const empty: FeatureState = { grants: {}, screen: 'hidden', soundboard: false, catalog: [], voices: [], plusSelected: false, announcements: [], announcementBoundary: 0, communityBoundary: 0, catalogVersion: "" };
 const initial = { ...empty, refresh: () => {}, byId: new Map<string, CatalogItem>(), shortcodes: catalogEmojiShortcodes([]) };
@@ -52,7 +55,7 @@ export function useFeatureState(socket: RefObject<Socket | null>, uid: string | 
       try {
         const platform = Capacitor.getPlatform() === 'android' ? 'android' : window.desktop ? 'windows' : 'web';
         const cached = current.current?.uid === uid && current.current.origin === origin ? current.current.data : empty;
-        const data = await request<FeatureState>(`/features?platform=${platform}&version=${encodeURIComponent(__APP_VERSION__)}&catalogVersion=${cached.catalogVersion}`, undefined, 'GET', true, { signal: controller.signal });
+        const data = await request<FeatureState>(`/features?platform=${platform}&version=${encodeURIComponent(clientVersion)}&compatibility=1&catalogVersion=${cached.catalogVersion}`, undefined, 'GET', true, { signal: controller.signal });
         if (!controller.signal.aborted) {
           const next = { uid, origin, data: { ...data, catalog: data.catalog ?? cached.catalog } };
           current.current = next;
@@ -107,9 +110,11 @@ export function RankBadge({ user, label = false }: { user: PublicUser; label?: b
 }
 
 export function FeatureAnnouncements() {
-  const { announcements } = useFeatures();
+  const { announcements, clientFeatures } = useFeatures();
   const language = currentLanguage() === 'fa-IR' ? 'fa' : 'en';
-  return <>{announcements.map(item => <p key={item.id} className="feature-announcement" role="status" dir="auto">{item[language] || item.en || item.fa}</p>)}</>;
+  return <>{announcements.map(item => <p key={item.id} className="feature-announcement" role="status" dir="auto">{item[language] || item.en || item.fa}</p>)}
+    {clientFeatures?.filter(feature => !supportsClientFeature(feature, clientVersion)).map(feature => <ClientFeatureNotice key={feature.id} feature={feature}/>)}
+  </>;
 }
 
 export function ProfileCatalog({ me, error }: { me: PublicUser; error: (err: unknown) => void }) {

@@ -441,7 +441,7 @@ func (h *Hub) handlers(p *peer) {
 	})
 	h.handle(p, "game:watch", func(b M) any {
 		id := VString(b, "id", 1, 80, false)
-		view := h.a.Games.View(p.uid, id)
+		view := h.a.Games.View(p.uid, id, S(b["clientVersion"]))
 		p.mu.Lock()
 		p.gameWatching = id
 		p.mu.Unlock()

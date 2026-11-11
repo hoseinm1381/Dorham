@@ -160,10 +160,10 @@ func TestFeatureCatalogAndVoicePolicies(t *testing.T) {
 	call(adminToken, "PUT", "/admin/features/settings/speech", M{"enabled": true, "endpoint": "http://127.0.0.1/speech", "model": "bad", "voice": "bad", "label": "Bad", "timeoutSeconds": 5, "monthlyCharacters": 400, "globalMonthlyCharacters": 400}, 400)
 
 	call(adminToken, "POST", "/admin/features/announcements", M{"en": "Maintenance", "fa": "", "platform": "web", "version": "1.2.0", "startsAt": Now() - 100, "endsAt": Now() + 60000}, 200)
-	if len(Arr(config(token)["announcements"])) != 1 {
+	if len(Arr(call(token, "GET", "/features?platform=web&version=1.2.0&compatibility=1", nil, 200)["announcements"])) != 1 {
 		t.Fatal("notice not delivered to target")
 	}
-	if len(Arr(call(token, "GET", "/features?platform=android&version=1.2.0", nil, 200)["announcements"])) != 0 {
+	if len(Arr(call(token, "GET", "/features?platform=android&version=1.2.0&compatibility=1", nil, 200)["announcements"])) != 0 {
 		t.Fatal("notice leaked to untargeted platform")
 	}
 	call(adminToken, "PUT", "/admin/features/users/"+user, M{"feature": "profilePlus", "enabled": true, "expiresAt": Now() + int64(time.Minute/time.Millisecond)}, 200)

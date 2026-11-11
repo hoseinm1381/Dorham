@@ -51,7 +51,7 @@ static bool writeAll(HANDLE pipe, const void* buffer, DWORD length) {
 
 int wmain(int count, wchar_t** arguments) {
   // include-window <HWND> <parent PID>, or exclude-process <own PID> <parent PID>.
-  if (count != 4) return 2;
+  if (count != 4 && count != 5) return 2;
   wchar_t* end = nullptr;
   const unsigned long long identifier = wcstoull(arguments[2], &end, 10);
   if (!identifier || !end || *end) return 2;
@@ -62,6 +62,10 @@ int wmain(int count, wchar_t** arguments) {
   DWORD target = static_cast<DWORD>(identifier);
   HWND handle = reinterpret_cast<HWND>(static_cast<uintptr_t>(identifier));
   if (window && (!IsWindow(handle) || !GetWindowThreadProcessId(handle, &target))) return 3;
+  if (count == 5) {
+    const auto expected = wcstoul(arguments[4], &end, 10);
+    if (!window || !expected || !end || *end || target != expected) return 3;
+  }
   if (!target || (window && target == parentId)) return 3;
   HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, parentId);
   if (!parent) return 3;

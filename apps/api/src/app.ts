@@ -29,6 +29,7 @@ import { mediaAdmission } from './media-admission';
 import { publicAccountRoutes, protectedAccountRoutes, audit, initialRecoveryCodes } from './accounts';
 import { ChessService, chessCreate, chessCommand } from './chess';
 import { serverIcons } from './server-icons';
+import { clientFeatures, gameClientFeatures, legacyFeatureNotices } from '../../../packages/contracts/src/client-features';
 import { GameService, gameCreate, gameCommand } from './games/service';
 
 declare module 'fastify' { interface FastifyRequest { account: Row; session: Row; } }
@@ -178,10 +179,17 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
   await app.register(async api => {
     api.addHook('preHandler', authenticate);
     protectedAccountRoutes(api, service, disconnectInvalidSessions);
-    api.get('/games', async req => { const channelId=id.parse((req.query as any).channelId); return {games:await games.list(req.account.id,channelId),chess:await chess.voiceGames(req.account.id,channelId)}; });
-    api.post('/games', {bodyLimit:16384}, async req => games.create(req.account.id,gameCreate.parse(req.body)));
-    api.get('/games/:id', async req => games.get(req.account.id,id.parse((req.params as any).id)));
-    api.post('/games/:id', {bodyLimit:16384}, async req => games.command(req.account.id,id.parse((req.params as any).id),gameCommand.parse(req.body)));
+    api.get('/features', async (req, reply) => {
+      const q = req.query as Record<string, unknown>;
+      reply.header('Cache-Control', 'private, no-store');
+      return { grants: {}, screen: 'hidden', soundboard: false, catalog: [], voices: [], plusSelected: false,
+        announcements: q.compatibility === '1' ? [] : legacyFeatureNotices(q.platform, q.version),
+        announcementBoundary: 0, communityBoundary: 0, catalogVersion: '', clientFeatures };
+    });
+    api.get('/games', async req => { const q = req.query as Record<string, unknown>, channelId=id.parse(q.channelId); return {games:await games.list(req.account.id,channelId,q.clientVersion),chess:await chess.voiceGames(req.account.id,channelId),clientFeatures:gameClientFeatures}; });
+    api.post('/games', {bodyLimit:16384}, async req => games.create(req.account.id,gameCreate.parse(req.body),(req.query as Record<string, unknown>).clientVersion));
+    api.get('/games/:id', async req => games.get(req.account.id,id.parse((req.params as any).id),(req.query as Record<string, unknown>).clientVersion));
+    api.post('/games/:id', {bodyLimit:16384}, async req => games.command(req.account.id,id.parse((req.params as any).id),gameCommand.parse(req.body),(req.query as Record<string, unknown>).clientVersion));
     api.get('/chess', async req => { const q = req.query as any; return { games: q.channelId ? await chess.voiceGames(req.account.id, id.parse(q.channelId)) : await chess.list(req.account.id, id.parse(q.serverId)) }; });
     api.post('/chess', async req => chess.create(req.account.id, chessCreate.parse(req.body)));
     api.get('/chess/:id', async req => chess.get(req.account.id, id.parse((req.params as any).id)));
@@ -379,7 +387,7 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
       finally { const elapsed = performance.now() - started; metric.totalMs += elapsed; metric.maxMs = Math.max(metric.maxMs, elapsed); if (elapsed > 500) metric.slow++; }
     });
     handle('message:send', async b => { const m = messageSchema.parse(b); return service.send(socket.data.userId, m.requestId, m.conversationId, m.content, m.replyTo, m.attachmentIds, m.tts); });
-    handle('game:watch', async b => {const gameId=id.parse(b.id);const view=await games.get(socket.data.userId,gameId);socket.data.gameWatching=gameId;return view;});
+    handle('game:watch', async b => {const gameId=id.parse(b.id);const view=await games.get(socket.data.userId,gameId,b.clientVersion);socket.data.gameWatching=gameId;return view;});
     handle('game:unwatch', async b => {if(socket.data.gameWatching===id.parse(b.id))socket.data.gameWatching=null;return {};});
     handle('typing', async b => { const v = z.object({ conversationId: id, active: z.boolean() }).parse(b); const audience = await service.conversationAudience([...io.sockets.sockets.values()].filter(s => s.id !== socket.id).map(s => ({ socketId: s.id, userId: s.data.userId })), v.conversationId, socket.data.userId); for (const id of audience) io.sockets.sockets.get(id)?.emit('typing', { ...v, userId: socket.data.userId }); return {}; });
     handle('voice:join', async b => { const v = z.object({ channelId: id, eligible: z.boolean() }).parse(b); const result = await service.joinVoice(socket.data.userId, socket.id!, v.channelId, v.eligible); socket.data.voiceChannel = v.channelId; return result; });

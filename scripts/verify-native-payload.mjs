@@ -56,8 +56,10 @@ try {
   const apkFiles = await apkEntries(apk);
   const extras = [...apkFiles.keys()].filter(name => name.startsWith('assets/public/') && !webFiles.includes(name.slice('assets/public/'.length)));
   assert.ok(extras.every(name => ['capacitor.js','capacitor.plugins.json','cordova.js','cordova_plugins.js'].includes(name.slice('assets/public/'.length))), `Unexpected Android web files: ${extras}`);
-  for (const file of webFiles) { const bytes = apkFiles.get('assets/public/' + file); assert.ok(bytes, `APK web file missing: ${file}`); assert.equal(sha(bytes), await fileSHA(path.join(root, 'apps/web/dist', file)), `Android web bytes: ${file}`); }
-  report.packageStaticChecks.androidWebFilesExact = webFiles.length;
+  // Digital Asset Links are served by the HTTPS host. AAPT omits dot directories.
+  const androidWebFiles = webFiles.filter(file => file !== '.well-known/assetlinks.json');
+  for (const file of androidWebFiles) { const bytes = apkFiles.get('assets/public/' + file); assert.ok(bytes, `APK web file missing: ${file}`); assert.equal(sha(bytes), await fileSHA(path.join(root, 'apps/web/dist', file)), `Android web bytes: ${file}`); }
+  report.packageStaticChecks.androidWebFilesExact = androidWebFiles.length;
   report.packageStaticChecks.androidCapacitorGeneratedExtraFiles = extras;
   const native64 = [];
   for (const [name, bytes] of apkFiles) {

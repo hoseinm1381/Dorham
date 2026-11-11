@@ -100,6 +100,9 @@ func (a *App) registerFeatures() {
 					announcementBoundary = boundary
 				}
 			}
+			if r.Query("compatibility") != "1" {
+				announcements = append(announcements, legacyClientFeatureNotices(platform, version)...)
+			}
 			voices := []M{}
 			if _, allowed := grants["ttsPlus"]; allowed {
 				if speech := featureSetting(tx, "speech"); speechEnabled(speech) {
@@ -117,6 +120,7 @@ func (a *App) registerFeatures() {
 				}
 			}
 			response := M{"grants": grants, "screen": visibility, "voices": voices, "plusSelected": len(voices) > 0 && Bool(tx.One("SELECT speech_plus FROM users WHERE id=?", r.UID()), "speech_plus"), "announcements": announcements, "announcementBoundary": announcementBoundary, "communityBoundary": communityBoundary, "soundboard": settings["soundboard"] != false}
+			response["clientFeatures"] = clientFeatures
 			memberships := map[string]bool{}
 			for _, member := range tx.All("SELECT server_id FROM members WHERE user_id=?", r.UID()) {
 				memberships[Str(member, "server_id")] = true

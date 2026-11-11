@@ -1,0 +1,79 @@
+use tauri::AppHandle;
+use url::Url;
+use webview2_com::Microsoft::Web::WebView2::Win32::*;
+use webview2_com::WebResourceRequestedEventHandler;
+use windows::Win32::UI::Shell::SHCreateMemStream;
+use windows_core::{HSTRING, Interface, PWSTR, Result, w};
+
+pub fn serve(core: &ICoreWebView2, app: AppHandle, allow_media: bool) -> Result<()> {
+    let core2: ICoreWebView2_2 = core.cast()?;
+    let environment = unsafe { core2.Environment()? };
+    let mut token = 0;
+    unsafe {
+        core.AddWebResourceRequestedFilter(
+            w!("https://localhost/*"),
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+        )?;
+        core.add_WebResourceRequested(&WebResourceRequestedEventHandler::create(Box::new(move |sender, args| {
+            let Some(args) = args else { return Ok(()) };
+            let request = args.Request()?;
+            let mut uri = PWSTR::null();
+            request.Uri(&mut uri)?;
+            let uri = webview2_com::take_pwstr(uri);
+            let url = Url::parse(&uri).ok()
+                .filter(|url| url.scheme() == "https" && url.host_str() == Some("localhost") && url.port().is_none()
+                    && url.username().is_empty() && url.password().is_none());
+            if let Some(path) = url.as_ref().and_then(|url| url.path().strip_prefix("/__dorham_media/")) {
+                let mut document = PWSTR::null();
+                if let Some(sender) = sender {
+                    sender.Source(&mut document)?;
+                }
+                let document = webview2_com::take_pwstr(document);
+                let mut method = PWSTR::null();
+                request.Method(&mut method)?;
+                let method = webview2_com::take_pwstr(method);
+                let frame = if allow_media && method == "GET"
+                    && Url::parse(&document).is_ok_and(|url| crate::trusted_main_url(&url))
+                {
+                    media(&app, path)
+                } else {
+                    Err("Untrusted screen media request".into())
+                };
+                let (code, reason, bytes, content_type) = match frame {
+                    Ok(bytes) if bytes.is_empty() => (204, "No Content", bytes, "application/octet-stream"),
+                    Ok(bytes) => (200, "OK", bytes, "application/octet-stream"),
+                    Err(error) => (410, "Gone", error.into_bytes(), "text/plain; charset=utf-8"),
+                };
+                let headers = HSTRING::from(format!("Content-Type: {content_type}\r\nCache-Control: no-store\r\nCross-Origin-Resource-Policy: same-origin\r\nX-Content-Type-Options: nosniff"));
+                let stream = (!bytes.is_empty()).then(|| SHCreateMemStream(Some(&bytes))).flatten();
+                let response = environment.CreateWebResourceResponse(stream.as_ref(), code, &HSTRING::from(reason), &headers)?;
+                return args.SetResponse(&response);
+            }
+            let asset = url.and_then(|url| app.asset_resolver().get_for_scheme(url.path().trim_start_matches('/').to_owned(), true));
+            let response = if let Some(asset) = asset {
+                let headers = HSTRING::from(format!(
+                    "Content-Type: {}\r\nX-Content-Type-Options: nosniff\r\nCross-Origin-Resource-Policy: same-origin\r\nReferrer-Policy: no-referrer",
+                    asset.mime_type
+                ));
+                let stream = SHCreateMemStream(Some(&asset.bytes));
+                environment.CreateWebResourceResponse(stream.as_ref(), 200, w!("OK"), &headers)?
+            } else {
+                environment.CreateWebResourceResponse(None, 404, w!("Not Found"), w!("Cache-Control: no-store"))?
+            };
+            args.SetResponse(&response)
+        })), &mut token)?;
+    }
+    Ok(())
+}
+
+fn media(app: &AppHandle, path: &str) -> std::result::Result<Vec<u8>, String> {
+    let (kind, id) = path.split_once('/').ok_or("Invalid screen media request")?;
+    let id = id
+        .parse::<u64>()
+        .map_err(|_| "Invalid screen share identifier")?;
+    match kind {
+        "video" => crate::capture::video_frame(app, id),
+        "audio" => crate::capture::audio_frame(app, id),
+        _ => Err("Invalid screen media request".into()),
+    }
+}

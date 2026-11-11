@@ -25,7 +25,11 @@ type Games struct {
 	deadlineDirty map[string]bool
 }
 
-var gameLimits = map[string][2]int{"poker": {2, 8}, "domino": {2, 4}, "telephone": {3, 8}, "drawing": {2, 8}, "words": {4, 8}, "ludo": {2, 4}, "four": {2, 2}}
+var gameLimits = map[string][2]int{
+	"poker": {2, 8}, "domino": {2, 4}, "telephone": {3, 8}, "drawing": {2, 8}, "words": {4, 8}, "ludo": {2, 4}, "four": {2, 2},
+	"rps": {2, 16}, "high-low": {2, 16}, "target-dice": {2, 16}, "odd-one": {2, 16}, "color-sequence": {2, 16},
+	"memory-match": {2, 8}, "number-hunt": {2, 8}, "treasure-grid": {2, 4},
+}
 
 func NewGames(a *App) *Games {
 	g := &Games{a: a, online: a.Hub.Online, now: gamesNow, stop: make(chan struct{}), wake: make(chan struct{}, 1), rates: map[string][2]int64{}, observed: map[string]M{}, chessObserved: map[string]*ChessGame{}}
@@ -250,24 +254,28 @@ func (g *Games) summary(s M, uid string) M {
 func gameJoinable(s M) bool {
 	return S(s["status"]) == "waiting" || (S(s["status"]) == "playing" && S(s["kind"]) == "poker" && S(Obj(s["state"])["phase"]) == "between")
 }
-func (g *Games) List(uid, channel string) any {
+func (g *Games) List(uid, channel, version string) any {
 	g.requireVoice(g.a.DB, uid, channel)
 	out := []M{}
 	for _, r := range g.a.DB.All("SELECT state FROM game_sessions WHERE channel_id=? AND status<>'finished' ORDER BY updated_at DESC LIMIT 60", channel) {
-		out = append(out, g.summary(Obj(Parse(S(r["state"]))), uid))
+		s := Obj(Parse(S(r["state"])))
+		if clientSupportsGame(S(s["kind"]), version) {
+			out = append(out, g.summary(s, uid))
+		}
 	}
 	return out
 }
-func (g *Games) View(uid, id string) any {
+func (g *Games) View(uid, id, version string) any {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.tickGame(id)
-	return g.view(uid, id)
+	return g.view(uid, id, version)
 }
-func (g *Games) view(uid, id string) M {
+func (g *Games) view(uid, id, version string) M {
 	return g.a.DB.Tx(func(tx *DB) any {
 		s := g.load(tx, id)
 		g.allowed(tx, uid, s)
+		requireGameClient(S(s["kind"]), version)
 		self := gameSeat(s, uid)
 		voice := tx.One("SELECT user_id FROM voice_members WHERE user_id=? AND channel_id=?", uid, s["channelId"]) != nil
 		state := Obj(s["state"])
@@ -288,10 +296,11 @@ func (g *Games) busy(tx *DB, uid, except string) bool {
 func (g *Games) free(tx *DB, uid, except string) {
 	Check(!g.busy(tx, uid, except) && tx.One("SELECT id FROM chess_games WHERE status<>'finished' AND (white_id=? OR black_id=?)", uid, uid) == nil, 409, "CAPACITY", "Finish or leave your existing game first.")
 }
-func (g *Games) create(uid string, b M) any {
+func (g *Games) create(uid, version string, b M) any {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	validateGameCreate(b)
+	requireGameClient(S(b["kind"]), version)
 	r := Obj(g.a.Service.Mutate(uid, S(b["requestId"]), "game.create", b, func(tx *DB) any {
 		channel := g.requireVoice(tx, uid, S(b["channelId"]))
 		g.free(tx, uid, "")
@@ -306,9 +315,9 @@ func (g *Games) create(uid string, b M) any {
 	}))
 	g.changed(S(r["id"]), nil)
 	g.reconcile()
-	return g.view(uid, S(r["id"]))
+	return g.view(uid, S(r["id"]), version)
 }
-func (g *Games) command(uid, id string, b M) any {
+func (g *Games) command(uid, id, version string, b M) any {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	validateGameCommand(b)
@@ -325,13 +334,18 @@ func (g *Games) command(uid, id string, b M) any {
 	r := Obj(g.a.Service.Mutate(uid, S(b["requestId"]), "game.command", Merge(M{"id": id}, b), func(tx *DB) any {
 		s := g.load(tx, id)
 		g.allowed(tx, uid, s)
+		requireGameClient(S(s["kind"]), version)
 		Check(S(s["status"]) != "finished", 409, "GAME_FINISHED", "This game has ended.")
 		a, state := Obj(b["action"]), Obj(s["state"])
-		concurrent := (S(s["kind"]) == "drawing" || S(s["kind"]) == "telephone") && S(b["kind"]) == "action" && a != nil && S(a["token"]) == S(state["token"])
-		Check(N(s["revision"]) == N(b["revision"]) || concurrent, 409, "STALE_GAME", "The game changed. Review the latest state.")
+		kind := S(b["kind"])
+		game := S(s["kind"])
+		concurrent := (game == "drawing" || game == "telephone") && kind == "action" && S(a["token"]) == S(state["token"])
+		quickConcurrent := isQuickGame(game) && N(b["revision"]) < N(s["revision"]) &&
+			((kind == "join" && S(s["status"]) == "waiting") ||
+				(kind == "action" && S(a["type"]) == "quick-pick" && S(state["phase"]) == "quick-pick" && S(a["token"]) == S(state["token"])))
+		Check(N(s["revision"]) == N(b["revision"]) || concurrent || quickConcurrent, 409, "STALE_GAME", "The game changed. Review the latest state.")
 		roster := false
 		seat := gameSeat(s, uid)
-		kind := S(b["kind"])
 		if kind != "leave" && kind != "close" {
 			g.requireVoice(tx, uid, S(s["channelId"]))
 		}
@@ -420,7 +434,7 @@ func (g *Games) command(uid, id string, b M) any {
 	if S(b["kind"]) == "leave" {
 		return M{"left": true, "id": id}
 	}
-	return g.view(uid, id)
+	return g.view(uid, id, version)
 }
 func gameComplete(s M) {
 	if state := Obj(s["state"]); s["state"] != nil && state["result"] != nil {
@@ -709,11 +723,11 @@ func (g *Games) RegisterRoutes() {
 	a := g.a
 	a.Route("GET", "/api/v1/games", true, func(r *Request) any {
 		c := r.Query("channelId")
-		return M{"games": g.List(r.UID(), c), "chess": g.ChessList(r.UID(), c)}
+		return M{"games": g.List(r.UID(), c, r.Query("clientVersion")), "chess": g.ChessList(r.UID(), c), "clientFeatures": gameFeatureRequirements()}
 	})
-	a.Route("POST", "/api/v1/games", true, func(r *Request) any { return g.create(r.UID(), r.Body) })
-	a.Route("GET", "/api/v1/games/{id}", true, func(r *Request) any { return g.View(r.UID(), r.Param("id")) })
-	a.Route("POST", "/api/v1/games/{id}", true, func(r *Request) any { return g.command(r.UID(), r.Param("id"), r.Body) })
+	a.Route("POST", "/api/v1/games", true, func(r *Request) any { return g.create(r.UID(), r.Query("clientVersion"), r.Body) })
+	a.Route("GET", "/api/v1/games/{id}", true, func(r *Request) any { return g.View(r.UID(), r.Param("id"), r.Query("clientVersion")) })
+	a.Route("POST", "/api/v1/games/{id}", true, func(r *Request) any { return g.command(r.UID(), r.Param("id"), r.Query("clientVersion"), r.Body) })
 	a.Route("GET", "/api/v1/chess", true, func(r *Request) any {
 		if c := r.Query("channelId"); c != "" {
 			return M{"games": g.ChessList(r.UID(), c)}

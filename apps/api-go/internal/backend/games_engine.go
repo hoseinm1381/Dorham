@@ -137,6 +137,9 @@ func gameWords(settings M) []any {
 	return gameShuffle(a)
 }
 func startGameEngine(kind string, n int, settings M, now int64) M {
+	if isQuickGame(kind) {
+		return quickStart(kind, n, now)
+	}
 	var s M
 	switch kind {
 	case "four":
@@ -181,6 +184,10 @@ func startGameEngine(kind string, n int, settings M, now int64) M {
 }
 func gameAct(kind string, s M, seat int, a, settings M, now int64) {
 	gameInsist(a != nil && S(a["type"]) != "")
+	if isQuickGame(kind) {
+		quickAction(kind, s, seat, a, now)
+		return
+	}
 	switch kind {
 	case "four":
 		fourAction(s, seat, a, now)
@@ -199,6 +206,9 @@ func gameAct(kind string, s M, seat int, a, settings M, now int64) {
 	}
 }
 func gameProject(kind string, s M, seat int) M {
+	if isQuickGame(kind) {
+		return quickProject(kind, s, seat)
+	}
 	switch kind {
 	case "poker":
 		return pokerView(s, seat)
@@ -236,6 +246,10 @@ func gameProject(kind string, s M, seat int) M {
 	}
 }
 func gameTimeout(kind string, s, settings M, now int64) {
+	if isQuickGame(kind) {
+		quickTimeout(kind, s, now)
+		return
+	}
 	switch kind {
 	case "drawing":
 		drawingTick(s, settings, now)
@@ -258,6 +272,9 @@ func gameTimeout(kind string, s, settings M, now int64) {
 func gameDepart(kind string, s M, seat int, settings M, now int64) {
 	active := Arr(s["active"])
 	active[seat] = false
+	if isQuickGame(kind) && S(s["phase"]) == "ended" {
+		return
+	}
 	remaining := []int{}
 	for i, v := range active {
 		if B(v) {
@@ -275,6 +292,10 @@ func gameDepart(kind string, s M, seat int, settings M, now int64) {
 		if len(remaining) > 0 {
 			s["result"] = fmt.Sprintf("Player %d wins by departure", remaining[0]+1)
 		}
+		return
+	}
+	if isQuickGame(kind) {
+		quickDepart(kind, s, seat, now)
 		return
 	}
 	next := remaining[0]

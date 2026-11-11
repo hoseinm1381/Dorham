@@ -1,0 +1,8 @@
+[
+  {
+    "id": "arcade.quick-games",
+    "minVersion": "1.2.8",
+    "name": { "en": "the eight new voice games", "fa": "هشت بازی صوتی جدید" },
+    "gameKinds": ["rps", "high-low", "target-dice", "odd-one", "color-sequence", "memory-match", "number-hunt", "treasure-grid"]
+  }
+]

@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+const gameTestVersion = "1.2.8"
+
 func gamesTestFixture(t *testing.T) (*Games, *int64, map[string]bool) {
 	t.Helper()
 	c := Config{DataDir: t.TempDir(), MaxDatabaseMiB: 32, MaxUsers: 100, MaxOnline: 20, MaxVoice: 16, GuestsEnabled: true}
@@ -56,26 +58,26 @@ func gamesTestCommand(g *Games, uid string, s M, kind string, action M) M {
 	if action != nil {
 		b["action"] = action
 	}
-	return Obj(g.command(uid, S(s["id"]), b))
+	return Obj(g.command(uid, S(s["id"]), gameTestVersion, b))
 }
 func TestGamesAllLobbiesPermissionsPrivacyAndIdempotency(t *testing.T) {
 	for kind, limit := range gameLimits {
 		t.Run(kind, func(t *testing.T) {
 			g, _, _ := gamesTestFixture(t)
-			s := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": kind, "settings": M{"maxPlayers": limit[1]}}))
+			s := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": kind, "settings": M{"maxPlayers": limit[1]}}))
 			if S(s["status"]) != "waiting" || gi(s["players"]) != 1 || S(Obj(s["state"])["phase"]) != "lobby" {
 				t.Fatal("waiting projection")
 			}
 			gamesExpectError(t, "CAPACITY", func() {
-				g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": kind, "settings": M{"maxPlayers": limit[1]}})
+				g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": kind, "settings": M{"maxPlayers": limit[1]}})
 			})
-			gamesExpectError(t, "FORBIDDEN", func() { g.View("outsider", S(s["id"])) })
+			gamesExpectError(t, "FORBIDDEN", func() { g.View("outsider", S(s["id"]), gameTestVersion) })
 			gamesExpectError(t, "NOT_READY", func() { gamesTestCommand(g, "a", s, "start", nil) })
 			players := []string{"a", "b", "c", "d", "e"}
 			for i := 1; i < limit[0]; i++ {
 				body := M{"requestId": ID(), "revision": s["revision"], "kind": "join"}
-				s = Obj(g.command(players[i], S(s["id"]), body))
-				again := Obj(g.command(players[i], S(s["id"]), body))
+				s = Obj(g.command(players[i], S(s["id"]), gameTestVersion, body))
+				again := Obj(g.command(players[i], S(s["id"]), gameTestVersion, body))
 				if N(again["revision"]) != N(s["revision"]) {
 					t.Fatal("duplicate join changed state")
 				}
@@ -84,7 +86,7 @@ func TestGamesAllLobbiesPermissionsPrivacyAndIdempotency(t *testing.T) {
 			if S(s["status"]) != "playing" {
 				t.Fatal("start")
 			}
-			watch := Obj(g.View("e", S(s["id"])))
+			watch := Obj(g.View("e", S(s["id"]), gameTestVersion))
 			if gi(watch["self"]) != -1 || B(watch["canPlay"]) {
 				t.Fatal("spectator seat")
 			}
@@ -126,38 +128,38 @@ func TestGamesAllLobbiesPermissionsPrivacyAndIdempotency(t *testing.T) {
 }
 func TestGamesRetriesPauseBudgetRestartAndHostTransfer(t *testing.T) {
 	g, now, online := gamesTestFixture(t)
-	s := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
+	s := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
 	s = gamesTestCommand(g, "b", s, "join", nil)
 	s = gamesTestCommand(g, "a", s, "start", nil)
 	gamesExpectError(t, "CAPACITY", func() {
 		g.chessCreate("a", M{"requestId": ID(), "serverId": "server", "mode": "standard", "difficulty": "Easy", "minutes": 3, "increment": 0})
 	})
 	body := M{"requestId": ID(), "revision": s["revision"], "kind": "action", "action": M{"type": "drop", "column": 0}}
-	s = Obj(g.command("a", S(s["id"]), body))
-	again := Obj(g.command("a", S(s["id"]), body))
+	s = Obj(g.command("a", S(s["id"]), gameTestVersion, body))
+	again := Obj(g.command("a", S(s["id"]), gameTestVersion, body))
 	if JSON(s["state"]) != JSON(again["state"]) {
 		t.Fatal("duplicate move")
 	}
 	conflict := Clone(body)
 	Obj(conflict["action"])["column"] = 1
-	gamesExpectError(t, "IDEMPOTENCY_CONFLICT", func() { g.command("a", S(s["id"]), conflict) })
+	gamesExpectError(t, "IDEMPOTENCY_CONFLICT", func() { g.command("a", S(s["id"]), gameTestVersion, conflict) })
 	deadline := N(s["deadline"])
 	*now += 3000
 	online["a"] = false
 	g.ReconcileVoice()
-	s = Obj(g.View("a", S(s["id"])))
+	s = Obj(g.View("a", S(s["id"]), gameTestVersion))
 	if N(s["pausedUntil"]) != *now+30000 {
 		t.Fatal("pause missing")
 	}
 	*now += 9000
 	online["a"] = true
 	g.ReconcileVoice()
-	s = Obj(g.View("a", S(s["id"])))
+	s = Obj(g.View("a", S(s["id"]), gameTestVersion))
 	if N(s["pausedUntil"]) != 0 || N(s["deadline"]) != deadline+9000 || N(Obj(Arr(s["seats"])[0])["grace"]) != 21000 {
 		t.Fatal("reconnect grace")
 	}
 	g.initialize()
-	s = Obj(g.View("b", S(s["id"])))
+	s = Obj(g.View("b", S(s["id"]), gameTestVersion))
 	if N(s["pausedUntil"]) != *now+21000 {
 		t.Fatal("restart grace")
 	}
@@ -168,14 +170,14 @@ func TestGamesRetriesPauseBudgetRestartAndHostTransfer(t *testing.T) {
 	g.mu.Lock()
 	g.tick()
 	g.mu.Unlock()
-	s = Obj(g.View("b", S(s["id"])))
+	s = Obj(g.View("b", S(s["id"]), gameTestVersion))
 	if S(s["status"]) != "finished" || S(s["result"]) != "Player 2 wins by departure" {
 		t.Fatal("departure did not settle")
 	}
-	s = Obj(g.create("b", M{"requestId": ID(), "channelId": "voice", "kind": "domino", "settings": M{"maxPlayers": 4}}))
+	s = Obj(g.create("b", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "domino", "settings": M{"maxPlayers": 4}}))
 	s = gamesTestCommand(g, "c", s, "join", nil)
 	gamesTestCommand(g, "b", s, "leave", nil)
-	s = Obj(g.View("c", S(s["id"])))
+	s = Obj(g.View("c", S(s["id"]), gameTestVersion))
 	if S(s["hostId"]) != "c" || gi(s["players"]) != 1 {
 		t.Fatal("host transfer")
 	}
@@ -241,7 +243,7 @@ func TestChessVoiceSeatRetriesClockAndRestart(t *testing.T) {
 }
 func TestGamesBlocksVoiceAndConcurrentPrivateSubmissions(t *testing.T) {
 	g, now, _ := gamesTestFixture(t)
-	s := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": "telephone", "settings": M{"maxPlayers": 4}}))
+	s := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "telephone", "settings": M{"maxPlayers": 4}}))
 	g.a.DB.Run("INSERT INTO user_blocks(user_id,blocked_id) VALUES('a','b')")
 	gamesExpectError(t, "FORBIDDEN", func() { gamesTestCommand(g, "b", s, "join", nil) })
 	g.a.DB.Run("DELETE FROM user_blocks")
@@ -250,35 +252,35 @@ func TestGamesBlocksVoiceAndConcurrentPrivateSubmissions(t *testing.T) {
 	s = gamesTestCommand(g, "a", s, "start", nil)
 	revision, token := s["revision"], Obj(s["state"])["token"]
 	for _, uid := range []string{"a", "b", "c"} {
-		s = Obj(g.command(uid, S(s["id"]), M{"requestId": ID(), "revision": revision, "kind": "action", "action": M{"type": "submit", "token": token, "text": "private-" + uid}}))
+		s = Obj(g.command(uid, S(s["id"]), gameTestVersion, M{"requestId": ID(), "revision": revision, "kind": "action", "action": M{"type": "submit", "token": token, "text": "private-" + uid}}))
 	}
 	if gi(Obj(s["state"])["step"]) != 1 {
 		t.Fatal("concurrent token submissions stalled")
 	}
-	watch := Obj(g.View("d", S(s["id"])))
+	watch := Obj(g.View("d", S(s["id"]), gameTestVersion))
 	if strings.Contains(JSON(watch), "private-") {
 		t.Fatal("telephone secret leaked")
 	}
 	gamesExpectError(t, "INVALID_MOVE", func() { gamesTestCommand(g, "a", s, "action", M{"type": "submit", "token": token, "text": "stale"}) })
 	g.a.DB.Run("UPDATE voice_members SET channel_id='other' WHERE user_id='d'")
-	gamesExpectError(t, "VOICE_REQUIRED", func() { g.View("d", S(s["id"])) })
-	gamesExpectError(t, "VOICE_REQUIRED", func() { g.List("d", "voice") })
+	gamesExpectError(t, "VOICE_REQUIRED", func() { g.View("d", S(s["id"]), gameTestVersion) })
+	gamesExpectError(t, "VOICE_REQUIRED", func() { g.List("d", "voice", gameTestVersion) })
 	for _, uid := range []string{"a", "b"} {
-		gamesTestCommand(g, uid, Obj(g.View(uid, S(s["id"]))), "leave", nil)
+		gamesTestCommand(g, uid, Obj(g.View(uid, S(s["id"]), gameTestVersion)), "leave", nil)
 	}
-	lobby := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
+	lobby := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
 	*now += 600001
 	g.mu.Lock()
 	g.tick()
 	g.mu.Unlock()
-	lobby = Obj(g.View("a", S(lobby["id"])))
+	lobby = Obj(g.View("a", S(lobby["id"]), gameTestVersion))
 	if S(lobby["result"]) != "Lobby expired" {
 		t.Fatal("lobby never expired")
 	}
 }
 func TestGamesAtomicLastSeat(t *testing.T) {
 	g, _, _ := gamesTestFixture(t)
-	s := Obj(g.create("a", M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
+	s := Obj(g.create("a", gameTestVersion, M{"requestId": ID(), "channelId": "voice", "kind": "four", "settings": M{"maxPlayers": 2}}))
 	results := make(chan any, 3)
 	for _, uid := range []string{"b", "c", "d"} {
 		go func(uid string) {
@@ -307,7 +309,7 @@ func TestGamesAtomicLastSeat(t *testing.T) {
 	if success != 1 {
 		t.Fatalf("%d last-seat claims succeeded", success)
 	}
-	s = Obj(g.View("a", S(s["id"])))
+	s = Obj(g.View("a", S(s["id"]), gameTestVersion))
 	if gi(s["players"]) != 2 {
 		t.Fatal("seat overwrite")
 	}

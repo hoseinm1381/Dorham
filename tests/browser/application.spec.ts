@@ -91,6 +91,44 @@ test('real accounts, channel chat, reactions, editing, unread state and private 
   await a.close(); await b.close();
 });
 
+test('deafen is distinct from microphone mute in voice participant lists', async ({ browser }) => {
+  const speaker = await browser.newPage({ permissions: ['microphone'] });
+  const observer = await browser.newPage({ permissions: ['microphone'], viewport: { width: 1100, height: 800 } });
+  const suffix = Date.now().toString().slice(-7), name = `DeafenA${suffix}`;
+  try {
+    await register(speaker, name);
+    await register(observer, `DeafenB${suffix}`);
+    const server = await api(speaker, '/servers', { name: 'Deafen lab' });
+    const invite = await api(speaker, `/servers/${server.id}/invites`, {});
+    await api(observer, '/invites/join', { code: invite.code });
+    for (const page of [speaker, observer]) await page.getByRole('button', { name: 'Open Deafen lab', exact: true }).click();
+
+    await speaker.getByRole('button', { name: 'Lounge', exact: true }).click();
+    const row = observer.getByLabel('Participants in Lounge').getByRole('button').filter({ hasText: name });
+    const muted = row.getByRole('img', { name: 'Muted', exact: true });
+    const deafened = row.getByRole('img', { name: 'Deafened', exact: true });
+    await speaker.getByRole('button', { name: 'Mute microphone', exact: true }).click();
+    await expect(muted).toBeVisible();
+    await speaker.getByRole('button', { name: 'Deafen', exact: true }).click();
+    await expect(deafened).toBeVisible();
+    await expect(muted).toHaveCount(0);
+
+    await observer.getByRole('button', { name: 'Lounge', exact: true }).click();
+    await observer.getByRole('button', { name: /^Show participants/ }).click();
+    const participant = observer.getByRole('dialog', { name: 'Members', exact: true }).locator('.mobile-participants button').filter({ hasText: name });
+    await expect(participant.getByRole('img', { name: 'Deafened', exact: true })).toBeVisible();
+    await expect(participant.locator('small')).toHaveText('Deafened');
+    await expect(participant.locator('small')).toBeVisible();
+    await speaker.getByRole('button', { name: 'Undeafen', exact: true }).click();
+    await expect(participant.getByRole('img', { name: 'Muted', exact: true })).toBeVisible();
+    await observer.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await expect(muted).toBeVisible();
+    await expect(deafened).toHaveCount(0);
+  } finally {
+    await Promise.all([speaker.close(), observer.close()]);
+  }
+});
+
 test('actual WebRTC decodes audio/video, applies volume and mute, unsubscribes and migrates coordinator', async ({ browser }) => {
   const a = await browser.newContext({ permissions: ['microphone'] }), b = await browser.newContext({ permissions: ['microphone'] }), page = await a.newPage(), other = await b.newPage(); await instrument(page); await instrument(other); const suffix = Date.now().toString().slice(-7);
   await register(page, `VoiceA${suffix}`); await register(other, `VoiceB${suffix}`);

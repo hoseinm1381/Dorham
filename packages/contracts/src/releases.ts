@@ -4,10 +4,12 @@ export type ReleasePlatform = 'windows' | 'android';
 export type ReleaseFile = { version: string; url: string; sha256: string; size: number; appId: string; versionCode?: number };
 export type ReleaseManifest = { schema: 1; version: string; publishedAt: string; windows: ReleaseFile; android: ReleaseFile };
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+export function validReleaseVersion(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 50 && versionPattern.test(value) && value.split('.').every(part => Number.isSafeInteger(Number(part)));
+}
 export function newerVersion(candidate: string, current: string): boolean {
-  if (!versionPattern.test(candidate) || !versionPattern.test(current)) return false;
+  if (!validReleaseVersion(candidate) || !validReleaseVersion(current)) return false;
   const a = candidate.split('.').map(Number), b = current.split('.').map(Number);
-  if ([...a, ...b].some(n => !Number.isSafeInteger(n))) return false;
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
   return false;
 }
