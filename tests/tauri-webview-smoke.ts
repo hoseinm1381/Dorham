@@ -13,6 +13,7 @@ import { proveAudioScopes } from './tauri-audio-scope';
 import { proveProductSharing } from './tauri-product-sharing';
 import { proveOverlay } from './tauri-overlay';
 import { exportOwnedElectronProfile } from './tauri-legacy-profile';
+import { proveDeferredTts } from './tauri-tts-lifecycle';
 
 const executable = path.resolve(process.env.DORHAM_TAURI_SMOKE_EXECUTABLE || 'apps/desktop-tauri/target/debug/Dorham.exe');
 const owned = await mkdtemp(path.join(os.tmpdir(), 'dorham-tauri-smoke-'));
@@ -148,13 +149,6 @@ try {
   }
   console.log(JSON.stringify({ version: identity.app?.version, origin, secureContext: true, httpLogin: true, socketConnected: true, loginRetainedOnReload: true }));
   if (process.env.DORHAM_TEST_CUES === '1') {
-    const response = await fetch(backend.url + '/api/v1/servers', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ownerToken}` },
-      body: JSON.stringify({ requestId: randomUUID(), name: 'Owned cue fixture' }),
-    });
-    expect(response.ok).toBe(true);
-    await response.body?.cancel();
-    await page.reload();
     await page.evaluate(`{
       const contexts = window.__fixtureCueContexts = [];
       const cues = window.__fixtureCues = [];
@@ -171,18 +165,17 @@ try {
     }`);
     const contexts = () => page.evaluate<string[]>('window.__fixtureCueContexts.map(context => context.state)');
     const cues = () => page.evaluate<string[]>('window.__fixtureCues.slice()');
-    await page.getByRole('button', { name: 'Open Owned cue fixture', exact: true }).click();
+    await page.getByRole('button', { name: 'Account settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Notifications', exact: true }).click();
     expect(await contexts(), JSON.stringify(await page.evaluate('window.__fixtureCueOrigins'))).toEqual([]);
-    const send = async (text: string) => {
-      await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);
-      await page.getByRole('button', { name: 'Send message', exact: true }).click();
-    };
-    await send('First owned cue');
-    await expect.poll(cues).toEqual(['sent']);
+    const preview = page.getByRole('button', { name: 'Preview notification sound', exact: true });
+    await preview.click();
+    await expect.poll(cues).toEqual(['message']);
     await expect.poll(contexts, { timeout: 12000 }).toEqual(['closed']);
-    await send('Second owned cue');
-    await expect.poll(cues).toEqual(['sent', 'sent']);
-    console.log(JSON.stringify({ idleCueAudioDeferred: true, sentCuePlayed: true, idleCueAudioReleased: true, subsequentCuePlayed: true }));
+    await preview.click();
+    await expect.poll(cues).toEqual(['message', 'message']);
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    console.log(JSON.stringify({ idleCueAudioDeferred: true, notificationPreviewPlayed: true, idleCueAudioReleased: true, subsequentCuePlayed: true }));
   }
   if (upgradeFromTauri) {
     const response = await fetch(backend.url + '/api/v1/servers', {
@@ -217,6 +210,7 @@ try {
     console.log(JSON.stringify({ tauriProfileFrom: '1.3.0', reopenedBy: version, sameAccount: true, draft: true, overlay: true }));
   }
   if (overlay) await proveOverlay(page, backend.url, ownerToken, displayName, app.child.pid!);
+  if (process.env.DORHAM_TEST_TTS === '1') await proveDeferredTts(page, backend.url, ownerToken);
   if (process.env.DORHAM_CAPTURE_WINDOW_FIXTURE) {
     const compatibility = process.env.DORHAM_TEST_VIDEO_COMPATIBILITY === '1';
     if (compatibility) {
