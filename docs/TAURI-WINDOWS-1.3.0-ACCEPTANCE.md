@@ -95,7 +95,7 @@ The fixed build delivered 10.6 fps at 502 × 315 with zero reported drops in bot
 
 The separate unsigned x64 test installer is `artifacts/v1.3.0/overlay-perf/windows/Dorham-1.3.0-Windows-x64.exe`. Its SHA-256 is `3d5e27457fdcda54b96eca06630255e7dddcbb76ffa1299e08cf292f21d2e741`. It is 12,185,542 bytes versus 122,764,753 bytes for the public Electron installer. The extracted runtime is 15,107,584 bytes versus 378,286,696 bytes for Electron. All four packaged binaries matched the release build inventory. There are no new runtime dependencies.
 
-The benchmark files and native smoke logs are under `artifacts/v1.3.0/overlay-perf`. Audio testing was paused at the operator's request. The Windows 10 video-only check and full release-executable and installer checks in a separate Windows user or VM remain pending.
+The benchmark files and native smoke logs are under `artifacts/v1.3.0/overlay-perf`. The Windows 10 video-only check and full release-executable and installer checks in a separate Windows user or VM remain pending.
 
 The main WebView2 runs while the app is idle. The overlay and picker WebViews are created on demand. Screen video and audio polling start with a share and the capture helpers are absent from the post-share samples. The renderer collects call diagnostics only while the Diagnostics panel is open and visible. During a background call the main WebView and media connection stay active.
 
@@ -104,3 +104,20 @@ With the overlay open in a silent one-client call, the fixed development build s
 The Windows 11 development build passed silent second-client video decoding over mesh and LiveKit, with picker cancellation and two share cycles on each transport. It also passed the binary-response video path and stopped its track on source closure. The release executable extracted from the installer validated the protected export from the public 1.2.8 runtime. The development executable then restored the same account, draft and settings and retained the login after restart.
 
 TypeScript checking and lint passed. All 257 JavaScript tests and four Rust tests passed under the regular Windows test account. Restricted execution prevented the database test subprocess from reading Windows account information and blocked the DPAPI unit test. Both passed on retry under the regular account. The release runtime and installer were built from source revision `3cf762222de4bff5dc5a0a66f5c2b1ea66a4c714`.
+
+## Screen sharing with audio
+
+After the operator resumed audio testing, the Windows 11 development build from the candidate source sent the owned window's video and selected application's 400 Hz tone to a second client twice over Mesh and twice over LiveKit. The native PCM test measured the owned 400 Hz tone in application mode and both the 400 Hz and 700 Hz fixtures in system mode. The 1100 Hz tone from Dorham playback was below the exclusion threshold in both modes. The system scope measurement ran locally at the native bridge. Evidence is in `native-audio-scopes.log`, `mesh-screen-audio.log`, and `livekit-screen-audio.log`.
+
+The product retest exercised both the Stop sharing button and closure of the shared window on each transport. The second client received video and the selected tone after restarting the share, and its stream disappeared after each termination. Windows process queries confirmed that `CaptureVideo.exe` and `ShareAudio.exe` exited in both cases. Evidence is in `mesh-audio-cleanup.log` and `livekit-audio-cleanup.log`.
+
+The matched performance run used the owned animated window, its 400 Hz tone, the Balanced preset, and a second Mesh client. The picker IDs matched the owned HWND. The old and fixed development builds delivered 502 × 315 video. The second client detected the 400 Hz tone at roughly −51 dB in every cycle across all three builds. The old Tauri build delivered 10.4–10.5 fps and the fixed build delivered 10.0–10.5 fps. Both reported zero dropped frames in the two samples. Electron delivered 10.6–11.5 fps at 502 × 314, with zero and two reported drops. Both Windows capture helpers exited after each fixed-build share. CPU is percent of one logical core. Active samples are the mean of two cycles per build.
+
+| Application-audio workload | Tauri before | Tauri fixed | Electron 1.2.8 |
+|---|---:|---:|---:|
+| Active CPU | 44.8% | 34.2% | 13.5% |
+| Active private memory | 526 MiB | 426 MiB | 464 MiB |
+| Active working set | 777 MiB | 685 MiB | 809 MiB |
+| Private memory after 30 seconds | 441 MiB | 291 MiB | 339 MiB |
+
+The detailed samples are in `audio-benchmark-summary.jsonl` and `before/audio-*.json` under `artifacts/v1.3.0/overlay-perf`. The installer hash and production source revision are the same as above. Audio validation used temporary profiles with the Windows 11 development executable. The exact installer still needs an isolated install-over and interactive release-runtime check. The Windows 10 native video-only check remains pending.

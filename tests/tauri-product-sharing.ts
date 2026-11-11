@@ -1,15 +1,25 @@
 import { chromium, expect, type Page } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { completeRecovery } from './browser/recovery-helper';
 
-export async function proveProductSharing(host: Page, server: string, ownerToken: string, fixture: string, transport: string, videoOnly = false) {
+const run = promisify(execFile);
+
+export async function proveProductSharing(host: Page, server: string, ownerToken: string, fixture: string, transport: string, hostPid: number, videoOnly = false) {
   const args = transport === 'livekit' ? ['--disable-features=WebRtcHideLocalIpsWithMdns'] : [];
   if (videoOnly) args.push('--mute-audio');
   const viewer = await chromium.launch({ channel: 'msedge', headless: true, args });
   const source = spawn(path.resolve(fixture), videoOnly ? ['selected'] : ['selected', 'tones'], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const captureHelpers = async (): Promise<string[]> => {
+    const filter = `ParentProcessId = ${hostPid} AND (Name = 'CaptureVideo.exe' OR Name = 'ShareAudio.exe')`;
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter "${filter}" -ErrorAction Stop | Sort-Object Name | Select-Object -ExpandProperty Name)`,
+    ], { windowsHide: true, timeout: 6000 });
+    return JSON.parse(stdout);
+  };
   try {
     await once(source.stdout, 'data', { signal: AbortSignal.timeout(10000) });
     const receiver = await viewer.newPage();
@@ -76,6 +86,7 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
     await expect(dialog.getByRole('button', { name: 'Choose screen', exact: true })).toBeEnabled();
     await expect(receiver.getByRole('button', { name: 'Watch stream', exact: true })).toHaveCount(0);
     for (let attempt = 0; attempt < 2; attempt++) {
+      await receiver.evaluate(() => (window as unknown as { __ownedDecodedAudio: Set<MediaStreamTrack> }).__ownedDecodedAudio.clear());
       picker = await choose();
       await picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true }).click();
       if (!videoOnly) await picker.locator('#scope').selectOption('application');
@@ -105,12 +116,15 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
           await context.close();
         }
       }), { timeout: 20000 }).toBeGreaterThan(-65);
+      await expect.poll(captureHelpers, { timeout: 10000 }).toEqual(videoOnly ? ['CaptureVideo.exe'] : ['CaptureVideo.exe', 'ShareAudio.exe']);
       console.log(JSON.stringify({ transport, attempt: attempt + 1, receiverDecodedVideo: true, ...(!videoOnly && { receiverDecodedSelectedAppTone: true }) }));
-      await host.getByRole('button', { name: 'Stop sharing', exact: true }).click();
-      await expect(video).toHaveCount(0);
+      if (attempt === 0) await host.getByRole('button', { name: 'Stop sharing', exact: true }).click();
+      else source.kill();
+      await expect(video).toHaveCount(0, { timeout: 12000 });
+      await expect.poll(captureHelpers, { timeout: 10000 }).toEqual([]);
       if (attempt === 0) await host.getByRole('button', { name: 'Share screen', exact: true }).click();
     }
-    console.log(JSON.stringify({ transport, realOwnedWindow: true, receiverDecodedVideo: true, ...(!videoOnly && { receiverDecodedSelectedAppTone: true }), cancel: true, stopRestart: true, permissionDeniedListenOnly: true }));
+    console.log(JSON.stringify({ transport, realOwnedWindow: true, receiverDecodedVideo: true, ...(!videoOnly && { receiverDecodedSelectedAppTone: true }), cancel: true, stopRestart: true, sourceClosureStopsShare: true, captureHelpersExited: true, permissionDeniedListenOnly: true }));
   } finally {
     if (source.exitCode === null) source.kill();
     await viewer.close();

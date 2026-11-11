@@ -147,7 +147,7 @@ try {
     if (compatibility) console.log(JSON.stringify({ videoBinaryResponseFallback: true }));
   }
   if (process.env.DORHAM_CAPTURE_AUDIO_FIXTURE) await proveAudioScopes(page, process.env.DORHAM_CAPTURE_AUDIO_FIXTURE);
-  if (product) await proveProductSharing(page, backend.url, ownerToken, product, fixtureConfig.mediaTransport, silent);
+  if (product) await proveProductSharing(page, backend.url, ownerToken, product, fixtureConfig.mediaTransport, app.child.pid!, silent);
   if (migration) {
     await stopDorham(app, browser);
     browser = undefined;
