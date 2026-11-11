@@ -38,6 +38,7 @@ export function useVoiceInput(transport: RefObject<Pick<MediaTransport, 'setMute
   useEffect(() => {
     const changed = () => { prefs.current = readVoiceInput(); state.current.configure(prefs.current.mode); fault.current = false; setPreferences(prefs.current); applyRef.current(); void window.desktop?.configureVoiceHotkey(prefs.current).catch(e => onError.current(e)); };
     const native = window.desktop?.onVoiceHotkey(event => {
+      if (event.type === 'ready') { fault.current = false; return; }
       if (event.type === 'error') { fault.current = true; state.current.release(); applyRef.current(); onError.current(new Error(event.message)); return; }
       if (event.type === 'release') state.current.release();
       else if (event.type === 'up') state.current.up();

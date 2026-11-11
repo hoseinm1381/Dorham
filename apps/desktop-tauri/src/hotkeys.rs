@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{
-    Arc, Mutex, OnceLock,
+    Arc, OnceLock,
     atomic::{AtomicU64, Ordering},
 };
 use std::thread;
@@ -54,14 +54,13 @@ impl Preferences {
     }
 }
 
-type Helper = Arc<Mutex<Child>>;
-
 pub struct Hotkeys {
     path: PathBuf,
     preferences: Option<Preferences>,
     active: bool,
-    helper: Option<Helper>,
+    helper: Option<Child>,
     generation: Arc<AtomicU64>,
+    failures: u32,
 }
 
 impl Hotkeys {
@@ -72,14 +71,13 @@ impl Hotkeys {
             active: false,
             helper: None,
             generation: Arc::new(AtomicU64::new(0)),
+            failures: 0,
         }
     }
 
     pub fn configure(&mut self, app: &AppHandle, preferences: Preferences) -> Result<bool, String> {
         preferences.key()?;
-        if self.preferences.as_ref() != Some(&preferences)
-            || self.helper.as_ref().is_some_and(exited)
-        {
+        if self.preferences.as_ref() != Some(&preferences) {
             self.preferences = Some(preferences);
             self.restart(app);
         }
@@ -95,14 +93,21 @@ impl Hotkeys {
 
     fn stop(&mut self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
-        if let Some(helper) = self.helper.take() {
-            kill(&helper);
+        if let Some(mut child) = self.helper.take() {
+            child.stdin.take();
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 
     fn restart(&mut self, app: &AppHandle) {
         self.stop();
+        self.failures = 0;
         emit(app, "release", None);
+        self.start(app);
+    }
+
+    fn start(&mut self, app: &AppHandle) {
         let Some(preferences) = self
             .preferences
             .as_ref()
@@ -128,44 +133,61 @@ impl Hotkeys {
         {
             Ok(child) => child,
             Err(_) => {
-                emit(
-                    app,
-                    "error",
-                    Some("Could not start the background voice hotkey. Microphone released."),
-                );
+                self.failed(app);
                 return;
             }
         };
         let stdout = child.stdout.take().expect("piped hotkey output");
-        let helper = Arc::new(Mutex::new(child));
         let (sender, receiver) = mpsc::sync_channel(16);
         thread::spawn(move || read_events(stdout, sender));
-        self.helper = Some(helper.clone());
+        self.helper = Some(child);
         let app = app.clone();
         let generation = self.generation.clone();
         let current = generation.load(Ordering::SeqCst);
         thread::spawn(move || {
+            let mut ready = false;
             while generation.load(Ordering::SeqCst) == current {
-                match receiver.recv_timeout(Duration::from_millis(2200)) {
-                    Ok(b'H') => {}
-                    Ok(b'D') => schedule(&app, &generation, current, "down", None),
-                    Ok(b'U') => schedule(&app, &generation, current, "up", None),
+                match receiver.recv_timeout(Duration::from_millis(3500)) {
+                    Ok(event @ (b'H' | b'D' | b'U')) => {
+                        if !ready {
+                            ready = true;
+                            with_current(&app, current, |keys, app| {
+                                keys.failures = 0;
+                                emit(app, "ready", None);
+                            });
+                        }
+                        match event {
+                            b'D' => schedule_key(&app, current, "down"),
+                            b'U' => schedule_key(&app, current, "up"),
+                            _ => {}
+                        }
+                    }
                     _ => {
-                        kill(&helper);
-                        schedule(&app, &generation, current, "release", None);
-                        schedule(
-                            &app,
-                            &generation,
-                            current,
-                            "error",
-                            Some(
-                                "Background hotkey stopped. Microphone released; reselect the voice input mode to retry.",
-                            ),
-                        );
+                        with_current(&app, current, |keys, app| keys.failed(app));
                         break;
                     }
                 }
             }
+        });
+    }
+
+    fn failed(&mut self, app: &AppHandle) {
+        self.stop();
+        emit(app, "release", None);
+        if self.failures == 0 {
+            emit(
+                app,
+                "error",
+                Some("Background hotkey interrupted. Microphone released."),
+            );
+        }
+        let delay = Duration::from_millis(750 << self.failures.min(4));
+        self.failures = self.failures.saturating_add(1);
+        let app = app.clone();
+        let current = self.generation.load(Ordering::SeqCst);
+        thread::spawn(move || {
+            thread::sleep(delay);
+            with_current(&app, current, |keys, app| keys.start(app));
         });
     }
 }
@@ -173,20 +195,6 @@ impl Hotkeys {
 impl Drop for Hotkeys {
     fn drop(&mut self) {
         self.stop();
-    }
-}
-
-fn exited(helper: &Helper) -> bool {
-    helper
-        .lock()
-        .is_ok_and(|mut child| child.try_wait().is_ok_and(|status| status.is_some()))
-}
-
-fn kill(helper: &Helper) {
-    if let Ok(mut child) = helper.lock() {
-        child.stdin.take();
-        let _ = child.kill();
-        let _ = child.wait();
     }
 }
 
@@ -216,20 +224,24 @@ fn read_events(mut pipe: impl Read, sender: mpsc::SyncSender<u8>) {
     }
 }
 
-fn schedule(
+fn with_current(
     app: &AppHandle,
-    generation: &Arc<AtomicU64>,
     current: u64,
-    kind: &'static str,
-    message: Option<&'static str>,
+    operation: impl FnOnce(&mut Hotkeys, &AppHandle) + Send + 'static,
 ) {
     let handle = app.clone();
-    let generation = generation.clone();
     let _ = app.run_on_main_thread(move || {
-        if generation.load(Ordering::SeqCst) == current {
-            emit(&handle, kind, message);
+        let host = handle.state::<crate::Host>();
+        if let Ok(mut keys) = host.hotkeys.lock() {
+            if keys.generation.load(Ordering::SeqCst) == current {
+                operation(&mut keys, &handle);
+            }
         }
     });
+}
+
+fn schedule_key(app: &AppHandle, current: u64, kind: &'static str) {
+    with_current(app, current, move |_, app| emit(app, kind, None));
 }
 
 fn emit(app: &AppHandle, kind: &str, message: Option<&str>) {

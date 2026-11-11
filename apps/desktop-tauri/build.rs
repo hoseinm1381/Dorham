@@ -5,6 +5,7 @@ fn main() {
             "capture_video",
             "capture_stop",
             "capture_picker_model",
+            "capture_picker_thumbnail",
             "capture_picker_select",
             "capture_audio_start",
             "capture_audio_stop",

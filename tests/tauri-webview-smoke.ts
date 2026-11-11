@@ -14,6 +14,7 @@ import { proveProductSharing } from './tauri-product-sharing';
 import { proveOverlay } from './tauri-overlay';
 import { exportOwnedElectronProfile } from './tauri-legacy-profile';
 import { proveDeferredTts } from './tauri-tts-lifecycle';
+import { proveHotkeyRecovery } from './tauri-hotkey-recovery';
 
 const executable = path.resolve(process.env.DORHAM_TAURI_SMOKE_EXECUTABLE || 'apps/desktop-tauri/target/debug/Dorham.exe');
 const owned = await mkdtemp(path.join(os.tmpdir(), 'dorham-tauri-smoke-'));
@@ -211,6 +212,7 @@ try {
   }
   if (overlay) await proveOverlay(page, backend.url, ownerToken, displayName, app.child.pid!);
   if (process.env.DORHAM_TEST_TTS === '1') await proveDeferredTts(page, backend.url, ownerToken);
+  if (process.env.DORHAM_TEST_HOTKEY_RECOVERY === '1') await proveHotkeyRecovery(page, backend.url, ownerToken, app.child.pid!);
   if (process.env.DORHAM_CAPTURE_WINDOW_FIXTURE) {
     const compatibility = process.env.DORHAM_TEST_VIDEO_COMPATIBILITY === '1';
     if (compatibility) {

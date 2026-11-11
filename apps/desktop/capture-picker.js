@@ -1,8 +1,52 @@
 /* global window, document */
 let model, selected = '', tab = 'window', busy = false;
 const byId = id => document.getElementById(id);
+const previews = new Map();
+let previewGeneration = 0, previewLoading = false;
 const translations = { 'Choose what to share': 'انتخاب منبع اشتراک‌گذاری', 'Refresh': 'تازه‌سازی', 'Applications': 'برنامه‌ها', 'Screens': 'نمایشگرها', 'Search sources': 'جست‌وجوی منبع', 'Share sound': 'اشتراک صدا', 'No sound': 'بدون صدا', 'Selected application only': 'فقط برنامهٔ انتخاب‌شده', 'Computer sound, excluding Dorham': 'صدای رایانه به‌جز دورهم', 'Cancel': 'لغو', 'Share': 'اشتراک‌گذاری', 'Choose a source to continue.': 'برای ادامه یک منبع انتخاب کنید.', 'No matching sources. Try Refresh.': 'منبعی یافت نشد. فهرست را تازه‌سازی کنید.', 'Only sound from the selected application is shared.': 'فقط صدای برنامهٔ انتخاب‌شده به اشتراک گذاشته می‌شود.', 'Other apps may be audible. Dorham call audio is excluded.': 'صدای برنامه‌های دیگر ممکن است شنیده شود. صدای تماس دورهم ارسال نمی‌شود.', 'Video only. No application or computer sound is shared.': 'فقط تصویر ارسال می‌شود؛ صدای برنامه یا رایانه ارسال نمی‌شود.', 'Unable to list sources. Try Refresh.': 'فهرست منابع در دسترس نیست. دوباره تازه‌سازی کنید.', 'The source could not be shared. Refresh and choose again.': 'اشتراک این منبع ممکن نشد. فهرست را تازه‌سازی و دوباره انتخاب کنید.' };
 const text = value => model?.language === 'fa-IR' ? translations[value] || value : value;
+translations['Loading preview…'] = 'در حال بارگیری پیش‌نمایش…';
+translations['Preview unavailable'] = 'پیش‌نمایش در دسترس نیست';
+const previewObserver = new window.IntersectionObserver(entries => {
+  for (const { target, isIntersecting } of entries) target.toggleAttribute('data-visible', isIntersecting);
+  void loadPreview();
+}, { root: byId('sources') });
+
+function showPreview(preview, thumbnail, pending = false) {
+  if (thumbnail) {
+    const image = document.createElement('img');
+    image.alt = '';
+    image.onerror = () => showPreview(preview, null);
+    image.src = thumbnail;
+    preview.replaceChildren(image);
+  } else {
+    preview.textContent = text(pending ? 'Loading preview…' : 'Preview unavailable');
+  }
+}
+
+async function loadPreview() {
+  if (busy || previewLoading || !window.capturePicker.thumbnail) return;
+  const preview = [...byId('sources').querySelectorAll('[data-preview][data-visible]')]
+    .find(item => !previews.has(item.dataset.preview));
+  if (!preview) return;
+  const id = preview.dataset.preview, generation = previewGeneration;
+  previewLoading = true;
+  try {
+    const thumbnail = await window.capturePicker.thumbnail(id).catch(() => null);
+    if (generation === previewGeneration) {
+      previews.set(id, thumbnail);
+      for (const item of byId('sources').querySelectorAll('[data-preview]')) {
+        if (item.dataset.preview === id) {
+          previewObserver.unobserve(item);
+          showPreview(item, thumbnail);
+        }
+      }
+    }
+  } finally {
+    previewLoading = false;
+    void loadPreview();
+  }
+}
 function audioScope() {
   const scope = byId('scope'), source = model.sources.find(item => item.id === selected);
   scope.querySelector('[value=application]').disabled = source?.kind !== 'window';
@@ -11,15 +55,24 @@ function audioScope() {
 }
 function render() {
   const list = byId('sources'), query = byId('search').value.trim().toLocaleLowerCase();
+  previewObserver.disconnect();
   list.replaceChildren();
   for (const source of model.sources.filter(item => item.kind === tab && item.name.toLocaleLowerCase().includes(query))) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'source'; button.setAttribute('role', 'option'); button.setAttribute('aria-selected', String(source.id === selected)); button.setAttribute('aria-label', source.name);
-    const preview = document.createElement('img'); preview.className = 'preview'; preview.alt = ''; if (source.thumbnail) preview.src = source.thumbnail;
+    const preview = document.createElement('span'); preview.className = 'preview';
+    const pending = !source.thumbnail && Boolean(window.capturePicker.thumbnail) && !previews.has(source.id);
+    showPreview(preview, source.thumbnail || previews.get(source.id), pending);
     const label = document.createElement('span'); label.className = 'source-name';
     if (source.icon) { const icon = document.createElement('img'); icon.src = source.icon; icon.alt = ''; label.append(icon); }
     const name = document.createElement('span'); name.textContent = source.name; label.append(name); button.append(preview, label);
-    button.onclick = () => { const changed = selected !== source.id; selected = source.id; if (changed && model.audioRequested && model.audioSupported) byId('scope').value = source.kind === 'window' ? 'application' : 'system'; render(); };
+    button.onclick = () => {
+      const changed = selected !== source.id; selected = source.id;
+      if (changed && model.audioRequested && model.audioSupported) byId('scope').value = source.kind === 'window' ? 'application' : 'system';
+      for (const item of list.children) item.setAttribute('aria-selected', String(item === button));
+      byId('status').textContent = ''; byId('share').disabled = busy; audioScope();
+    };
     list.append(button);
+    if (pending) { preview.dataset.preview = source.id; previewObserver.observe(preview); }
   }
   byId('status').textContent = text(!list.childElementCount ? 'No matching sources. Try Refresh.' : selected ? '' : 'Choose a source to continue.');
   byId('share').disabled = !selected || busy; audioScope();
@@ -28,6 +81,7 @@ async function refresh() {
   if (busy) return; busy = true; byId('refresh').disabled = true;
   try {
     model = await window.capturePicker.model(); document.documentElement.lang = model.language; document.documentElement.dir = model.language === 'fa-IR' ? 'rtl' : 'ltr';
+    previewGeneration++; previews.clear();
     for (const [id, value] of Object.entries({ title: 'Choose what to share', refresh: 'Refresh', windows: 'Applications', screens: 'Screens', 'audio-label': 'Share sound', cancel: 'Cancel', share: 'Share' })) byId(id).textContent = text(value);
     for (const option of byId('scope').options) option.textContent = text({ none: 'No sound', application: 'Selected application only', system: 'Computer sound, excluding Dorham' }[option.value]);
     byId('search').placeholder = text('Search sources'); byId('search').setAttribute('aria-label', text('Search sources'));

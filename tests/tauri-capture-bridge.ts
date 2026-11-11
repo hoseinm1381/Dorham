@@ -54,7 +54,30 @@ export async function proveCaptureBridge(page: Page, fixture: string) {
     void capture.catch(() => {});
     const picker = await pickerEvent;
     await expect(picker).toHaveURL('https://localhost/capture-picker.html');
-    await picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true }).click();
+    const option = picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true });
+    if (process.env.DORHAM_TEST_PICKER_PREVIEWS === '1') {
+      const search = picker.getByRole('searchbox', { name: 'Search sources' });
+      await search.fill('Dorham owned capture fixture selected');
+      await expect.poll(() => option.locator('.preview').evaluate(preview => {
+        const image = preview.querySelector('img');
+        if (!image?.naturalWidth) return false;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(image, image.naturalWidth / 2, image.naturalHeight / 2, 1, 1, 0, 0, 1, 1);
+        const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+        return red > 90 && green < 75 && blue > 120;
+      }), { timeout: 15000 }).toBe(true);
+      await picker.getByRole('tab', { name: 'Screens', exact: true }).click();
+      await search.clear();
+      const screen = picker.getByRole('option', { name: /^Screen / }).first();
+      await expect.poll(() => screen.locator('.preview').evaluate(preview => preview.querySelector('img')?.naturalWidth || 0), { timeout: 12000 }).toBeGreaterThan(0);
+      await search.fill('Dorham owned capture fixture selected');
+      await picker.getByRole('tab', { name: 'Applications', exact: true }).click();
+      await expect(option.locator('.preview img')).toBeVisible();
+      console.log(JSON.stringify({ applicationPreviewPixels: true, screenPreviewDecoded: true }));
+    }
+    await option.click();
     await picker.getByRole('button', { name: 'Share', exact: true }).click();
     const captured = await capture;
     expect(captured.selection).toMatchObject({

@@ -1,4 +1,5 @@
 mod audio;
+mod preview;
 mod sources;
 
 use crate::{Host, assets, trusted_main_url};
@@ -28,6 +29,7 @@ const BRIDGE: &str = r#"
 if (location.href === "https://localhost/capture-picker.html" && window.top === window) {
   Object.defineProperty(window, "capturePicker", { value: Object.freeze({
     model: () => window.__TAURI_INTERNALS__.invoke("capture_picker_model"),
+    thumbnail: id => window.__TAURI_INTERNALS__.invoke("capture_picker_thumbnail", { id }),
     choose: choice => window.__TAURI_INTERNALS__.invoke("capture_picker_select", { choice })
   }) });
 }
@@ -65,6 +67,14 @@ struct Picker {
     sources: Vec<Source>,
     audio: bool,
     result: Option<mpsc::SyncSender<Option<Selection>>>,
+    preview_stopped: Arc<AtomicBool>,
+    preview_pending: bool,
+}
+
+impl Drop for Picker {
+    fn drop(&mut self) {
+        self.preview_stopped.store(true, Ordering::Release);
+    }
 }
 
 type LatestFrame = Arc<Mutex<Option<Vec<u8>>>>;
@@ -109,7 +119,11 @@ impl Capture {
 
     pub fn stop(&mut self) {
         self.generation += 1;
-        if let Some(result) = self.picker.take().and_then(|picker| picker.result) {
+        if let Some(result) = self
+            .picker
+            .take()
+            .and_then(|mut picker| picker.result.take())
+        {
             let _ = result.try_send(None);
         }
         self.audio = None;
@@ -262,6 +276,54 @@ pub fn capture_picker_model(window: WebviewWindow) -> Result<Value, String> {
 }
 
 #[tauri::command]
+pub async fn capture_picker_thumbnail(
+    window: WebviewWindow,
+    id: String,
+) -> Result<Option<String>, String> {
+    picker_window(&window)?;
+    let host = window.state::<Host>();
+    let (source, binary, generation, stopped) = {
+        let mut capture = host
+            .capture
+            .lock()
+            .map_err(|_| "Screen capture unavailable")?;
+        let binary = capture.binary.clone();
+        let picker = capture
+            .picker
+            .as_mut()
+            .filter(|picker| allowed(&host) && picker.result.is_some() && !picker.preview_pending)
+            .ok_or("Screen preview unavailable")?;
+        let source = picker
+            .sources
+            .iter()
+            .find(|source| source.id == id)
+            .ok_or("Unknown capture source")?
+            .clone();
+        picker.preview_pending = true;
+        (source, binary, picker.generation, picker.preview_stopped.clone())
+    };
+    let thumbnail = tauri::async_runtime::spawn_blocking(move || {
+        preview::capture(&binary, &source, &stopped)
+    })
+    .await
+    .ok()
+    .flatten();
+    let mut capture = host
+        .capture
+        .lock()
+        .map_err(|_| "Screen capture unavailable")?;
+    let Some(picker) = capture
+        .picker
+        .as_mut()
+        .filter(|picker| picker.generation == generation)
+    else {
+        return Ok(None);
+    };
+    picker.preview_pending = false;
+    Ok(thumbnail.filter(|_| allowed(&host) && picker.result.is_some()))
+}
+
+#[tauri::command]
 pub fn capture_picker_select(window: WebviewWindow, choice: Choice) -> Result<(), String> {
     picker_window(&window)?;
     let host = window.state::<Host>();
@@ -297,11 +359,12 @@ pub fn capture_picker_select(window: WebviewWindow, choice: Choice) -> Result<()
             audio_scope: choice.audio_scope,
         })
     };
-    let result = capture
+    let picker = capture
         .picker
         .as_mut()
-        .and_then(|picker| picker.result.take())
         .ok_or("Screen sharing was cancelled")?;
+    picker.preview_stopped.store(true, Ordering::Release);
+    let result = picker.result.take().ok_or("Screen sharing was cancelled")?;
     result
         .try_send(selection)
         .map_err(|_| "Screen sharing was cancelled")?;
@@ -344,6 +407,8 @@ pub async fn capture_video(
             sources: Vec::new(),
             audio,
             result: Some(sender),
+            preview_stopped: Arc::new(AtomicBool::new(false)),
+            preview_pending: false,
         });
         generation
     };
@@ -395,26 +460,7 @@ pub async fn capture_video(
         return Ok(None);
     }
     capture.picker.take();
-    let mut helper = Command::new(&capture.binary)
-        .args([
-            (if selected.source.kind == Kind::Window {
-                "window"
-            } else {
-                "monitor"
-            })
-            .into(),
-            selected.source.handle.to_string(),
-            selected.source.pid.to_string(),
-            std::process::id().to_string(),
-            settings.width.to_string(),
-            settings.height.to_string(),
-            settings.fps.to_string(),
-        ])
-        .creation_flags(NO_CONSOLE)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let mut helper = start_video_helper(&capture.binary, &selected.source, &settings, false)
         .map_err(|_| "Windows could not start screen capture")?;
     let stdout = helper.stdout.take().expect("piped capture output");
     let latest = Arc::new(Mutex::new(None));
@@ -442,25 +488,62 @@ pub async fn capture_video(
     Ok(Some(result))
 }
 
+fn start_video_helper(
+    binary: &Path,
+    source: &Source,
+    settings: &Settings,
+    thumbnail: bool,
+) -> io::Result<Child> {
+    let mut command = Command::new(binary);
+    command
+        .args([
+            (if source.kind == Kind::Window {
+                "window"
+            } else {
+                "monitor"
+            })
+            .into(),
+            source.handle.to_string(),
+            source.pid.to_string(),
+            std::process::id().to_string(),
+            settings.width.to_string(),
+            settings.height.to_string(),
+            settings.fps.to_string(),
+        ])
+        .creation_flags(NO_CONSOLE)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if thumbnail {
+        command.arg("thumbnail");
+    }
+    command.spawn()
+}
+
 fn read_frames(mut source: impl Read, latest: LatestFrame, settings: Settings) -> io::Result<()> {
-    let mut header = [0; 8];
     loop {
-        source.read_exact(&mut header)?;
-        let width = u32::from_le_bytes(header[..4].try_into().expect("frame width"));
-        let height = u32::from_le_bytes(header[4..].try_into().expect("frame height"));
-        if !(1..=settings.width).contains(&width) || !(1..=settings.height).contains(&height) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Invalid Windows capture frame",
-            ));
-        }
-        let mut buffer = vec![0; 8 + (width * height * 4) as usize];
-        buffer[..8].copy_from_slice(&header);
-        source.read_exact(&mut buffer[8..])?;
+        let (buffer, _, _) = read_frame(&mut source, &settings)?;
         if let Ok(mut latest) = latest.lock() {
             *latest = Some(buffer);
         }
     }
+}
+
+fn read_frame(source: &mut impl Read, settings: &Settings) -> io::Result<(Vec<u8>, u32, u32)> {
+    let mut header = [0; 8];
+    source.read_exact(&mut header)?;
+    let width = u32::from_le_bytes(header[..4].try_into().expect("frame width"));
+    let height = u32::from_le_bytes(header[4..].try_into().expect("frame height"));
+    if !(1..=settings.width).contains(&width) || !(1..=settings.height).contains(&height) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid Windows capture frame",
+        ));
+    }
+    let mut buffer = vec![0; 8 + (width * height * 4) as usize];
+    buffer[..8].copy_from_slice(&header);
+    source.read_exact(&mut buffer[8..])?;
+    Ok((buffer, width, height))
 }
 
 pub fn video_frame(app: &AppHandle, id: u64) -> Result<Vec<u8>, String> {

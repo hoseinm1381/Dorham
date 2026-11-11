@@ -132,7 +132,8 @@ public:
 };
 
 int wmain(int count, wchar_t** args) {
-    if (count != 8) return 2;
+    const bool thumbnail = count == 9 && std::wcscmp(args[8], L"thumbnail") == 0;
+    if (count != 8 && !thumbnail) return 2;
     const bool window = std::wcscmp(args[1], L"window") == 0;
     if (!window && std::wcscmp(args[1], L"monitor") != 0) return 2;
     const auto handle = number(args[2]), pid = number(args[3]), parent = number(args[4]);
@@ -163,12 +164,13 @@ int wmain(int count, wchar_t** args) {
 
         const HANDLE events[]{owner.value, closed.value, available.value};
         const auto started = Clock::now();
+        const auto initialTimeout = thumbnail ? std::chrono::milliseconds(1200) : std::chrono::milliseconds(8000);
         auto next = started;
         bool sentFrame = false;
-        while (target.isPresent()) {
+        while (target.isPresent() && (!thumbnail || Clock::now() - started < initialTimeout)) {
             const auto signalled = WaitForMultipleObjects(3, events, FALSE, 250);
             if (signalled != WAIT_OBJECT_0 + 2) {
-                if (signalled == WAIT_TIMEOUT && (sentFrame || Clock::now() - started < std::chrono::seconds(8))) continue;
+                if (signalled == WAIT_TIMEOUT && (sentFrame || Clock::now() - started < initialTimeout)) continue;
                 break;
             }
             auto frame = pool.TryGetNextFrame();
@@ -188,6 +190,7 @@ int wmain(int count, wchar_t** args) {
                 next = now + std::chrono::microseconds(1000000 / fps);
             }
             frame.Close();
+            if (thumbnail && sentFrame) break;
         }
         frameEvent.revoke();
         closedEvent.revoke();
