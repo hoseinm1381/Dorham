@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { usePackagedListenOnly } from './tauri-test-microphone';
 
 const run = promisify(execFile);
 
@@ -15,6 +16,7 @@ export async function proveOverlay(main: Page, server: string, token: string, di
   expect(response.ok).toBe(true);
   await response.body?.cancel();
   await main.reload();
+  await usePackagedListenOnly(main);
   await main.getByRole('button', { name: 'Open Overlay qualification', exact: true }).click();
   const join = () => main.getByRole('button', { name: 'Lounge', exact: true }).click();
   const leave = () => main.getByRole('button', { name: 'Disconnect voice', exact: true }).click();

@@ -7,7 +7,8 @@ use tauri::{
     WebviewWindowBuilder,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, WS_EX_NOACTIVATE,
+    GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WS_EX_NOACTIVATE,
 };
 use windows_core::{HSTRING, w};
 
@@ -70,7 +71,7 @@ pub fn sanitize(value: Value, previous: Option<&Value>) -> Option<Value> {
     }))
 }
 
-fn render(window: &WebviewWindow, packet: Value, position: OverlayPosition) -> tauri::Result<()> {
+fn render(window: &WebviewWindow, packet: Value, position: OverlayPosition) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(monitor) = window.primary_monitor()? {
         let area = monitor.work_area();
         let scale = monitor.scale_factor();
@@ -108,7 +109,11 @@ fn render(window: &WebviewWindow, packet: Value, position: OverlayPosition) -> t
             let _ = core.PostWebMessageAsJson(&payload);
         }
     })?;
-    window.show()
+    unsafe {
+        SetWindowPos(window.hwnd()?, None, 0, 0, 0, 0,
+            SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)?;
+    }
+    Ok(())
 }
 
 pub fn request_sync(app: &AppHandle) -> tauri::Result<()> {

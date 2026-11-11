@@ -7,6 +7,7 @@ import { acceptTtsProgress, clearTtsProgress } from './TtsProgress';
 import { speechAudio } from './api';
 import { readAudioChoices } from './AudioDevices';
 import { currentLanguage, t } from './i18n';
+import { onDemandDesktopAudio } from './notifications';
 import loadingEnglish from '../../../assets/tts-loading/tts-loading-en.wav?url';
 import loadingPersian from '../../../assets/tts-loading/tts-loading-fa.wav?url';
 declare const __APP_VERSION__: string;
@@ -19,10 +20,22 @@ export function useVoiceTts(socket: React.RefObject<Socket | null>, room: VoiceR
   useEffect(() => { if (!room || blocked || !enabled) stop.current(); }, [room?.channelId, blocked, enabled]);
   useEffect(() => {
     if (!userId) return;
+    const onDemand = onDemandDesktopAudio();
     let context: AudioContext | undefined, source: AudioBufferSourceNode | undefined, processing = false, disposed = false, generation = 0;
     const queue: Playback[] = [], seen = new Set<string>();
     const allowed = (event: VoiceTts) => !disposed && current.current.enabled && !current.current.blocked && current.current.room?.channelId === event.channelId && event.expiresAt > Date.now();
-    stop.current = () => { if (androidSpeech) void nativeSpeech.stopSpeech().catch(() => {}); generation++; queue.length = 0; source?.stop(); source = undefined; clearTtsProgress(); };
+    stop.current = () => {
+      if (androidSpeech) void nativeSpeech.stopSpeech().catch(() => {});
+      generation++;
+      queue.length = 0;
+      source?.stop();
+      source = undefined;
+      if (onDemand && context) {
+        void context.close().catch(() => {});
+        context = undefined;
+      }
+      clearTtsProgress();
+    };
     async function pump() {
       if (processing || !queue.length || (!androidSpeech && context?.state !== 'running')) return;
       processing = true; const event = queue.shift()!, epoch = generation;
@@ -56,6 +69,7 @@ export function useVoiceTts(socket: React.RefObject<Socket | null>, room: VoiceR
     }
     const unlock = () => {
       if (androidSpeech) { void pump(); return; }
+      if (onDemand && !queue.length) return;
       try { context ||= new AudioContext(); if (context.state === 'suspended') void context.resume().then(pump).catch(() => {}); else void pump(); } catch { /* no playback device */ }
     };
     const enqueue = (event: VoiceTts, loading = false) => {

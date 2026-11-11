@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { completeRecovery } from './browser/recovery-helper';
+import { usePackagedListenOnly } from './tauri-test-microphone';
 
 const run = promisify(execFile);
 
@@ -67,6 +68,7 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
     await receiver.getByRole('button', { name: 'Let’s get you in', exact: true }).click();
     await completeRecovery(receiver);
     await host.reload();
+    await usePackagedListenOnly(host);
     for (const page of [host, receiver]) {
       await page.getByRole('button', { name: 'Open Native sharing qualification', exact: true }).click();
       await page.getByRole('button', { name: 'Lounge', exact: true }).click();

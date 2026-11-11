@@ -13,6 +13,7 @@ use std::thread;
 
 const PACKET: usize = 7680;
 const MAX_PACKETS: usize = 6;
+const MAX_BATCH_PACKETS: usize = 3;
 type Queue = Arc<Mutex<VecDeque<[u8; PACKET]>>>;
 
 pub struct Audio {
@@ -85,10 +86,17 @@ impl Audio {
             .queue
             .lock()
             .map_err(|_| "Windows application audio unavailable")?;
-        Ok(queue
-            .pop_front()
-            .map_or_else(Vec::new, |packet| packet.to_vec()))
+        Ok(take_batch(&mut queue))
     }
+}
+
+fn take_batch(queue: &mut VecDeque<[u8; PACKET]>) -> Vec<u8> {
+    let packets = queue.len().min(MAX_BATCH_PACKETS);
+    let mut result = Vec::with_capacity(packets * PACKET);
+    for packet in queue.drain(..packets) {
+        result.extend_from_slice(&packet);
+    }
+    result
 }
 
 fn read_packets(mut pipe: impl Read, queue: Queue) {
@@ -107,5 +115,22 @@ impl Drop for Audio {
         self.helper.stdin.take();
         let _ = self.helper.kill();
         let _ = self.helper.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_batches_preserve_fifo_order_and_leave_pending_packets() {
+        let mut queue = VecDeque::from([[1; PACKET], [2; PACKET], [3; PACKET], [4; PACKET]]);
+        let batch = take_batch(&mut queue);
+        assert_eq!(batch.len(), MAX_BATCH_PACKETS * PACKET);
+        for (index, packet) in batch.chunks_exact(PACKET).enumerate() {
+            assert!(packet.iter().all(|value| *value == index as u8 + 1));
+        }
+        assert_eq!(take_batch(&mut queue), vec![4; PACKET]);
+        assert!(take_batch(&mut queue).is_empty());
     }
 }

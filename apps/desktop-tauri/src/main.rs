@@ -39,6 +39,7 @@ fn trusted_main_url(url: &Url) -> bool {
 
 struct Host {
     profile: PathBuf,
+    benchmark: bool,
     settings: Mutex<settings::Store>,
     hotkeys: Mutex<hotkeys::Hotkeys>,
     capture: Mutex<capture::Capture>,
@@ -73,6 +74,9 @@ fn set_in_call(app: &AppHandle, value: bool) {
     let previous = host.in_call.swap(value, Ordering::AcqRel);
     if value && !previous {
         host.updater.pause();
+        if let Some(main) = app.get_webview_window(MAIN) {
+            webview::set_memory_idle(&main, false);
+        }
     } else if !value && previous && !cfg!(debug_assertions) {
         updater::schedule(app, false);
     }
@@ -100,6 +104,7 @@ enum DesktopRequest {
     GetUpdateState,
     FinishMigration,
     SetInCall(bool),
+    SetMemoryIdle(bool),
     ConfigureVoiceHotkey(hotkeys::Preferences),
     SetLanguage(String),
     IsVisible,
@@ -136,6 +141,10 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
         })),
         DesktopRequest::SetInCall(value) => {
             set_in_call(window.app_handle(), value);
+            Ok(Value::Null)
+        }
+        DesktopRequest::SetMemoryIdle(idle) => {
+            webview::set_memory_idle(&window, idle);
             Ok(Value::Null)
         }
         DesktopRequest::ConfigureVoiceHotkey(value) => {
@@ -289,21 +298,23 @@ fn profile_dir(app: &tauri::App) -> tauri::Result<PathBuf> {
     app.path().app_local_data_dir()
 }
 
-fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let profile = profile_dir(app)?;
-    let migration = app
-        .path()
-        .local_data_dir()?
-        .join("Dorham/migration/electron-export-v1.json");
-    #[cfg(debug_assertions)]
-    let migration = if std::env::var_os("DORHAM_TEST_PROFILE_ROOT").is_some() {
+fn setup(app: &mut tauri::App, benchmark_profile: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
+    let benchmark = benchmark_profile.is_some();
+    let profile = match benchmark_profile {
+        Some(path) => path.to_owned(),
+        None => profile_dir(app)?,
+    };
+    let alternate = benchmark
+        || cfg!(debug_assertions) && std::env::var_os("DORHAM_TEST_PROFILE_ROOT").is_some();
+    let migration = if alternate {
         profile.join("electron-export-v1.json")
     } else {
-        migration
+        app.path().local_data_dir()?.join("Dorham/migration/electron-export-v1.json")
     };
     let settings = settings::Store::load(&profile, &migration)?;
     app.manage(Host {
         profile: profile.clone(),
+        benchmark,
         settings: Mutex::new(settings),
         hotkeys: Mutex::new(hotkeys::Hotkeys::new(
             app.path().resource_dir()?.join("native/VoiceHotkey.exe"),
@@ -424,7 +435,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     tray.build(app)?;
     app.manage(TrayItems { open, update, quit });
-    if !cfg!(debug_assertions) {
+    if !benchmark && !cfg!(debug_assertions) {
         let handle = app.handle().clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(10));
@@ -439,18 +450,31 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
-    if args.next().as_deref() == Some(std::ffi::OsStr::new("--validate-electron-export")) {
+    let command = args.next();
+    if command.as_deref() == Some(std::ffi::OsStr::new("--validate-electron-export")) {
         let valid = args
             .next()
             .is_some_and(|path| settings::validate_legacy(Path::new(&path)).is_ok())
             && args.next().is_none();
         std::process::exit(if valid { 0 } else { 1 });
     }
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            show_main(app)
-        }))
-        .setup(setup)
+    let benchmark_profile = if command.as_deref() == Some(std::ffi::OsStr::new("--benchmark-profile")) {
+        let Some(profile) = args.next().map(PathBuf::from).filter(|path| path.is_absolute() && path.is_dir()) else {
+            std::process::exit(2);
+        };
+        if args.next().is_some() {
+            std::process::exit(2);
+        }
+        Some(profile)
+    } else {
+        None
+    };
+    let mut builder = tauri::Builder::default();
+    if benchmark_profile.is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show_main(app)));
+    }
+    builder
+        .setup(move |app| setup(app, benchmark_profile.as_deref()))
         .invoke_handler(tauri::generate_handler![
             desktop_command,
             capture::capture_video,

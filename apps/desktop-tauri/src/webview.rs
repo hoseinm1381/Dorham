@@ -1,4 +1,5 @@
 use crate::{set_in_call, trusted_main_url};
+use std::sync::atomic::Ordering;
 use tauri::{Manager, WebviewWindow};
 use url::Url;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -8,6 +9,26 @@ use webview2_com::{
 };
 use windows::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
 use windows_core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR, Result, w};
+
+fn set_memory_target(core: &ICoreWebView2, idle: bool) {
+    let Ok(view) = core.cast::<ICoreWebView2_19>() else { return };
+    let level = if idle {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+    } else {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+    };
+    let _ = unsafe { view.SetMemoryUsageTargetLevel(level) };
+}
+
+pub fn set_memory_idle(main: &WebviewWindow, idle: bool) {
+    let app = main.app_handle().clone();
+    let _ = main.with_webview(move |view| {
+        let host = app.state::<crate::Host>();
+        if let Ok(core) = unsafe { view.controller().CoreWebView2() } {
+            set_memory_target(&core, idle && !host.in_call.load(Ordering::Acquire));
+        }
+    });
+}
 
 pub fn open_link(url: &Url) {
     if url.scheme() == "https"
@@ -34,7 +55,10 @@ pub fn install(core: &ICoreWebView2, main: WebviewWindow) -> Result<()> {
     unsafe {
         let navigation_app = main.app_handle().clone();
         core.add_NavigationStarting(
-            &NavigationStartingEventHandler::create(Box::new(move |_, _| {
+            &NavigationStartingEventHandler::create(Box::new(move |sender, _| {
+                if let Some(core) = sender {
+                    set_memory_target(&core, false);
+                }
                 let app = navigation_app.clone();
                 let _ = navigation_app.run_on_main_thread(move || {
                     if app

@@ -179,6 +179,9 @@ impl Updater {
     }
 
     pub async fn check(&self, app: &AppHandle) -> Result<Status, String> {
+        if app.state::<Host>().benchmark {
+            return Ok(self.state());
+        }
         if self.operation.swap(true, Ordering::AcqRel) {
             return Ok(self.state());
         }
@@ -212,6 +215,9 @@ impl Updater {
     }
 
     pub async fn prepare(&self, app: &AppHandle) -> Result<PathBuf, String> {
+        if app.state::<Host>().benchmark {
+            return Err("Windows updates are unavailable in benchmark mode".into());
+        }
         let epoch = self.pause_epoch.load(Ordering::Acquire);
         self.outside_call(app, epoch)?;
         if self.operation.swap(true, Ordering::AcqRel) {
@@ -367,6 +373,9 @@ impl Updater {
     }
 
     pub async fn install(&self, app: &AppHandle) -> Result<(), String> {
+        if app.state::<Host>().benchmark {
+            return Err("Windows updates are unavailable in benchmark mode".into());
+        }
         let epoch = self.pause_epoch.load(Ordering::Acquire);
         self.outside_call(app, epoch)?;
         if self.operation.swap(true, Ordering::AcqRel) {

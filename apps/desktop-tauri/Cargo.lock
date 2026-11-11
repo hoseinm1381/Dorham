@@ -825,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "dorham-desktop"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "base64 0.23.1",
  "reqwest 0.12.28",

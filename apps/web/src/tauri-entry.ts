@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { acknowledgeCaptureAudio, captureNativeVideo, onCaptureAudio, startCaptureAudio, stopCaptureAudio } from './tauri-capture';
+import { enableOnDemandDesktopAudio } from './notifications';
 
 function desktop<T>(method: string, value?: unknown) {
   return invoke<T>('desktop_command', { request: { method, value } });
@@ -25,6 +26,26 @@ async function start() {
     await desktop<void>('finishMigration');
   }
 
+  let inCall = false;
+  let idle = false;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const activity = () => {
+    clearTimeout(idleTimer);
+    if (idle) {
+      idle = false;
+      void desktop('setMemoryIdle', false).catch(console.error);
+    }
+    if (inCall) return;
+    idleTimer = setTimeout(() => {
+      idle = true;
+      void desktop('setMemoryIdle', true).catch(console.error);
+    }, 10000);
+  };
+  for (const event of ['pointerdown', 'keydown', 'wheel', 'focus']) {
+    window.addEventListener(event, activity, { capture: true, passive: true });
+  }
+  activity();
+
   const bridge: NonNullable<Window['desktop']> = {
     getAppInfo: () => desktop('getAppInfo'),
     checkUpdate: () => invoke('update_check'),
@@ -47,12 +68,17 @@ async function start() {
     stopCaptureAudio,
     acknowledgeCaptureAudio,
     onCaptureAudio,
-    setInCall: value => { void desktop('setInCall', value).catch(console.error); },
+    setInCall: value => {
+      inCall = value;
+      activity();
+      void desktop('setInCall', value).catch(console.error);
+    },
     setLanguage: value => desktop('setLanguage', value),
     configureVoiceHotkey: value => desktop('configureVoiceHotkey', value),
     onVoiceHotkey: listener => subscribe('desktop-voice-hotkey', listener),
   };
   Object.defineProperty(window, 'desktop', { value: Object.freeze(bridge) });
+  enableOnDemandDesktopAudio();
   await import('./main');
 }
 

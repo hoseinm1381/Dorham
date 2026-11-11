@@ -133,6 +133,10 @@ type AudioSelection = { id: string; sourceName: string; audioScope: 'application
 type AudioPacket = { id: string; pcm?: Uint8Array; error?: string };
 const audioListeners = new Set<(packet: AudioPacket) => void>();
 let audioSession: { id: string; outstanding: number; stopped: AbortController } | undefined;
+// The native queue contains 20 ms PCM packets. A request can deliver several
+// packets so WebView2 does not need to dispatch each one separately.
+const audioPollInterval = 32;
+const maxAudioBatchesInFlight = 3;
 
 export function onCaptureAudio(listener: (packet: AudioPacket) => void) {
   audioListeners.add(listener);
@@ -146,15 +150,20 @@ export async function startCaptureAudio(): Promise<AudioSelection> {
   void (async () => {
     await delay(0);
     while (audioSession === session) {
+      const started = performance.now();
+      if (session.outstanding >= maxAudioBatchesInFlight) {
+        await delay(audioPollInterval);
+        continue;
+      }
       const response = await frame('audio', session.id, session.stopped.signal);
       const data = await response.arrayBuffer();
       if (audioSession !== session) return;
-      if (data.byteLength && session.outstanding < 6) {
+      if (data.byteLength) {
         const pcm = new Uint8Array(data);
         session.outstanding++;
         for (const listener of audioListeners) listener({ id: session.id, pcm });
       }
-      await delay(16);
+      await delay(Math.max(0, audioPollInterval - (performance.now() - started)));
     }
   })().catch(error => {
     if (audioSession === session) {
