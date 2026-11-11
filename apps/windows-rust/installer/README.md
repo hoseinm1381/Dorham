@@ -32,9 +32,9 @@ the release owner; this package currently targets 1.1.1.
 
 ## One-time profile import contract
 
-The installer runs migration after its normal running-application check, before
-the previous uninstaller removes the engine needed for export. It reads the
-legacy `%APPDATA%\@dorhamdesktop` profile only after Dorham exits. A new private
+The installer runs migration during initialization, before the previous
+uninstaller removes the engine needed for export. It reads the legacy
+`%APPDATA%\@dorham\desktop` profile after Dorham exits. A new private
 directory under `%LOCALAPPDATA%\Dorham\migration\backups` retains an immutable
 profile copy and a verified per-file SHA-256 manifest. Reparse points cause an
 abort instead of following a link outside the intended profile/runtime.

@@ -5,6 +5,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { completeRecovery } from './browser/recovery-helper';
 
+const run = promisify(execFile);
+
 export const migratedValues = {
   'dorham.language': 'fa-IR',
   'dorham-voice-input': JSON.stringify({ mode: 'push', background: true, binding: { code: 'F9', alt: false, ctrl: false, shift: false } }),
@@ -15,8 +17,9 @@ export async function exportOwnedElectronProfile(
   previousExecutable: string, validator: string, root: string,
   destination: string, server: string, username: string, password: string, token: string,
 ) {
-  const legacyProfile = path.join(root, 'legacy-electron');
-  await mkdir(legacyProfile);
+  const roaming = path.join(root, 'Roaming AppData');
+  const legacyProfile = path.join(roaming, '@dorham', 'desktop');
+  await mkdir(legacyProfile, { recursive: true });
   const overlay = { enabled: true, position: 'bottom-right' };
   await writeFile(path.join(legacyProfile, 'settings.json'), JSON.stringify({ server, voiceOverlay: overlay }));
   const created = await fetch(server + '/api/v1/servers', {
@@ -54,12 +57,21 @@ export async function exportOwnedElectronProfile(
     await previous.close();
   }
 
-  await promisify(execFile)('powershell.exe', [
-    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-    path.resolve('apps/windows-rust/installer/migrate-electron.ps1'),
-    '-InstallDir', path.dirname(path.resolve(previousExecutable)), '-ProfileDir', legacyProfile,
-    '-MigrationDir', destination, '-Validator', validator,
-  ], { timeout: 120000, windowsHide: true });
+  const nsis = path.resolve(process.env.DORHAM_NSIS_BUNDLE || '.tools/nsis/nsis-bundle', 'windows');
+  const runner = path.join(root, 'run-installer-migration.exe');
+  await run(path.join(nsis, 'makensis.exe'), ['/V2', path.resolve('tests/fixtures/tauri-migration.nsi')], {
+    env: {
+      ...process.env, NSISDIR: nsis, DORHAM_PROFILE_VALIDATOR: path.resolve(validator),
+      DORHAM_TEST_MIGRATION_RUNNER: runner,
+      DORHAM_TEST_MIGRATION_RESOURCES: path.resolve('apps/windows-rust/installer'),
+    }, timeout: 60000, windowsHide: true,
+  });
+  await run(runner, [], {
+    env: {
+      ...process.env, DORHAM_TEST_MIGRATION_INSTALL: path.dirname(path.resolve(previousExecutable)),
+      DORHAM_TEST_MIGRATION_ROAMING: roaming, DORHAM_TEST_MIGRATION_DESTINATION: destination,
+    }, timeout: 130000, windowsHide: true,
+  });
   const raw = await readFile(path.join(destination, 'electron-export-v1.json'), 'utf8');
   const parsed = JSON.parse(raw);
   expect(parsed.appId).toBe('com.dorham.chat');

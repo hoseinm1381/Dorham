@@ -19,11 +19,12 @@
       Abort
     ${EndIf}
   ${EndIf}
-  !insertmacro exportPreviousProfile
+  !insertmacro exportPreviousProfile "$APPDATA" "$LOCALAPPDATA\Dorham\migration"
 !macroend
 
 # NSIS initializes the current user's install path before customInit.
-!macro exportPreviousProfile
+# Electron 1.2.x uses its scoped package name as the userData path.
+!macro exportPreviousProfile roamingDir migrationDir
   ${If} ${FileExists} "$INSTDIR\resources\app.asar"
     InitPluginsDir
     SetOutPath $PLUGINSDIR
@@ -32,14 +33,15 @@
     File "${BUILD_RESOURCES_DIR}\protect-export.ps1"
     !if /FileExists "$%DORHAM_PROFILE_VALIDATOR%"
       File /oname=ValidateDorham.exe "$%DORHAM_PROFILE_VALIDATOR%"
-      nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\migrate-electron.ps1" -InstallDir "$INSTDIR" -ProfileDir "$APPDATA\@dorhamdesktop" -MigrationDir "$LOCALAPPDATA\Dorham\migration" -Validator "$PLUGINSDIR\ValidateDorham.exe"'
+      nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\migrate-electron.ps1" -InstallDir "$INSTDIR" -ProfileDir "${roamingDir}\@dorham\desktop" -MigrationDir "${migrationDir}" -Validator "$PLUGINSDIR\ValidateDorham.exe"'
     !else
-      nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\migrate-electron.ps1" -InstallDir "$INSTDIR" -ProfileDir "$APPDATA\@dorhamdesktop" -MigrationDir "$LOCALAPPDATA\Dorham\migration"'
+      nsExec::ExecToStack /TIMEOUT=120000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\migrate-electron.ps1" -InstallDir "$INSTDIR" -ProfileDir "${roamingDir}\@dorham\desktop" -MigrationDir "${migrationDir}"'
     !endif
     Pop $R0
     Pop $R1
     ${If} $R0 != 0
-      MessageBox MB_OK|MB_ICONSTOP "Your previous Dorham profile was preserved, but it could not be migrated. Installation stopped before removing the old app. Close Dorham and retry."
+      MessageBox MB_OK|MB_ICONSTOP "Your previous Dorham profile was preserved, but it could not be migrated. Installation stopped before removing the old app. Close Dorham and retry." /SD IDOK
+      SetErrorLevel 1
       Abort
     ${EndIf}
   ${EndIf}

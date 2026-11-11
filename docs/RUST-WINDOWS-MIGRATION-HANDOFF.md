@@ -100,7 +100,7 @@ deliberately when resuming. The Rust source/build script remains local and inact
 Keep `com.dorham.chat`, product name Dorham, NSIS GUID
 `26094eeb-aead-5f8d-b988-ece04b473a4b`, the existing per-user install directory
 and one uninstall entry. The legacy Electron profile is
-`%APPDATA%\@dorhamdesktop`.
+`%APPDATA%\@dorham\desktop`.
 
 Do not directly DPAPI-decrypt the existing `settings.secret`: Electron safeStorage
 uses Chromium OSCrypt. Do not open a live Electron LevelDB profile with WebView2.

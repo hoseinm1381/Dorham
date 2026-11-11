@@ -26,7 +26,7 @@ separate completed work and must not be described as Rust acceptance.
   `26094eeb-aead-5f8d-b988-ece04b473a4b`. Reusing the existing per-user NSIS
   installer identity is necessary to upgrade the same folder/uninstall entry.
 - The legacy Electron profile location was confirmed by the root agent as
-  `%APPDATA%\@dorhamdesktop`, **not** `%APPDATA%\Dorham`.
+  `%APPDATA%\@dorham\desktop` for the shipped 1.2.8 Electron app.
 - The published 1.1.0 executable reports ProductVersion `1.1.0.0` but FileVersion
   `1.1.0`. The prototype exporter normalizes FileVersion to a numeric triple.
 - Electron 45.1.0 `safeStorage` delegates to Chromium OSCrypt and recognizes
