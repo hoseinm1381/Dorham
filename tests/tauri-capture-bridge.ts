@@ -12,9 +12,9 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
   const second = previews ? spawn(path.resolve(fixture), ['unrelated'], { stdio: ['ignore', 'pipe', 'inherit'] }) : undefined;
   let sourceHandle = '';
   let secondHandle = '';
-  const sourceWindow = async (action: 'minimize' | 'inspect') => {
+  const sourceWindow = async (action: 'minimize' | 'maximize' | 'inspect') => {
     const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.resolve('tests/fixtures/tauri-picker-source.ps1'), String(source.pid), sourceHandle, action], { windowsHide: true });
-    return JSON.parse(stdout) as { minimized: boolean };
+    return JSON.parse(stdout) as { minimized: boolean; maximized: boolean };
   };
   const previewHelpers = async () => {
     const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
@@ -41,7 +41,7 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
       secondHandle = String(secondReady?.[0]).match(/^\d+/m)?.[0] ?? '';
       expect(sourceHandle).not.toBe('');
       expect(secondHandle).not.toBe('');
-      expect(await sourceWindow('minimize')).toEqual({ minimized: true });
+      expect(await sourceWindow('minimize')).toMatchObject({ minimized: true });
     }
     const denied = await page.evaluate(async () => {
       try { await window.desktop!.captureNativeVideo!({ width: 400, height: 220, fps: 15 }, false); return false; }
@@ -93,14 +93,24 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
     let option = picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true });
     if (previews) {
       const search = picker.getByRole('searchbox', { name: 'Search sources' });
-      await search.fill('Dorham owned capture fixture');
-      const minimized = option.filter({ hasText: 'Window minimized' });
-      await expect(minimized).toBeVisible();
-      await minimized.click();
+      await search.fill('Dorham owned capture fixture selected');
+      option = picker.locator(`button:has([data-preview="window:${sourceHandle}:${source.pid}"])`);
+      await expect(option.locator('.preview')).toHaveText('Window minimized');
+      await option.click();
+      await expect(picker.getByRole('button', { name: 'Restore window', exact: true })).toBeEnabled();
+      await expect.poll(previewHelpers).toBe(0);
+      expect(await sourceWindow('maximize')).toEqual({ minimized: false, maximized: true });
+      await picker.bringToFront();
+      await expect(picker.getByRole('button', { name: 'Share', exact: true })).toBeEnabled();
+      await expect.poll(() => fingerprint(option.locator('.preview')), { timeout: 15000 }).not.toBeNull();
+      expect(await sourceWindow('minimize')).toMatchObject({ minimized: true });
+      await picker.bringToFront();
+      await expect(option.locator('.preview')).toHaveText('Window minimized');
+      await expect.poll(previewHelpers).toBe(0);
       await picker.getByRole('button', { name: 'Restore window', exact: true }).click();
       await expect(picker.getByRole('button', { name: 'Share', exact: true })).toBeEnabled();
-      expect(await sourceWindow('inspect')).toEqual({ minimized: false });
-      option = picker.locator(`button:has([data-preview="window:${sourceHandle}:${source.pid}"])`);
+      expect(await sourceWindow('inspect')).toMatchObject({ minimized: false });
+      await search.fill('Dorham owned capture fixture');
       await expect.poll(() => fingerprint(option.locator('.preview')), { timeout: 15000 }).not.toBeNull();
       const other = picker.locator(`button:has([data-preview="window:${secondHandle}:${second?.pid}"])`);
       await expect.poll(() => fingerprint(other.locator('.preview')), { timeout: 10000 }).not.toBeNull();
@@ -130,7 +140,7 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
       await search.fill('Dorham owned capture fixture selected');
       await picker.getByRole('tab', { name: 'Applications', exact: true }).click();
       await expect(option.locator('.preview img')).toBeVisible();
-      console.log(JSON.stringify({ minimizedApplicationRestored: true, simultaneousApplicationPreviews: 2, applicationFrameChanges: changes, changingScreenPreview: true, stoppedWhenNoSourcesVisible: true }));
+      console.log(JSON.stringify({ previewResumedAfterExternalMaximize: true, previewStoppedAfterExternalMinimize: true, minimizedApplicationRestored: true, simultaneousApplicationPreviews: 2, applicationFrameChanges: changes, changingScreenPreview: true, stoppedWhenNoSourcesVisible: true }));
     }
     await option.click();
     await picker.getByRole('button', { name: 'Share', exact: true }).click();

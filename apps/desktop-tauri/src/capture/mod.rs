@@ -284,11 +284,8 @@ pub fn capture_picker_previews(
     window: WebviewWindow,
     ids: Vec<String>,
     revision: u64,
-) -> Result<HashMap<String, Option<String>>, String> {
+) -> Result<PickerPreviews, String> {
     picker_window(&window)?;
-    if ids.len() > preview::MAX_SOURCES {
-        return Err("Too many screen previews".into());
-    }
     let host = window.state::<Host>();
     let mut capture = host
         .capture
@@ -300,35 +297,45 @@ pub fn capture_picker_previews(
         .as_mut()
         .filter(|picker| allowed(&host) && picker.result.is_some())
         .ok_or("Screen preview unavailable")?;
-    let mut frames = HashMap::new();
-    let mut sources = Vec::new();
+    if ids.len() > picker.sources.len() {
+        return Err("Too many screen preview sources".into());
+    }
+    let mut minimized = HashMap::new();
+    let mut sources: Vec<&Source> = Vec::new();
     for id in ids {
         let source = picker
             .sources
             .iter()
             .find(|source| source.id == id)
             .ok_or("Unknown capture source")?;
-        if source.minimized || source.is_minimized() {
-            frames.insert(id, None);
-        } else if !sources.iter().any(|previous: &&Source| previous.id == id) {
+        let is_minimized = source.is_minimized();
+        if !is_minimized && sources.len() < preview::MAX_SOURCES
+            && !sources.iter().any(|previous| previous.id == id)
+        {
             sources.push(source);
         }
+        if source.kind == Kind::Window {
+            minimized.insert(id, is_minimized);
+        }
     }
+    sources.sort_unstable_by(|left, right| left.id.cmp(&right.id));
     if sources.is_empty() {
         picker.previews = None;
-        return Ok(frames);
-    }
-    if !picker.previews.as_ref().is_some_and(|batch| batch.matches(&sources, revision)) {
+    } else if !picker.previews.as_ref().is_some_and(|batch| batch.matches(&sources, revision)) {
         picker.previews = None;
         picker.previews = Some(
             preview::Batch::start(&binary, &sources, revision)
                 .map_err(|_| "Windows could not start the screen previews")?,
         );
     }
-    if let Some(batch) = &picker.previews {
-        frames.extend(batch.frames());
-    }
-    Ok(frames)
+    let frames = picker.previews.as_ref().map_or_else(HashMap::new, preview::Batch::frames);
+    Ok(PickerPreviews { minimized, frames })
+}
+
+#[derive(Serialize)]
+pub struct PickerPreviews {
+    minimized: HashMap<String, bool>,
+    frames: HashMap<String, Option<String>>,
 }
 
 #[tauri::command]
@@ -345,7 +352,7 @@ pub async fn capture_picker_restore(window: WebviewWindow, id: String) -> Result
             .as_ref()
             .filter(|picker| allowed(&host) && picker.result.is_some())
             .and_then(|picker| {
-                picker.sources.iter().find(|source| source.id == id && source.minimized)
+                picker.sources.iter().find(|source| source.id == id && source.kind == Kind::Window)
             })
             .ok_or("Unknown minimized window")?;
         sources::enumerate()

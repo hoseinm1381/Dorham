@@ -30,6 +30,11 @@ function showPreview(preview, thumbnail, pending = false) {
   }
 }
 
+function paintPreview(preview, source) {
+  if (source.minimized) preview.textContent = text('Window minimized');
+  else showPreview(preview, source.thumbnail || previews.get(source.id), Boolean(preview.dataset.preview) && !previews.has(source.id));
+}
+
 function schedulePreviews(delay = 0) {
   window.clearTimeout(previewTimer);
   if (window.capturePicker.previewFrames) previewTimer = window.setTimeout(pollPreviews, delay);
@@ -38,22 +43,32 @@ function schedulePreviews(delay = 0) {
 async function pollPreviews() {
   if (busy || previewLoading) return;
   const visible = document.hidden ? [] : [...byId('sources').querySelectorAll('[data-preview][data-visible]')];
-  const ids = visible.map(item => item.dataset.preview);
-  const selectedIndex = ids.indexOf(selected);
-  if (selectedIndex >= 6) ids.unshift(...ids.splice(selectedIndex, 1));
-  const requested = ids.slice(0, 6).sort();
+  const requested = visible.map(item => item.dataset.preview);
+  const selectedIndex = requested.indexOf(selected);
+  if (selectedIndex > 0) requested.unshift(...requested.splice(selectedIndex, 1));
   if (!requested.length && !previewActive) return;
   previewActive = requested.length > 0;
   const generation = previewGeneration;
   previewLoading = true;
   try {
-    const frames = await window.capturePicker.previewFrames(requested, generation).catch(() => (
-      Object.fromEntries(requested.filter(id => !previews.has(id)).map(id => [id, null]))
-    ));
+    const { frames, minimized } = await window.capturePicker.previewFrames(requested, generation).catch(() => ({
+      frames: Object.fromEntries(requested.filter(id => !previews.has(id)).map(id => [id, null])),
+      minimized: {},
+    }));
     if (generation === previewGeneration) {
+      const changed = new Set(Object.keys(frames));
+      for (const source of model.sources) {
+        if (Object.hasOwn(minimized, source.id) && source.minimized !== minimized[source.id]) {
+          source.minimized = minimized[source.id];
+          previews.delete(source.id);
+          changed.add(source.id);
+          if (source.id === selected) updateShareButton();
+        }
+      }
       for (const [id, thumbnail] of Object.entries(frames)) previews.set(id, thumbnail);
       for (const item of byId('sources').querySelectorAll('[data-preview]')) {
-        if (Object.hasOwn(frames, item.dataset.preview)) showPreview(item, frames[item.dataset.preview]);
+        const id = item.dataset.preview;
+        if (changed.has(id)) paintPreview(item, model.sources.find(source => source.id === id));
       }
     }
   } finally {
@@ -81,10 +96,9 @@ function render() {
   for (const source of model.sources.filter(item => item.kind === tab && item.name.toLocaleLowerCase().includes(query))) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'source'; button.setAttribute('role', 'option'); button.setAttribute('aria-selected', String(source.id === selected)); button.setAttribute('aria-label', source.name);
     const preview = document.createElement('span'); preview.className = 'preview';
-    const live = !source.minimized && !source.thumbnail && Boolean(window.capturePicker.previewFrames);
-    const pending = live && !previews.has(source.id);
-    if (source.minimized) preview.textContent = text('Window minimized');
-    else showPreview(preview, source.thumbnail || previews.get(source.id), pending);
+    const live = !source.thumbnail && Boolean(window.capturePicker.previewFrames);
+    if (live) preview.dataset.preview = source.id;
+    paintPreview(preview, source);
     const label = document.createElement('span'); label.className = 'source-name';
     if (source.icon) { const icon = document.createElement('img'); icon.src = source.icon; icon.alt = ''; label.append(icon); }
     const name = document.createElement('span'); name.textContent = source.name; label.append(name); button.append(preview, label);
@@ -96,7 +110,7 @@ function render() {
       schedulePreviews();
     };
     list.append(button);
-    if (live) { preview.dataset.preview = source.id; previewObserver.observe(preview); }
+    if (live) previewObserver.observe(preview);
   }
   byId('status').textContent = text(!list.childElementCount ? 'No matching sources. Try Refresh.' : selected ? '' : 'Choose a source to continue.');
   updateShareButton(); audioScope();
@@ -149,4 +163,5 @@ byId('search').oninput = render; byId('scope').onchange = audioScope; byId('refr
 byId('cancel').onclick = () => { void choose(''); }; byId('share').onclick = () => { void actOnSelection(); };
 document.addEventListener('keydown', event => { if (event.key === 'Escape') void choose(''); });
 document.addEventListener('visibilitychange', () => schedulePreviews());
+window.addEventListener('focus', () => schedulePreviews());
 void refresh();
