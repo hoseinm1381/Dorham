@@ -32,6 +32,7 @@
     "android:build": "node scripts/android-build.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "pretest": "node -e \"require('node:fs').copyFileSync('packages/contracts/src/voice-keys.json', 'apps/desktop/voice-keys.json')\"",
     "test": "vitest run",
     "test:e2e": "node scripts/browser-tests.mjs",
     "test:media-load": "node scripts/browser-tests.mjs --capacity",

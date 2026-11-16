@@ -64,7 +64,11 @@ it('passes selected-window audio to native Chrome and publishes screen audio ind
     (f.socket as any).timeout = () => ({ emit: (_name: string, body: any, reply: any) => reply(null, { ok: true, data: { lease: { id: 'screen', policyRevision: 1, includeAudio: Boolean(body.includeAudio), maxFrameRate: 30 } } }) });
     await f.transport.startShare('720p15', { includeAudio: true });
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ windowAudio: 'window', systemAudio: 'include', audio: expect.objectContaining({ restrictOwnAudio: true }), selfBrowserSurface: 'exclude' }));
-    expect(participant.publishTrack).toHaveBeenCalledWith(video, expect.objectContaining({ source: 'screen_share', screenShareEncoding: { maxBitrate: 402000, maxFramerate: 15 } }));
+    expect(participant.publishTrack).toHaveBeenCalledWith(video, expect.objectContaining({
+      source: 'screen_share', simulcast: true,
+      screenShareEncoding: { maxBitrate: 302000, maxFramerate: 15, priority: 'low' },
+      screenShareSimulcastLayers: [expect.objectContaining({ width: 320, height: 180, encoding: expect.objectContaining({ maxBitrate: 100000, maxFramerate: 4 }) })]
+    }));
     expect(participant.publishTrack).toHaveBeenCalledWith(audio, expect.objectContaining({ source: 'screen_share_audio', forceStereo: true, audioPreset: { maxBitrate: 48000 } }));
     await f.transport.stopShare(); expect(video.stop).toHaveBeenCalled(); expect(audio.stop).toHaveBeenCalled();
     published.clear(); await f.transport.startShare('720p15', { includeAudio: false });
@@ -190,11 +194,13 @@ it('applies live screen limits and keeps the new bandwidth for later quality and
   const f=fixture();try{
     const transport=f.transport as any,media=transport.media,lease={id:'screen',policyRevision:1,maxFrameRate:30,includeAudio:true};transport.lease=lease;transport.options.screenPolicy={maxBitrate:1500000,maxFrameRate:30};
     (f.socket as any).timeout=()=>({emit:(name:string,_body:any,reply:any)=>reply(null,{ok:true,data:{lease:{...lease,policyRevision:2}}})});
-    let parameters:any={encodings:[{active:true,maxBitrate:402000,maxFramerate:15}]};
+    let parameters:any={encodings:[{rid:'q',active:true,maxBitrate:100000,maxFramerate:4},{rid:'h',active:true,maxBitrate:302000,maxFramerate:15}]};
     const sender={getParameters:()=>structuredClone(parameters),setParameters:vi.fn(async(value:any)=>{parameters=value;})};
     const track={sender,mediaStreamTrack:{applyConstraints:vi.fn(async()=>{})}},publication={videoTrack:track,options:{screenShareEncoding:{maxBitrate:402000,maxFramerate:15}}};media.localParticipant.getTrackPublication=()=>publication;
-    await f.transport.setShareQuality('480p30',1500000);expect(parameters.encodings[0]).toMatchObject({active:true,maxBitrate:1452000,maxFramerate:30});expect(publication.options.screenShareEncoding).toEqual({maxBitrate:1452000,maxFramerate:30});
-    await f.transport.setShareQuality('720p15');expect(parameters.encodings[0]).toMatchObject({maxBitrate:1452000,maxFramerate:15});expect(track.mediaStreamTrack.applyConstraints).toHaveBeenLastCalledWith(expect.objectContaining({height:{ideal:720,max:720}}));
+    await f.transport.setShareQuality('480p30',1500000);
+    expect(parameters.encodings).toEqual([{rid:'q',active:true,maxBitrate:100000,maxFramerate:4},{rid:'h',active:true,maxBitrate:1352000,maxFramerate:30}]);
+    expect(publication.options.screenShareEncoding).toEqual({maxBitrate:1352000,maxFramerate:30,priority:'low'});
+    await f.transport.setShareQuality('720p15');expect(parameters.encodings[1]).toMatchObject({maxBitrate:1352000,maxFramerate:15});expect(track.mediaStreamTrack.applyConstraints).toHaveBeenLastCalledWith(expect.objectContaining({height:{ideal:720,max:720}}));
   }finally{await f.transport.destroy();}
 });
 it('stops a partly applied screen when encoder changes fail instead of displaying a false applied limit',async()=>{
