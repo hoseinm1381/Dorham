@@ -34,4 +34,3 @@ async (page) => {
   await button('Disconnect voice').first().click();
   return { ...local, directLink: 'playing', muteControl: true, botInRoster: true };
 }
-

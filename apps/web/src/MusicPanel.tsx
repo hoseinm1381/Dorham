@@ -343,5 +343,3 @@ function MusicSettings({ data, busy, listening, command }: { data: MusicData; bu
     </form>}
   </div>;
 }
-
-

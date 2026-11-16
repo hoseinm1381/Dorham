@@ -291,5 +291,3 @@ async (page) => {
     await Promise.all(contexts.map(context => context.close()));
   }
 }
-
-

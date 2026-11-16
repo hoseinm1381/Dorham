@@ -22,6 +22,8 @@ The database migration adds Music room state and the upload index. The starter a
 
 The optional JSON is an array. A local file must be within the same directory tree as this catalog. Duration is in milliseconds. A live source is a direct HTTPS audio stream, with same-host redirects only. Use sources that permit playback to channel members.
 
+The release catalogs are in `music-pack/`. Supply the catalog audio separately under `music-pack/audio/` when building the release fixture. Operator-provided audio and raw inputs in `new_musics/` stay local. The built-in starter library works without those files.
+
 ```json
 [
   {
