@@ -143,8 +143,9 @@ func (n *Notifications) register() {
 	a.Route("POST", "/api/v1/notifications/poll", false, func(r *Request) any {
 		device := n.device(a.DB, r.R)
 		id := Str(device, "id")
+		limit := max(32, readCapacity(a.DB, a.C).Connections*2)
 		n.mu.Lock()
-		busy := n.polling[id] != nil || len(n.polling) >= max(32, a.C.MaxOnline*2)
+		busy := n.polling[id] != nil || int64(len(n.polling)) >= limit
 		if !busy {
 			n.polling[id] = make(chan struct{})
 		}

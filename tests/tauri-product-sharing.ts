@@ -78,7 +78,9 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
     await host.getByRole('button', { name: 'Share screen', exact: true }).click();
     const dialog = host.getByRole('dialog', { name: 'Screen sharing', exact: true });
     const choose = async () => {
-      if (!videoOnly) await dialog.getByRole('checkbox', { name: 'Share sound', exact: true }).check();
+      const shareSound = dialog.getByRole('checkbox', { name: 'Share sound', exact: true });
+      await expect(shareSound).toBeChecked();
+      if (videoOnly) await shareSound.uncheck();
       const opening = host.context().waitForEvent('page', { timeout: 15000 });
       await dialog.getByRole('button', { name: 'Choose screen', exact: true }).click();
       return opening;
@@ -91,7 +93,7 @@ export async function proveProductSharing(host: Page, server: string, ownerToken
       await receiver.evaluate(() => (window as unknown as { __ownedDecodedAudio: Set<MediaStreamTrack> }).__ownedDecodedAudio.clear());
       picker = await choose();
       await picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true }).click();
-      if (!videoOnly) await picker.locator('#scope').selectOption('application');
+      await expect(picker.locator('#scope')).toHaveValue(videoOnly ? 'none' : 'application');
       await picker.getByRole('button', { name: 'Share', exact: true }).click();
       await expect(dialog).toBeHidden({ timeout: 15000 });
       if (!videoOnly) await expect(host.getByText('Selected application sound', { exact: false })).toBeVisible();

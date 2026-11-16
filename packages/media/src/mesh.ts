@@ -363,9 +363,9 @@ export class MeshTransport implements MediaTransport {
       screen = await captureScreen(settings, includeAudio);
       if (generation !== this.generation || !this.channelId) { stopScreenCapture(screen); throw Error('Screen sharing was cancelled.'); }
       this.screen = screen;
-      if (includeAudio && !screen.getAudioTracks().length) {
+      const withoutAudio = includeAudio && !screen.getAudioTracks().length;
+      if (withoutAudio) {
         const applied = await ack(this.options.socket, 'share:update', { requestId: crypto.randomUUID(), leaseId: this.lease!.id, expectedRevision: this.lease!.policyRevision, includeAudio: false }); this.lease = applied.lease;
-        this.options.emit('notice', 'No sound was selected. Video sharing is active; restart sharing to change the sound source.');
       }
       screen.getVideoTracks()[0].onended = () => { void this.stopShare(); };
       for (const [userId, p] of this.peers) {
@@ -383,6 +383,10 @@ export class MeshTransport implements MediaTransport {
         await this.signal(userId, {});
       }
       this.options.emit('localScreen', { userId: this.options.userId, leaseId: this.lease!.id, stream: screen, sourceName: captureDetails(screen).sourceName, audioScope: captureDetails(screen).audioScope });
+      if (withoutAudio) {
+        if (globalThis.window?.desktop) this.options.emit('notice', 'No sound was selected. Video sharing is active; restart sharing to change the sound source.');
+        else this.options.emit('browserShareWithoutAudio', undefined);
+      }
     } catch (e) { stopScreenCapture(screen); await this.stopShare(); throw e; }
   }
   private updatingScreenQuality = false;

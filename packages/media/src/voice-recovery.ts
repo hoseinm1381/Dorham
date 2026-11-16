@@ -2,7 +2,7 @@ import type { Socket } from 'socket.io-client';
 import type { VoiceRoom } from '@dorham/contracts';
 import { ack } from './signaling';
 
-type VoiceTicket = { channelId: string; epoch: string; resumeToken: string };
+type VoiceTicket = { channelId: string; epoch: string; resumeToken: string; nativeKeepalive?: true };
 type ResumedVoice = { room: VoiceRoom; epoch: string };
 const recoveryLimit = 30_000;
 const terminalCodes = new Set(['VOICE_SESSION_ENDED', 'NOT_IN_VOICE', 'UNAUTHENTICATED', 'FORBIDDEN', 'TIMED_OUT', 'NOT_FOUND', 'BANNED']);
@@ -21,6 +21,7 @@ export class VoiceRecovery {
     waiting(): void;
     restore(result: ResumedVoice, current: () => boolean): Promise<void>;
     ended(): void;
+    mayWait?(): Promise<boolean>;
   }) {
     socket.on('disconnect', this.disconnected);
     socket.on('connect', this.connected);
@@ -29,8 +30,8 @@ export class VoiceRecovery {
   get supported() { return Boolean(this.ticket); }
   get pending() { return this.deadline !== 0; }
 
-  remember(channelId: string, result: { epoch: string; resumeToken?: string }) {
-    if (result.resumeToken) this.ticket = { channelId, epoch: result.epoch, resumeToken: result.resumeToken };
+  remember(channelId: string, result: { epoch: string; resumeToken?: string }, nativeKeepalive = false) {
+    if (result.resumeToken) this.ticket = { channelId, epoch: result.epoch, resumeToken: result.resumeToken, ...(nativeKeepalive ? { nativeKeepalive: true } : {}) };
   }
 
   request() {
@@ -61,12 +62,24 @@ export class VoiceRecovery {
 
   private disconnected = (reason: string) => {
     this.revision++;
-    if (reason === 'io client disconnect' || reason === 'io server disconnect') {
+    if (reason === 'io server disconnect' && this.ticket?.nativeKeepalive) {
+      const ticket = this.ticket, revision = this.revision;
+      void this.nativeAlive().then(alive => {
+        if (this.ticket !== ticket || this.revision !== revision) return;
+        if (alive) { this.request(); this.socket.connect(); }
+        else this.callbacks.ended();
+      });
+    } else if (reason === 'io client disconnect' || reason === 'io server disconnect') {
       if (this.ticket) this.callbacks.ended();
     } else if (this.request()) this.schedule(this.deadline - Date.now());
   };
 
   private connected = () => { if (this.pending) this.schedule(0); };
+
+  private async nativeAlive() {
+    try { return this.ticket?.nativeKeepalive === true && await this.callbacks.mayWait?.() === true; }
+    catch { return false; }
+  }
 
   private schedule(delay: number) {
     clearTimeout(this.timer);
@@ -78,7 +91,13 @@ export class VoiceRecovery {
   private async attempt() {
     const ticket = this.ticket;
     if (!ticket || !this.pending) return;
-    if (Date.now() >= this.deadline) { this.callbacks.ended(); return; }
+    if (Date.now() >= this.deadline) {
+      const revision = this.revision;
+      const alive = await this.nativeAlive();
+      if (this.ticket !== ticket || this.revision !== revision || !this.pending) return;
+      if (!alive) { this.callbacks.ended(); return; }
+      this.deadline = Date.now() + recoveryLimit;
+    }
     if (!this.socket.connected || this.flight === ticket) { this.schedule(this.deadline - Date.now()); return; }
     const revision = this.revision;
     const current = () => this.ticket === ticket && this.revision === revision && this.socket.connected && Date.now() < this.deadline;

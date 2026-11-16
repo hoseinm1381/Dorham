@@ -25,9 +25,14 @@ import androidx.activity.result.ActivityResult
 import com.getcapacitor.*
 import com.getcapacitor.annotation.*
 import io.livekit.android.LiveKit
+import io.livekit.android.RoomOptions
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
+import io.livekit.android.room.participant.ConnectionQuality
 import io.livekit.android.room.participant.VideoTrackPublishOptions
+import io.livekit.android.room.track.CustomVideoPreset
+import io.livekit.android.room.track.Track as LiveTrack
+import io.livekit.android.room.track.VideoQuality
 import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.LocalScreencastVideoTrack
 import io.livekit.android.room.track.VideoCaptureParameter
@@ -51,6 +56,7 @@ class DorhamMediaPlugin : Plugin() {
     companion object { var active: DorhamMediaPlugin? = null }
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val voiceKeepalive = NativeVoiceKeepalive(scope)
     private var egl: EglBase? = null
     private var factory: PeerConnectionFactory? = null
     private var audioSource: AudioSource? = null
@@ -78,6 +84,8 @@ class DorhamMediaPlugin : Plugin() {
     private var screenStream = UUID.randomUUID().toString()
     private var sfu: Room? = null
     private var sfuReady = false
+    private var sfuScreenPriority = ScreenPlayback.FULL
+    private var screenRecoverySamples = 0
     private var microphoneAvailable = false
     private val microphoneLock = Mutex()
     private var viewer: FrameLayout? = null
@@ -130,7 +138,7 @@ class DorhamMediaPlugin : Plugin() {
         val recovering = call.getBoolean("recovering") == true
         val runningService = if (recovering) VoiceService.instance else null
         release(stopService = runningService == null); generation++; active = this; language = call.getString("language") ?: "en-US"; callName = call.getString("channelName") ?: "Dorham"; selfId = call.getString("selfId") ?: error("Missing identity").let { "" }; room = call.getObject("room") ?: JSONObject()
-        microphoneAvailable = canUseMicrophone(); muted = call.getBoolean("muted") ?: false; deafened = call.getBoolean("deafened") ?: false
+        volumes["dorham-music"] = call.getDouble("initialMusicVolume")?.coerceIn(0.0, 1.0) ?: 0.30; microphoneAvailable = canUseMicrophone(); muted = call.getBoolean("muted") ?: false; deafened = call.getBoolean("deafened") ?: false
         if (runningService == null) {
             context.startForegroundService(Intent(context, VoiceService::class.java).putExtra("microphone", microphoneAvailable).putExtra("language", language).putExtra("channelName", callName))
         } else {
@@ -146,14 +154,34 @@ class DorhamMediaPlugin : Plugin() {
         }
         val servers = call.getArray("iceServers") ?: JSArray(); ice = (0 until servers.length()).map { n -> val item = servers.getJSONObject(n); val urls = item.optJSONArray("urls") ?: JSONArray().put(item.optString("urls")); PeerConnection.IceServer.builder((0 until urls.length()).map { urls.getString(it) }).setUsername(item.optString("username")).setPassword(item.optString("credential")).createIceServer() }
         val credentials = call.getObject("credentials")
+        fun connected() {
+            call.getObject("backgroundVoice")?.let { background ->
+                voiceKeepalive.start(background.optString("origin"), selfId, room.optString("channelId"),
+                    call.getString("epoch") ?: "", background.optString("token"), { screenLease != null }) {
+                    release()
+                    emit("voiceMediaDisconnected", JSONObject().put("terminal", true))
+                }
+            }
+            call.resolve(JSObject().put("listenOnly", !microphoneAvailable))
+        }
         if (credentials != null) {
-            val joinGeneration = generation; val live = LiveKit.create(context); sfu = live
+            val joinGeneration = generation; val live = LiveKit.create(context, RoomOptions(dynacast = true)); sfu = live
             scope.launch {
                 try {
                     launch { live.events.collect { event ->
                         if (sfu !== live || generation != joinGeneration) return@collect
                         when (event) {
-                            is RoomEvent.TrackSubscribed -> { val id = event.participant.identity?.value?.substringBefore(":") ?: ""; when (val track = event.track) { is LiveVideoTrack -> { sfuVideos[id] = track; videoViews.refresh(); emit("video", JSONObject().put("userId", id)) }; is RemoteAudioTrack -> track.setVolume(sfuVolume(id, event.publication.source)) } }
+                            is RoomEvent.TrackSubscribed -> {
+                                val id = event.participant.identity?.value?.substringBefore(":") ?: ""
+                                when (val track = event.track) {
+                                    is LiveVideoTrack -> { sfuVideos[id] = track; videoViews.refresh(); emit("video", JSONObject().put("userId", id)) }
+                                    is RemoteAudioTrack -> track.setVolume(sfuVolume(id, event.publication.source))
+                                }
+                                (event.publication as? RemoteTrackPublication)?.let(::applySfuScreenPriority)
+                            }
+                            is RoomEvent.ConnectionQualityChanged -> {
+                                if (event.participant === live.localParticipant) updateSfuScreenPriority(event.quality, sampled = false)
+                            }
                             is RoomEvent.TrackUnsubscribed -> { val id = event.participant.identity?.value?.substringBefore(":") ?: ""; if (event.track is LiveVideoTrack) { sfuVideos.remove(id); videoViews.refresh() } }
                             is RoomEvent.ActiveSpeakersChanged -> members().forEach { member -> val id = member.getJSONObject("user").getString("id"); speaking(id, event.speakers.any { it.identity?.value?.substringBefore(":") == id && !it.identity!!.value.contains(":screen:") }) }
                             is RoomEvent.Reconnecting -> emit("status", JSONObject().put("message", "Reconnecting voice…"))
@@ -161,13 +189,20 @@ class DorhamMediaPlugin : Plugin() {
                             is RoomEvent.Disconnected -> {
                                 sfuReady = false
                                 val terminal = event.reason.name in setOf("PARTICIPANT_REMOVED", "DUPLICATE_IDENTITY", "CLIENT_INITIATED")
+                                if (terminal) voiceKeepalive.stop()
                                 emit("voiceMediaDisconnected", JSONObject().put("terminal", terminal))
                             }
                             is RoomEvent.TrackPublished -> updateSubscriptions()
                             else -> {}
                         }
                     } }
-                    live.connect(requireNotNull(credentials.getString("url")), requireNotNull(credentials.getString("token")), io.livekit.android.ConnectOptions(autoSubscribe = false)); require(sfu === live && generation == joinGeneration) { "Voice session changed" }; sfuReady = true; applySfuMicrophone(live); updateSubscriptions(); emitRoutes(); call.resolve(JSObject().put("listenOnly", !microphoneAvailable))
+                    live.connect(requireNotNull(credentials.getString("url")), requireNotNull(credentials.getString("token")), io.livekit.android.ConnectOptions(autoSubscribe = false)); require(sfu === live && generation == joinGeneration) { "Voice session changed" }; sfuReady = true; applySfuMicrophone(live); require(sfu === live && generation == joinGeneration) { "Voice session changed" }; updateSubscriptions(); emitRoutes(); connected()
+                    launch {
+                        while (sfu === live && generation == joinGeneration) {
+                            delay(2000)
+                            if (sfu === live && generation == joinGeneration) updateSfuScreenPriority(live.localParticipant.connectionQuality, sampled = true)
+                        }
+                    }
                 } catch (e: Exception) { if (sfu === live && generation == joinGeneration) release(stopService = !recovering); call.reject("SFU connection failed: ${e.message}") }
             }
         } else {
@@ -177,7 +212,7 @@ class DorhamMediaPlugin : Plugin() {
             factory = PeerConnectionFactory.builder().setAudioDeviceModule(adm).setVideoEncoderFactory(DefaultVideoEncoderFactory(shared.eglBaseContext, true, true)).setVideoDecoderFactory(DefaultVideoDecoderFactory(shared.eglBaseContext)).createPeerConnectionFactory(); adm.release()
             val constraints = MediaConstraints().apply { optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true")); optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true")); optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true")) }
             if (microphoneAvailable) { audioSource = factory!!.createAudioSource(constraints); microphone = factory!!.createAudioTrack(UUID.randomUUID().toString(), audioSource) }
-            updatePeers(); main.postDelayed(meter, 1000); call.resolve(JSObject().put("listenOnly", !microphoneAvailable))
+            updatePeers(); main.postDelayed(meter, 1000); connected()
         }
         val callback = object : ConnectivityManager.NetworkCallback() { override fun onAvailable(network: Network) { main.post { peers.values.forEach { it.pc.restartIce() } } } }
         context.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(callback); networkCallback = callback
@@ -249,8 +284,68 @@ class DorhamMediaPlugin : Plugin() {
         sfu?.let { live -> scope.launch { try { applySfuMicrophone(live) } catch (e: Exception) { error(e.message ?: "Microphone state failed") }; live.remoteParticipants.values.forEach { p -> p.trackPublications.values.forEach { pub -> (pub.track as? RemoteAudioTrack)?.setVolume(sfuVolume(p.identity?.value?.substringBefore(":") ?: "", pub.source)) } } } }
     }
     private fun shareFor(user: String): JSONObject? { val shares = room.optJSONArray("shares") ?: JSONArray(); return (0 until shares.length()).map { shares.getJSONObject(it) }.firstOrNull { it.optString("userId") == user } }
-    private fun sfuVolume(user: String, source: io.livekit.android.room.track.Track.Source): Double { if (deafened || selfDeafened()) return 0.0; if (source != io.livekit.android.room.track.Track.Source.SCREEN_SHARE_AUDIO) return volumes[user] ?: 1.0; val share = shareFor(user) ?: return 0.0; return if (share.optString("id") in watched && share.optBoolean("includeAudio")) streamVolumes[share.optString("id")] ?: 1.0 else 0.0 }
-    private fun updateSubscriptions() { watched.removeAll { lease -> val shares = room.optJSONArray("shares") ?: JSONArray(); !(0 until shares.length()).any { shares.getJSONObject(it).optString("id") == lease } }; sfu?.remoteParticipants?.values?.forEach { participant -> val id = participant.identity?.value?.substringBefore(":") ?: ""; val share = shareFor(id); participant.trackPublications.values.filterIsInstance<RemoteTrackPublication>().forEach { pub -> val wanted = AndroidMediaPolicy.shouldSubscribe(pub.source.name, share?.optString("id"), watched, share?.optBoolean("includeAudio") == true); pub.setSubscribed(wanted); (pub.track as? RemoteAudioTrack)?.setVolume(sfuVolume(id, pub.source)) } }; videoViews.refresh() }
+    private fun sfuVolume(user: String, source: io.livekit.android.room.track.Track.Source): Double { if (deafened || selfDeafened()) return 0.0; if (source != io.livekit.android.room.track.Track.Source.SCREEN_SHARE_AUDIO) return volumes[user] ?: if (user == "dorham-music") 0.30 else 1.0; val share = shareFor(user) ?: return 0.0; return if (share.optString("id") in watched && share.optBoolean("includeAudio")) streamVolumes[share.optString("id")] ?: 1.0 else 0.0 }
+    private fun updateSubscriptions() {
+        watched.removeAll { lease ->
+            val shares = room.optJSONArray("shares") ?: JSONArray()
+            !(0 until shares.length()).any { shares.getJSONObject(it).optString("id") == lease }
+        }
+        val live = sfu ?: return
+        updateSfuScreenPriority(live.localParticipant.connectionQuality, sampled = false)
+        for (participant in live.remoteParticipants.values) {
+            val id = participant.identity?.value?.substringBefore(":") ?: ""
+            val share = shareFor(id)
+            for (publication in participant.trackPublications.values.filterIsInstance<RemoteTrackPublication>()) {
+                val wanted = AndroidMediaPolicy.shouldSubscribe(publication.source.name, share?.optString("id"), watched, share?.optBoolean("includeAudio") == true)
+                publication.setSubscribed(wanted)
+                if (wanted) applySfuScreenPriority(publication)
+                (publication.track as? RemoteAudioTrack)?.setVolume(sfuVolume(id, publication.source))
+            }
+        }
+    }
+
+    private enum class ScreenPlayback { FULL, REDUCED, PAUSED }
+
+    private fun updateSfuScreenPriority(quality: ConnectionQuality, sampled: Boolean) {
+        val pressure = when {
+            watched.isEmpty() -> ScreenPlayback.FULL
+            quality == ConnectionQuality.LOST -> ScreenPlayback.PAUSED
+            quality == ConnectionQuality.POOR -> ScreenPlayback.REDUCED
+            else -> ScreenPlayback.FULL
+        }
+        val previous = sfuScreenPriority
+        when {
+            watched.isEmpty() || pressure > previous -> {
+                sfuScreenPriority = pressure
+                screenRecoverySamples = 0
+            }
+            pressure == previous -> screenRecoverySamples = 0
+            sampled && ++screenRecoverySamples == 3 -> {
+                sfuScreenPriority = ScreenPlayback.entries[previous.ordinal - 1]
+                screenRecoverySamples = 0
+            }
+        }
+        if (previous == sfuScreenPriority) return
+        sfu?.remoteParticipants?.values?.forEach { participant ->
+            participant.trackPublications.values.filterIsInstance<RemoteTrackPublication>().forEach(::applySfuScreenPriority)
+        }
+        if (sfuScreenPriority == ScreenPlayback.PAUSED) emit("status", JSONObject().put("message", "Screen sharing paused to keep voice clear."))
+        else if (previous == ScreenPlayback.PAUSED) emit("status", JSONObject().put("message", "Voice connected"))
+    }
+
+    private fun applySfuScreenPriority(publication: RemoteTrackPublication) {
+        if (!publication.subscribed) return
+        val full = sfuScreenPriority == ScreenPlayback.FULL
+        when (publication.source) {
+            LiveTrack.Source.SCREEN_SHARE -> {
+                publication.setVideoQuality(if (full) VideoQuality.HIGH else VideoQuality.LOW)
+                publication.setVideoFps(if (full) null else 4)
+                publication.setEnabled(sfuScreenPriority != ScreenPlayback.PAUSED)
+            }
+            LiveTrack.Source.SCREEN_SHARE_AUDIO -> publication.setEnabled(full)
+            else -> {}
+        }
+    }
     private fun speaking(id: String, value: Boolean) { if (speakingStates[id] != value) { speakingStates[id] = value; emit("speaking", JSONObject().put("userId", id).put("speaking", value)) } }
     private fun applyVolume(p: Peer) { p.screenAudios.forEach { (lease, track) -> track.setVolume(if (deafened || selfDeafened() || lease !in watched || shareFor(p.id)?.optString("id") != lease) 0.0 else streamVolumes[lease] ?: 1.0) }; val m = members().firstOrNull { it.getJSONObject("user").getString("id") == p.id }; p.audio?.setVolume(if (deafened || selfDeafened() || m?.optBoolean("serverMuted") == true || m?.optBoolean("muted") == true || m?.optBoolean("deafened") == true) 0.0 else volumes[p.id] ?: 1.0) }
     @PluginMethod fun playSpeech(call: PluginCall) = ui(call) { require(active === this && !deafened && !selfDeafened()) { "Speech playback is unavailable" }; val self = members().firstOrNull { it.optJSONObject("user")?.optString("id") == selfId }; require(self?.optString("epoch") == call.getString("epoch") && room.optString("channelId") == call.getString("channelId")) { "Voice session changed" }; speechPlayer.play(call) }
@@ -297,7 +392,24 @@ class DorhamMediaPlugin : Plugin() {
         screenWidth = dimensions.first; screenHeight = dimensions.second
         screenFps = (call.getInt("fps") ?: if (quality.endsWith("15")) 15 else 30).coerceIn(1, if (quality == "1080p15") 15 else 30)
         screenBitrate = (call.getInt("bitrate") ?: 800000).coerceIn(64000, 1500000)
-        sfu?.localParticipant?.let { p -> p.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(isScreencast = true, captureParams = VideoCaptureParameter(screenWidth, screenHeight, screenFps)); p.screenShareTrackPublishDefaults = p.screenShareTrackPublishDefaults.copy(videoEncoding = VideoEncoding(screenBitrate, screenFps), simulcast = false, videoCodec = "vp8") }
+        sfu?.localParticipant?.let { participant ->
+            participant.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(isScreencast = true, captureParams = VideoCaptureParameter(screenWidth, screenHeight, screenFps))
+            val options = sfuShareOptions()
+            participant.screenShareTrackPublishDefaults = participant.screenShareTrackPublishDefaults.copy(
+                videoEncoding = options.videoEncoding, simulcast = options.simulcast, videoCodec = options.videoCodec,
+                simulcastLayers = options.simulcastLayers,
+            )
+        }
+    }
+    private fun sfuShareOptions(): VideoTrackPublishOptions {
+        val fallback = minOf(100_000, screenBitrate / 4)
+        return VideoTrackPublishOptions(
+            videoEncoding = VideoEncoding(screenBitrate - fallback, screenFps),
+            simulcast = true,
+            videoCodec = "vp8",
+            source = LiveTrack.Source.SCREEN_SHARE,
+            simulcastLayers = listOf(CustomVideoPreset(VideoCaptureParameter(320, 180, 4), VideoEncoding(fallback, 4))),
+        )
     }
     @PluginMethod fun setShareQuality(call: PluginCall) = ui(call) {
         shareSettings(call)
@@ -309,7 +421,7 @@ class DorhamMediaPlugin : Plugin() {
                 track.options = track.options.copy(captureParams = VideoCaptureParameter(screenWidth, screenHeight, screenFps))
                 track.capturer.changeCaptureFormat(screenWidth, screenHeight, screenFps)
                 live.localParticipant.unpublishTrack(track, stopOnUnpublish = false)
-                if (!live.localParticipant.publishVideoTrack(track, VideoTrackPublishOptions(videoEncoding = VideoEncoding(screenBitrate, screenFps), simulcast = false, videoCodec = "vp8", source = io.livekit.android.room.track.Track.Source.SCREEN_SHARE))) throw IllegalStateException("Screen quality change could not be published")
+                if (!live.localParticipant.publishVideoTrack(track, sfuShareOptions())) throw IllegalStateException("Screen quality change could not be published")
                 call.resolve()
             } catch (e: Exception) { stopCapture(); emit("captureStopped", JSONObject()); call.reject(e.message) } }
         } else {
@@ -393,9 +505,13 @@ class DorhamMediaPlugin : Plugin() {
     }
     @PluginMethod fun getStats(call: PluginCall) = ui(call) { val out = JSONObject().put("screenAudioBytes", screenAudio?.bytes ?: 0L).put("screenAudioPeak", screenAudio?.peak ?: 0); val remaining = peers.size; if (remaining == 0) { call.resolve(JSObject.fromJSONObject(out.put("transport", if (sfu != null) "livekit" else "mesh"))); return@ui }; var received = 0; peers.values.forEach { p -> p.pc.getStats { reports -> main.post { val list = JSONArray(); reports.statsMap.values.forEach { s -> list.put(JSONObject().put("type", s.type).put("timestampUs", s.timestampUs).put("values", JSONObject(s.members))) }; out.put(p.id, list); if (++received == remaining) call.resolve(JSObject.fromJSONObject(out)) } } } }
     @PluginMethod fun leave(call: PluginCall) = ui(call) { release(); call.resolve() }
+    @PluginMethod fun voiceKeepaliveStatus(call: PluginCall) = ui(call) { call.resolve(JSObject().put("alive", voiceKeepalive.alive())) }
     fun pulse() { bridge.webView.evaluateJavascript("window.dispatchEvent(new Event('dorham-native-pulse'))", null) }
     fun stopFromSystem() { main.post { release(); emit("error", JSONObject().put("message", "Android stopped the voice service. Rejoin to reconnect.")); emit("voiceStopped", JSONObject()) } }
     private fun release(stopService: Boolean = true) {
+        voiceKeepalive.stop()
+        sfuScreenPriority = ScreenPlayback.FULL
+        screenRecoverySamples = 0
         speechPlayer.stop(); soundboardPlayer.stop(); generation++; videoViews.clear(); watched.clear(); streamVolumes.clear(); speakingStates.clear(); closeViewer(); main.removeCallbacks(meter); stopCapture(); peers.values.forEach { it.pc.close(); it.pc.dispose() }; peers.clear(); microphone?.dispose(); microphone = null; audioSource?.dispose(); audioSource = null; factory?.dispose(); factory = null; egl?.release(); egl = null; sfuReady = false; sfu?.disconnect(); sfu?.release(); sfu = null; sfuVideos.clear()
         networkCallback?.let { try { context.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } catch (_: Exception) {} }; networkCallback = null
         val audio = context.getSystemService(AudioManager::class.java); audio.unregisterAudioDeviceCallback(routesCallback); audioFocus?.let { audio.abandonAudioFocusRequest(it) }; audioFocus = null; if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice() else { audio.stopBluetoothSco(); audio.isBluetoothScoOn = false; audio.isSpeakerphoneOn = previousSpeaker }; if (active === this) audio.mode = previousAudioMode

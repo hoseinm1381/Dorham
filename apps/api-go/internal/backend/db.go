@@ -332,7 +332,7 @@ func (d *DB) Backup(destination string) {
 	d.Run("VACUUM INTO ?", destination)
 }
 func (d *DB) migrate() {
-	for version := 2; version <= 15; version++ {
+	for version := 2; version <= 17; version++ {
 		v := version
 		d.Tx(func(tx *DB) any {
 			if tx.One("SELECT version FROM schema_migrations WHERE version=?", v) != nil {
@@ -345,6 +345,20 @@ func (d *DB) migrate() {
 				for _, q := range featureSchema {
 					tx.Run(q)
 				}
+			}
+						if v == 17 {
+				tx.Run("CREATE TABLE IF NOT EXISTS music_allowances (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, bonus_mb BIGINT NOT NULL)")
+				tx.Run("CREATE TABLE IF NOT EXISTS music_member_lists (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, public INTEGER NOT NULL, created_at BIGINT NOT NULL)")
+				tx.Run("CREATE INDEX IF NOT EXISTS music_member_lists_owner ON music_member_lists(owner_id)")
+				tx.Run("CREATE TABLE IF NOT EXISTS music_member_tracks (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, list_id TEXT REFERENCES music_member_lists(id) ON DELETE CASCADE, title TEXT NOT NULL, track TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', bytes BIGINT NOT NULL, created_at BIGINT NOT NULL)")
+				tx.Run("CREATE INDEX IF NOT EXISTS music_member_tracks_list ON music_member_tracks(list_id,created_at)")
+				tx.Run("CREATE INDEX IF NOT EXISTS music_member_tracks_owner ON music_member_tracks(owner_id)")
+			}
+			if v == 16 {
+				tx.Run("CREATE TABLE IF NOT EXISTS music_rooms (channel_id TEXT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE, state TEXT NOT NULL, roster_title TEXT NOT NULL, roster_status TEXT NOT NULL, next_event_at BIGINT NOT NULL)")
+				tx.Run("CREATE TABLE IF NOT EXISTS music_uploads (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, track TEXT NOT NULL, created_at BIGINT NOT NULL)")
+				tx.Run("CREATE INDEX IF NOT EXISTS music_rooms_event ON music_rooms(next_event_at)")
+				tx.Run("CREATE INDEX IF NOT EXISTS music_uploads_channel ON music_uploads(channel_id,created_at)")
 			}
 			if v == 15 {
 				tx.Run(speechMeterSchema)

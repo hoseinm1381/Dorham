@@ -136,7 +136,7 @@ func (a *App) registerFeatures() {
 	})
 	a.Route("GET", "/api/v1/admin/features", true, func(r *Request) any {
 		return featureAdmin(r, func(tx *DB) any {
-			return M{"features": featureNames, "settings": featureSetting(tx, "features"), "screen": featureSetting(tx, "screen"), "uploads": featureSetting(tx, "uploads"), "speech": featureSetting(tx, "speech"), "catalog": tx.All("SELECT id,kind,label,pack,access,server_id,free_slot,active,published,bytes,digest FROM feature_catalog ORDER BY kind,label"), "announcements": tx.All("SELECT * FROM feature_announcements ORDER BY starts_at DESC LIMIT 100"), "communities": tx.All("SELECT s.id,s.name,s.community_banner,s.invite_blurb,s.community_emoji_slots,f.expires_at FROM servers s LEFT JOIN community_features f ON f.server_id=s.id AND f.feature='communityPlus' ORDER BY s.name LIMIT 250")}
+			return M{"features": featureNames, "settings": featureSetting(tx, "features"), "screen": featureSetting(tx, "screen"), "uploads": featureSetting(tx, "uploads"), "speech": featureSetting(tx, "speech"), "capacity": readCapacity(tx, a.C), "catalog": tx.All("SELECT id,kind,label,pack,access,server_id,free_slot,active,published,bytes,digest FROM feature_catalog ORDER BY kind,label"), "announcements": tx.All("SELECT * FROM feature_announcements ORDER BY starts_at DESC LIMIT 100"), "communities": tx.All("SELECT s.id,s.name,s.community_banner,s.invite_blurb,s.community_emoji_slots,f.expires_at FROM servers s LEFT JOIN community_features f ON f.server_id=s.id AND f.feature='communityPlus' ORDER BY s.name LIMIT 250")}
 		})
 	})
 	a.Route("GET", "/api/v1/admin/features/users/{id}", true, func(r *Request) any {
@@ -232,6 +232,9 @@ func (a *App) registerFeatures() {
 
 func (a *App) setFeatureSettings(r *Request) any {
 	id := r.Param("id")
+	if id == "capacity" {
+		return a.setCapacity(r)
+	}
 	result := featureAdmin(r, func(tx *DB) any {
 		value := M{}
 		switch id {

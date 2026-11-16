@@ -94,7 +94,7 @@ type Props = {
   room: VoiceRoom; userId: string; name: string; transport: MediaTransport | null; navigation: string | null;
   screens: Record<string, RemoteScreen>; localScreen: RemoteScreen | null; previewOwn: boolean; toggleOwn: () => void;
   error: (e: unknown) => void; viewer: (active: boolean) => void;
-  chatOpen: boolean; toggleChat: () => void; participants?: () => void; memberActions?: (user: PublicUser, event: React.MouseEvent<HTMLElement>) => void;
+  music?: React.ReactNode; musicRow?: React.ReactNode; chatOpen: boolean; toggleChat: () => void; participants?: () => void; memberActions?: (user: PublicUser, event: React.MouseEvent<HTMLElement>) => void;
 };
 export function GamingVoice(p: Props) {
   const [multi, setMulti] = useState(false), [selected, setSelected] = useState<string[]>([]), [streamLevels, setStreamLevels] = useState<Record<string, number>>({}), [streamMuted, setStreamMuted] = useState<Record<string, boolean>>({}), [previewClosed, setPreviewClosed] = useState(false);
@@ -118,10 +118,10 @@ export function GamingVoice(p: Props) {
   }
   function person(id: string) { return p.room.members.find(m => m.user.id === id)?.user.displayName || t('Member'); }
   return <section className={`voice-stage gaming-voice ${p.room.shares.length ? 'has-shares' : ''} ${active ? 'viewer-open' : ''}`} aria-label={t('Voice channel')}>
-    <header className="gaming-voice-header"><span><Radio size={16}/><strong><bdi>{p.name}</bdi></strong><small>{t('{count}/16 in voice', { count: formatNumber(p.room.members.length) })}</small></span><span>
+    <header className="gaming-voice-header"><span><Radio size={16}/><strong><bdi>{p.name}</bdi></strong><small>{t('{count}/16 in voice', { count: formatNumber(p.room.members.filter(m => m.user.kind !== "music").length) })}</small></span><span>{p.music}
       {active && <><label className="check-row"><input type="checkbox" checked={multi} onChange={e => { const enabled = e.target.checked; setMulti(enabled); if (!enabled) for (const id of selected.slice(1)) void stopWatching(id).catch(p.error); }}/>{t('Multi-view')}</label><button className="viewer-chat-toggle" aria-expanded={p.chatOpen} onClick={p.toggleChat}><MessageCircle size={15}/>{t(p.chatOpen ? 'Hide chat' : 'Show chat')}</button><button aria-label={t('Close stream viewer')} onClick={() => { void closeViewer().catch(p.error); }}><X size={17}/></button></>}
     </span></header>
-    {p.participants && <div className="mobile-voice-people"><button onClick={p.participants}>{t('Show participants')} · {formatNumber(p.room.members.length)}</button><ParticipantList members={p.room.members} actions={p.memberActions || (() => {})}/></div>}
+    {p.participants && <div className="mobile-voice-people"><button onClick={p.participants}>{t('Show participants')} · {formatNumber(p.room.members.filter(m => m.user.kind !== "music").length)}</button><ParticipantList musicRow={p.musicRow} members={p.room.members} actions={p.memberActions || (() => {})}/></div>}
     <div className="share-list">{p.room.shares.map(share => <div key={share.id}><MonitorUp size={17}/><span><bdi>{person(share.userId)}</bdi><small className="live-badge">LIVE</small></span>{share.userId === p.userId ? <><span className="share-tier">{t(share.tier === 'fallback' ? '15fps · waiting for a 30fps slot' : '30fps available')}</span><label className="own-preview-toggle"><input type="checkbox" checked={previewSelected} onChange={() => { if (p.previewOwn && previewClosed) setPreviewClosed(false); else { setPreviewClosed(false); p.toggleOwn(); } }}/>{t('Preview my screen')}</label></> : <button className="watch-stream" data-watching={selected.includes(share.id)} aria-label={t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')} onClick={() => { void watch(share).catch(p.error); }}>{t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')}</button>}</div>)}</div>
     {own && p.localScreen?.sourceName && <p className="stream-no-audio" role="status"><bdi>{p.localScreen.sourceName}</bdi> · {t(p.localScreen.audioScope === 'application' ? 'Selected application sound' : p.localScreen.audioScope === 'system' ? p.localScreen.native ? 'Phone sound, excluding Dorham' : 'Computer sound, excluding Dorham' : 'Video only')}</p>}
     {active && <div className={`screens ${multi ? 'multi-streams' : 'single-stream'}`}>

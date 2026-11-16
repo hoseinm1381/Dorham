@@ -131,12 +131,33 @@ func (m *Media) synchronizePass() {
 				}
 				remove := func() {
 					actions = append(actions, func() {
-						_, err := m.twirp("RemoveParticipant", M{"room": name, "identity": identity}, M{"roomAdmin": true, "room": name})
+						mediaMust(m.removeSFUParticipant(name, identity))
+						atomic.AddInt64(&m.sfuRemovals, 1)
+					})
+				}
+				enforce := func(subscribe bool, sources []int) {
+					actual := Obj(p["permission"])
+					publish := len(sources) > 0
+					if actual != nil && Bool(actual, "canSubscribe") == subscribe && Bool(actual, "canPublish") == publish &&
+						!Bool(actual, "canPublishData") && !Bool(actual, "canUpdateMetadata") && mediaSourceSet(actual["canPublishSources"]) == mediaSourceSet(sources) {
+						return
+					}
+					perm := M{"canSubscribe": subscribe, "canPublish": publish, "canPublishSources": sources, "canPublishData": false, "canUpdateMetadata": false}
+					actions = append(actions, func() {
+						_, err := m.twirp("UpdateParticipant", M{"room": name, "identity": identity, "permission": perm}, M{"roomAdmin": true, "room": name})
 						if !mediaMissing(err) {
 							mediaMust(err)
 						}
-						atomic.AddInt64(&m.sfuRemovals, 1)
+						atomic.AddInt64(&m.sfuUpdates, 1)
 					})
+				}
+				if strings.HasPrefix(identity, musicIdentity+":") {
+					if !m.a.Music.sessionValid(name, identity) {
+						remove()
+					} else {
+						enforce(false, []int{2})
+					}
+					continue
 				}
 				vm := tx.One("SELECT * FROM voice_members WHERE user_id=? AND epoch=? AND channel_id=? AND heartbeat>=?", uid, epoch, name, Now()-30000)
 				if vm == nil {
@@ -168,18 +189,7 @@ func (m *Media) synchronizePass() {
 					}
 					sources = []int{4}
 				}
-				perm := M{"canSubscribe": !auxiliary && !Bool(vm, "server_deafened"), "canPublish": len(sources) > 0, "canPublishSources": sources, "canPublishData": false, "canUpdateMetadata": false}
-				actual := Obj(p["permission"])
-				same := actual != nil && Bool(actual, "canSubscribe") == Bool(perm, "canSubscribe") && Bool(actual, "canPublish") == Bool(perm, "canPublish") && !Bool(actual, "canPublishData") && !Bool(actual, "canUpdateMetadata") && mediaSourceSet(actual["canPublishSources"]) == mediaSourceSet(sources)
-				if !same {
-					actions = append(actions, func() {
-						_, err := m.twirp("UpdateParticipant", M{"room": name, "identity": identity, "permission": perm}, M{"roomAdmin": true, "room": name})
-						if !mediaMissing(err) {
-							mediaMust(err)
-						}
-						atomic.AddInt64(&m.sfuUpdates, 1)
-					})
-				}
+				enforce(!auxiliary && !Bool(vm, "server_deafened"), sources)
 			}
 			return nil
 		})
@@ -188,6 +198,14 @@ func (m *Media) synchronizePass() {
 		}
 	}
 }
+func (m *Media) removeSFUParticipant(room, identity string) error {
+	_, err := m.twirp("RemoveParticipant", M{"room": room, "identity": identity}, M{"roomAdmin": true, "room": room})
+	if mediaMissing(err) {
+		return nil
+	}
+	return err
+}
+
 func (m *Media) deleteDirectCallRoom(name string) {
 	_, err := m.twirp("DeleteRoom", M{"room": name}, M{"roomCreate": true})
 	if !mediaMissing(err) {
@@ -241,7 +259,19 @@ func (m *Media) registerAdmission() {
 		}
 		claims := mediaVerifyJWT(raw, m.a.C.LivekitKey, m.a.C.LivekitSecret)
 		video := Obj(claims["video"])
-		split := strings.Split(Str(claims, "sub"), ":")
+		identity := Str(claims, "sub")
+		if strings.HasPrefix(identity, musicIdentity+":") {
+			room := Str(video, "room")
+			sources := Arr(video["canPublishSources"])
+			if !Bool(video, "roomJoin") || !Bool(video, "canPublish") || video["canSubscribe"] != false ||
+				Bool(video, "canPublishData") || Bool(video, "canUpdateOwnMetadata") || len(sources) != 1 ||
+				!mediaSourceIs(sources[0], "microphone", 2) || !m.a.Music.sessionValid(room, identity) ||
+				m.a.DB.One("SELECT user_id FROM voice_members WHERE channel_id=? AND heartbeat>=? LIMIT 1", room, Now()-30000) == nil {
+				denied()
+			}
+			return M{"allowed": true}
+		}
+		split := strings.Split(identity, ":")
 		auxiliary := len(split) == 4 && split[2] == "screen" && split[3] != ""
 		if !Bool(video, "roomJoin") || Str(video, "room") == "" || (len(split) != 2 && !auxiliary) || split[0] == "" || split[1] == "" {
 			denied()

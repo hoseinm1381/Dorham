@@ -2,6 +2,8 @@
 
 A separate Windows dashboard and administration app for Dorham. Use **Overview** for SSH telemetry and **People** for account actions, rank badges, and individual feature grants. **Server tools** holds instance-wide policies and content.
 
+To change the instance limits, sign in as a global administrator and open **People → Server tools → Capacity**. Set the total number of accounts and the number of simultaneous app or browser connections, then choose **Save capacity**. The limits apply to new sign-ups and connections as soon as they are saved. The server must support capacity controls.
+
 ## Open
 
 Run **Dorham Monitor.exe** from the versioned output directory printed by the build, or extract the corresponding portable ZIP. The title bar shows the version of the running build. The x64 build includes its .NET runtime. The executable is unsigned. Closing the window exits the monitor.

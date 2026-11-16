@@ -90,6 +90,11 @@ public partial class MainWindow : Window
         Width = MinWidth; Height = MinHeight;
         await Task.Delay(200); Capture(Path.Combine(directory, "admin-compact.png"));
         await Admin.ExercisePreview(directory, Capture);
+        using var fixture = AdminSelfTest.PreviewClient();
+        await fixture.SignIn("synthetic_admin", "synthetic-password");
+        var tools = new FeatureAdminWindow(fixture);
+        try { await tools.VerifyNavigation(); }
+        finally { tools.Close(); }
         File.WriteAllText(Path.Combine(directory, "admin-ui-checks.json"), System.Text.Json.JsonSerializer.Serialize(new { status = "rendered", offlineSyntheticData = true, noServerRequests = true, login = true, users = true, minimumSize = true }));
     }
     private async void SaveConnection(object sender, RoutedEventArgs e)

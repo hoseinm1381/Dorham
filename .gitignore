@@ -35,3 +35,7 @@ apps/desktop/release-contract.cjs
 *.p12
 
 apps/web/public/emojis/
+
+# Operator-provided music remains local. Catalogs and starter assets belong in Git.
+/new_musics/
+/music-pack/audio/

@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-const version = process.env.DORHAM_WINDOWS_VERSION ?? JSON.parse(readFileSync('package.json', 'utf8')).version;
+const version = process.env.DORHAM_WINDOWS_VERSION ?? process.env.DORHAM_ANDROID_VERSION ?? JSON.parse(readFileSync('package.json', 'utf8')).version;
 if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw new Error('Invalid Dorham client version');
 const desktopEntry = {
   name: 'dorham-tauri-entry',

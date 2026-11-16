@@ -9,6 +9,7 @@ import (
 // decision uses the caller's serialized database transaction; nothing here
 // caches membership, permissions or notification audiences across commits.
 type Service struct {
+	MusicEnabled   bool
 	DB             *DB
 	C              Config
 	Notify         func(string, any)

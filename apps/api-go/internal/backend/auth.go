@@ -167,7 +167,7 @@ func (a *App) registerAuth() {
 		authBody(b, true)
 		encoded := PasswordHash(Str(b, "password"))
 		created := Obj(a.DB.Tx(func(tx *DB) any {
-			Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL"), "count") < int64(a.C.MaxUsers), 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
+			Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL"), "count") < readCapacity(tx, a.C).Users, 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
 			Check(tx.One("SELECT id FROM users WHERE username=?", strings.ToLower(Str(b, "username"))) == nil, 409, "USERNAME_TAKEN", "This username is unavailable.")
 			uid := ID()
 			tx.Run("INSERT INTO users(id,username,display_name,password_hash,created_at,language) VALUES(?,?,?,?,?,?)", uid, strings.ToLower(Str(b, "username")), b["displayName"], encoded, Now(), Str(b, "language"))
@@ -291,7 +291,7 @@ func (a *App) guest(r *Request) any {
 		}
 		inv := tx.One("SELECT i.*,s.allow_guests FROM invites i JOIN servers s ON s.id=i.server_id WHERE i.hash=? AND i.expires_at>=? AND i.remaining>0", Hash(Str(b, "code")), Now())
 		Check(inv != nil && Bool(inv, "allow_guests"), 403, "GUEST_INVITE_REQUIRED", "A valid invitation to a guest-enabled server is required.")
-		Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL"), "count") < int64(a.C.MaxUsers), 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
+		Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL"), "count") < readCapacity(tx, a.C).Users, 409, "ACCOUNT_LIMIT", "This instance has reached its account limit.")
 		Check(Num(tx.One("SELECT COUNT(*) AS count FROM users WHERE guest=1"), "count") < int64(a.C.MaxGuests), 409, "GUEST_LIMIT", "Guest capacity has been reached.")
 		uid := ID()
 		tx.Run("INSERT INTO users(id,username,display_name,password_hash,guest,created_at,language) VALUES(?,?,?,?,1,?,?)", uid, "guest_"+strings.ReplaceAll(uid, "-", "")[:20], b["displayName"], "!guest-no-password", Now(), Str(b, "language"))

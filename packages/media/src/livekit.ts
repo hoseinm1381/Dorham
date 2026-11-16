@@ -2,7 +2,7 @@ import { microphoneUnavailable, listenOnlyNotice } from './microphone-access';
 import { captureScreen, captureDetails, sharedSoundSupported, stopScreenCapture } from './screen-capture';
 import type { NoiseRemoval } from './strong-denoiser';
 import { clampScreenBandwidth, screenSettings, shareHeight, type ScreenQuality } from './screen-quality';
-import { Room, RoomEvent, DisconnectReason, ParticipantEvent, Track, type LocalAudioTrack, type RemoteTrack, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
+import { Room, RoomEvent, ConnectionQuality, DisconnectReason, ParticipantEvent, Track, VideoPreset, VideoQuality, type LocalAudioTrack, type RemoteTrack, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 import { MicrophoneGain, clampMicrophoneGain } from './microphone-gain';
 import { waitForCondition } from './wait-condition';
 import type { VoiceRoom, Share } from '@dorham/contracts';
@@ -10,6 +10,7 @@ import { ack } from './signaling';
 import { VoiceRecovery } from './voice-recovery';
 import type { MediaOptions, MediaTransport } from './index';
 import { defaultAudioProcessing, browserAudioProcessing, processingMismatch, type AudioProcessing } from './audio-processing';
+import { VoicePriority, bufferMusic, screenEncodingBudget, type ScreenPlayback } from './voice-priority';
 
 export class LiveKitTransport implements MediaTransport {
   getCapabilities() { return { audio: typeof navigator.mediaDevices?.getUserMedia === 'function', screenCapture: typeof navigator.mediaDevices?.getDisplayMedia === 'function', nativeVideo: false, amplification: true, microphoneGain: true, sharedAudio: sharedSoundSupported(), outputSelection: typeof (AudioContext.prototype as any).setSinkId === 'function' || (typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype.setSinkId === 'function') }; }
@@ -28,6 +29,12 @@ export class LiveKitTransport implements MediaTransport {
   private microphoneTask: Promise<void> | null = null; private appliedMicrophone: boolean | undefined;
   private deliveredScreens = new Set<string>(); private hiddenScreens = new Set<string>();
   private watchedShares = new Set<string>(); private streamVolumes = new Map<string, number>();
+  private voicePriority = new VoicePriority();
+  private voiceStatsTimer?: ReturnType<typeof setInterval>;
+  private voiceStatsBusy = false;
+  private speechLoss = 0;
+  private voiceCounters = new Map<string, { total: number; concealed: number }>();
+  private readonly pausedVideo = new WeakSet<RemoteTrackPublication>();
   private sharePermissionWait: AbortController | null = null;
   private updatingScreenQuality = false;
   private screenCapture: MediaStream | null = null;
@@ -36,12 +43,13 @@ export class LiveKitTransport implements MediaTransport {
   private audioProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private captureProcessing: AudioProcessing = { ...defaultAudioProcessing };
   private onRoom = (r: VoiceRoom) => {
-    if (r.channelId !== this.channelId) return; this.room = r; this.options.emit('room', r); this.applyVolumes(); this.updateSubscriptions();
+    if (r.channelId !== this.channelId) return; this.room = r; this.options.emit('room', r); this.applyVolumes();
     const own = r.shares.find(s => s.userId === this.options.userId);
     if (this.lease && own) { if (this.lease.tier === 'fallback' && own.tier === 'standard') this.options.emit('notice', '30fps is now available for your screen.'); const previous = this.lease; this.lease = own; if (previous.maxHeight === 1080 && (own.maxHeight !== 1080 || own.maxBitrate !== previous.maxBitrate) && !this.updatingScreenQuality) void this.applyScreenQuality(own.maxHeight === 1080 ? '1080p15' : '720p15').catch(e => this.options.emit('error', e.message)); }
     for (const id of this.watchedShares) if (!r.shares.some(s => s.id === id)) this.watchedShares.delete(id);
     for (const id of this.deliveredScreens) if (!r.shares.some(s => s.id === id)) this.deliveredScreens.delete(id);
     for (const id of this.hiddenScreens) if (!r.shares.some(s => s.id === id)) this.hiddenScreens.delete(id);
+    this.updateSubscriptions();
     const self = r.members.find(m => m.user.id === this.options.userId);
     if (self && this.media.state === 'connected') void this.applyMicrophone().catch(e => this.options.emit('error', e.message));
     for (const participant of this.media.remoteParticipants.values()) for (const publication of participant.videoTrackPublications.values()) if (publication.track?.source === Track.Source.ScreenShare) this.deliverScreen(participant, publication.track);
@@ -91,15 +99,20 @@ export class LiveKitTransport implements MediaTransport {
     this.media.on(RoomEvent.TrackPublished, () => this.updateSubscriptions());
     this.media.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
       if (track.kind === Track.Kind.Audio) {
+        if (participant.identity.startsWith('dorham-music:')) bufferMusic(track.receiver);
         // The SDK owns the only audible graph. Wrapping a MediaStream-backed
         // element in createMediaElementSource can leave Chromium playback
         // outside that graph, bypassing our gain and deafen controls.
-        const element = track.attach(); element.hidden = true; document.body.appendChild(element);
+        this.applyVolumes(); const element = track.attach(); element.hidden = true; document.body.appendChild(element);
         this.elements.set(publication.trackSid, element);
         this.applyVolumes();
         void element.play().catch(e => this.options.emit('error', e.message));
       }
       if (track.source === Track.Source.ScreenShare) this.deliverScreen(participant, track);
+      this.applyScreenPriority(publication);
+    });
+    this.media.on(RoomEvent.ConnectionQualityChanged, (_, participant) => {
+      if (participant === this.media.localParticipant && this.watchedShares.size) this.updateVoicePriority(false);
     });
     this.media.on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => { track.detach().forEach(e => e.remove()); this.elements.delete(pub.trackSid); if (track.source === Track.Source.ScreenShare) { const share = this.room?.shares.find(s => s.userId === participant.identity.split(':')[0]); if (share) { this.deliveredScreens.delete(share.id); this.options.emit('screenRemoved', share.id); } } });
     this.media.on(RoomEvent.ActiveSpeakersChanged, speakers => { for (const m of this.room?.members || []) this.options.emit('speaking', { userId: m.user.id, speaking: speakers.some(p => p.identity.split(':')[0] === m.user.id) }); });
@@ -208,7 +221,8 @@ export class LiveKitTransport implements MediaTransport {
   private applyVolumes() {
     const silent = this.deafened || this.room?.members.find(m => m.user.id === this.options.userId)?.serverDeafened;
     for (const p of this.media.remoteParticipants.values()) {
-      const volume = silent ? 0 : this.volumes.get(p.identity.split(':')[0]) ?? 1;
+      const userId = p.identity.split(':')[0];
+      const volume = silent ? 0 : this.volumes.get(userId) ?? (userId === 'dorham-music' ? this.options.initialMusicVolume?.() ?? .30 : 1);
       p.setVolume(volume, Track.Source.Microphone);
       const share = this.room?.shares.find(s => s.userId === p.identity.split(':')[0]);
       p.setVolume(silent || !share || !this.watchedShares.has(share.id) ? 0 : this.streamVolumes.get(share.id) ?? 1, Track.Source.ScreenShareAudio);
@@ -270,7 +284,10 @@ export class LiveKitTransport implements MediaTransport {
       const video = stream.getVideoTracks()[0];
       if (!video) throw new Error('No screen video was captured.');
       video.addEventListener?.('ended', () => { void this.stopShare(); }, { once: true });
-      await participant.publishTrack(video, { source: Track.Source.ScreenShare, videoCodec: 'vp8', simulcast: false, screenShareEncoding: { maxBitrate, maxFramerate } }); current();
+      const budget = screenEncodingBudget(maxBitrate);
+      await participant.publishTrack(video, { source: Track.Source.ScreenShare, videoCodec: 'vp8', simulcast: true,
+        screenShareEncoding: { maxBitrate: budget.full, maxFramerate, priority: 'low' },
+        screenShareSimulcastLayers: [new VideoPreset(320, 180, budget.fallback, 4, 'low')] }); current();
       if (includeAudio) for (const audio of stream.getAudioTracks()) {
         await participant.publishTrack(audio, { source: Track.Source.ScreenShareAudio, audioPreset: { maxBitrate: settings.audioBitrate || 48000 }, forceStereo: true, dtx: false }); current();
       }
@@ -278,7 +295,8 @@ export class LiveKitTransport implements MediaTransport {
       if (audioSender) { const parameters = audioSender.getParameters(); for (const encoding of parameters.encodings || []) encoding.maxBitrate = settings.audioBitrate || 48000; await audioSender.setParameters(parameters); }
       if (includeAudio && !participant.getTrackPublication(Track.Source.ScreenShareAudio)) {
         const applied = await ack(this.options.socket, 'share:update', { requestId: crypto.randomUUID(), leaseId: this.lease!.id, expectedRevision: this.lease!.policyRevision, includeAudio: false }); this.lease = applied.lease;
-        this.options.emit('notice', (globalThis as any).desktop ? 'No sound was selected. Video sharing is active; restart sharing to change the sound source.' : 'Chrome did not provide an audio track. Restart sharing and enable audio in Chrome’s picker. For browser games, choose the game tab.');
+        if (globalThis.window?.desktop) this.options.emit('notice', 'No sound was selected. Video sharing is active; restart sharing to change the sound source.');
+        else this.options.emit('browserShareWithoutAudio', undefined);
       }
       this.emitLocalScreen();
     } catch (e) { await this.stopShare(); throw e; } finally { if (this.sharePermissionWait === wait) this.sharePermissionWait = null; }
@@ -297,10 +315,23 @@ export class LiveKitTransport implements MediaTransport {
     const settings = screenSettings(quality, this.options.screenPolicy, this.lease!, bandwidth??this.screenBandwidth), track = this.media.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack;
     if (!track) return;
     await track.mediaStreamTrack.applyConstraints({ width: { ideal: settings.width, max: settings.width }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } });
-    if (track.sender) { const params = track.sender.getParameters(); for (const encoding of params.encodings || []) { encoding.maxBitrate = settings.bitrate; encoding.maxFramerate = settings.fps; } await track.sender.setParameters(params); }
+    if (track.sender) {
+      const params = track.sender.getParameters(), encodings = params.encodings || [];
+      const budget = screenEncodingBudget(settings.bitrate);
+      for (const encoding of encodings) {
+        const fallback = encodings.length > 1 && encoding.rid === 'q';
+        encoding.maxBitrate = fallback ? budget.fallback : budget.full;
+        encoding.maxFramerate = fallback ? Math.min(settings.fps, 4) : settings.fps;
+      }
+      await track.sender.setParameters(params);
+    }
     this.screenBandwidth=bandwidth??this.screenBandwidth;
     const publication=this.media.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-    if(publication?.options)publication.options.screenShareEncoding={maxBitrate:settings.bitrate,maxFramerate:settings.fps};
+    if (publication?.options) {
+      const budget = screenEncodingBudget(settings.bitrate);
+      publication.options.screenShareEncoding = { maxBitrate: budget.full, maxFramerate: settings.fps, priority: 'low' };
+      publication.options.screenShareSimulcastLayers = [new VideoPreset(320, 180, budget.fallback, 4, 'low')];
+    }
     }catch(e){await this.stopShare();throw e;}
   }
   async stopShare() { this.sharePermissionWait?.abort(); stopScreenCapture(this.screenCapture); this.screenCapture = null; this.sharePermissionWait = null; const lease = this.lease; this.lease = null; this.options.emit('localScreen', null); await this.media.localParticipant.setScreenShareEnabled(false); if (lease) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {}); }
@@ -310,8 +341,80 @@ export class LiveKitTransport implements MediaTransport {
       for (const publication of participant.trackPublications.values()) {
         const wanted = publication.source === Track.Source.Microphone || Boolean(share && this.watchedShares.has(share.id) && (publication.source === Track.Source.ScreenShare || (publication.source === Track.Source.ScreenShareAudio && share.includeAudio)));
         if (publication.isSubscribed !== wanted) publication.setSubscribed(wanted);
+        if (wanted) this.applyScreenPriority(publication);
       }
     }
+    if (this.watchedShares.size && !this.voiceStatsTimer) {
+      this.voiceStatsTimer = setInterval(() => void this.sampleVoicePriority(), 2000);
+      this.updateVoicePriority(false);
+    } else if (!this.watchedShares.size) {
+      this.resetVoicePriority();
+    }
+  }
+  private applyScreenPriority(publication: RemoteTrackPublication) {
+    if (!publication.isSubscribed) return;
+    const level = this.voicePriority.level;
+    if (publication.source === Track.Source.ScreenShare) {
+      publication.setVideoQuality(level === 'full' ? VideoQuality.HIGH : VideoQuality.LOW);
+      publication.setVideoFPS(level === 'full' ? 0 : 4);
+      if (level === 'paused') {
+        publication.setEnabled(false);
+        this.pausedVideo.add(publication);
+      } else if (this.pausedVideo.delete(publication)) {
+        publication.setEnabled(true);
+      }
+    } else if (publication.source === Track.Source.ScreenShareAudio) {
+      publication.setEnabled(level === 'full');
+    }
+  }
+  private updateVoicePriority(sampled: boolean) {
+    const quality = this.media.localParticipant.connectionQuality;
+    const pressure: ScreenPlayback = quality === ConnectionQuality.Lost || this.speechLoss >= .12 ? 'paused'
+      : quality === ConnectionQuality.Poor || this.speechLoss >= .035 ? 'reduced' : 'full';
+    const previous = this.voicePriority.level;
+    const next = this.voicePriority.observe(pressure, sampled);
+    if (next === previous) return;
+    for (const participant of this.media.remoteParticipants.values()) {
+      for (const publication of participant.trackPublications.values()) this.applyScreenPriority(publication);
+    }
+    if (next === 'paused') this.options.emit('notice', 'Screen sharing paused to keep voice clear.');
+  }
+  private async sampleVoicePriority() {
+    if (this.voiceStatsBusy || !this.watchedShares.size || this.media.state !== 'connected') return;
+    this.voiceStatsBusy = true;
+    const generation = this.generation;
+    try {
+      const microphones = [...this.media.remoteParticipants.values()]
+        .filter(participant => !participant.identity.startsWith('dorham-music:'))
+        .flatMap(participant => [...participant.audioTrackPublications.values()].filter(publication => publication.source === Track.Source.Microphone && !publication.isMuted));
+      const reports = await Promise.all(microphones.map(async publication => ({
+        sid: publication.trackSid,
+        stats: await publication.track?.getRTCStatsReport().catch(() => undefined)
+      })));
+      if (generation !== this.generation || !this.watchedShares.size) return;
+      const counters = new Map<string, { total: number; concealed: number }>();
+      let fraction = 0;
+      for (const { sid, stats } of reports) for (const item of stats?.values() ?? []) {
+        if (item.type !== 'inbound-rtp' || item.kind !== 'audio') continue;
+        const key = sid + ':' + item.id;
+        const sample = { total: item.totalSamplesReceived ?? 0, concealed: item.concealedSamples ?? 0 };
+        const previous = this.voiceCounters.get(key);
+        counters.set(key, sample);
+        if (previous && sample.total > previous.total && sample.concealed >= previous.concealed) {
+          fraction = Math.max(fraction, (sample.concealed - previous.concealed) / (sample.total - previous.total));
+        }
+      }
+      this.voiceCounters = counters;
+      this.speechLoss = fraction;
+      this.updateVoicePriority(true);
+    } finally { this.voiceStatsBusy = false; }
+  }
+  private resetVoicePriority() {
+    clearInterval(this.voiceStatsTimer);
+    this.voiceStatsTimer = undefined;
+    this.voicePriority = new VoicePriority();
+    this.speechLoss = 0;
+    this.voiceCounters.clear();
   }
   async subscribe(share: Share, enabled: boolean) { if (enabled) { this.resumePlayback(); this.hiddenScreens.delete(share.id); this.watchedShares.add(share.id); } else { this.hiddenScreens.add(share.id); this.watchedShares.delete(share.id); } this.updateSubscriptions(); this.applyVolumes(); if (!enabled) { this.deliveredScreens.delete(share.id); this.options.emit('screenRemoved', share.id); } }
   async getStats() { const participants: Record<string, any> = { screenCapture: this.screenCaptureDetails, audioProcessing: this.getAudioProcessing(), noiseRemoval: this.getNoiseRemoval() }; for (const p of this.media.remoteParticipants.values()) { const tracks = []; for (const t of p.trackPublications.values()) if (t.track) tracks.push(await t.track.getRTCStatsReport()); participants[p.identity] = { quality: p.connectionQuality, tracks }; } return participants; }
@@ -335,6 +438,7 @@ export class LiveKitTransport implements MediaTransport {
     this.appliedMicrophone = undefined;
     this.deliveredScreens.clear();
     this.watchedShares.clear();
+    this.resetVoicePriority();
     this.hiddenScreens.clear();
     this.streamVolumes.clear();
     for (const element of this.elements.values()) element.remove();

@@ -1,0 +1,295 @@
+async (page) => {
+  const origin = 'http://127.0.0.1:17889';
+  const browser = page.context().browser();
+  if (!browser) throw new Error('Start Playwright in isolated browser mode.');
+  const contexts = await Promise.all(Array.from({ length: 3 }, () => browser.newContext({ permissions: ['microphone'], viewport: { width: 1280, height: 800 } })));
+  const [host, silent, listener] = await Promise.all(contexts.map(context => context.newPage()));
+  const errors = [];
+  const control = (p, name) => p.getByRole('button', { name, exact: true });
+  const dialog = p => p.getByRole('dialog', { name: 'Dorham Music', exact: true });
+  const wait = async (fn, label, timeout = 15000) => {
+    for (const start = Date.now(); Date.now() - start < timeout;) {
+      const value = await fn(); if (value) return value;
+      await new Promise(resolve => setTimeout(resolve, 180));
+    }
+    throw new Error(label);
+  };
+  const api = (p, route, body) => p.evaluate(async ({ route, body }) => {
+    const me = await (await fetch('/api/v1/auth/me')).json();
+    const response = await fetch('/api/v1' + route, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined });
+    return { code: response.status, value: await response.json() };
+  }, { route, body });
+  async function register(p, name) {
+    p.on('pageerror', e => errors.push(String(e)));
+    await p.addInitScript(() => {
+      const meters = new Map();
+      window.__musicMeters = meters;
+      const readStats = RTCRtpReceiver.prototype.getStats;
+      const addedSamples = new WeakMap();
+      RTCRtpReceiver.prototype.getStats = async function () {
+        const report = await readStats.call(this);
+        const loss = window.__voiceLoss;
+        if (this.track?.kind !== 'audio' || typeof loss !== 'number') return report;
+        const counters = addedSamples.get(this) ?? { total: 0, concealed: 0 };
+        counters.total += 96000;
+        counters.concealed += Math.round(96000 * loss);
+        addedSamples.set(this, counters);
+        const patched = new Map(report);
+        for (const [id, item] of report) {
+          if (item.type !== 'inbound-rtp') continue;
+          patched.set(id, { ...item, kind: 'audio', totalSamplesReceived: (item.totalSamplesReceived ?? 0) + counters.total, concealedSamples: (item.concealedSamples ?? 0) + counters.concealed });
+        }
+        return patched;
+      };
+      const connect = AudioNode.prototype.connect;
+      AudioNode.prototype.connect = function (destination, ...args) {
+        if (destination === this.context.destination) {
+          let meter = meters.get(this.context);
+          if (!meter) { meter = this.context.createAnalyser(); meter.fftSize = 2048; meters.set(this.context, meter); }
+          connect.call(this, meter);
+        }
+        return connect.call(this, destination, ...args);
+      };
+      navigator.mediaDevices.getDisplayMedia = async options => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 480; canvas.height = 270;
+        const context = canvas.getContext('2d');
+        let frame = 0;
+        const draw = () => { context.fillStyle = frame++ % 2 ? '#6353a5' : '#424185'; context.fillRect(0, 0, 480, 270); };
+        draw();
+        const video = canvas.captureStream(15);
+        const timer = setInterval(draw, 67);
+        video.getVideoTracks()[0].addEventListener('ended', () => clearInterval(timer));
+        if (options.audio) {
+          const context = new AudioContext(), tone = context.createOscillator(), gain = context.createGain(), stream = context.createMediaStreamDestination();
+          tone.frequency.value = 660; gain.gain.value = 0.05;
+          tone.connect(gain).connect(stream); tone.start(); await context.resume();
+          video.addTrack(stream.stream.getAudioTracks()[0]);
+          stream.stream.getAudioTracks()[0].addEventListener('ended', () => { tone.stop(); void context.close(); });
+        }
+        return video;
+      };
+      navigator.mediaDevices.getUserMedia = async () => {
+        const context = new AudioContext(), oscillator = context.createOscillator(), volume = context.createGain(), output = context.createMediaStreamDestination();
+        oscillator.frequency.value = 440; volume.gain.value = 0.05; oscillator.connect(volume).connect(output); oscillator.start(); await context.resume();
+        output.stream.getAudioTracks()[0].addEventListener('ended', () => { oscillator.stop(); void context.close(); });
+        return output.stream;
+      };
+    });
+    await p.goto(origin);
+    await control(p, 'Create an account').click();
+    await p.getByLabel('Display name', { exact: true }).fill(name);
+    await p.getByLabel('Username', { exact: true }).fill(name);
+    await p.getByLabel('Password', { exact: true }).fill('Local-Music-Fixture-Pass-Only');
+    await control(p, 'Create account').click();
+    const recovery = p.getByRole('dialog', { name: 'Protect your account', exact: true });
+    await recovery.waitFor({ state: 'visible' });
+    await recovery.getByLabel('I have saved my recovery codes', { exact: true }).check();
+    await recovery.getByRole('button', { name: 'Continue to Dorham' }).click();
+    await p.locator('.app').waitFor();
+  }
+  function rms(p) {
+    return p.evaluate(async () => {
+      let sum = 0;
+      for (let i = 0; i < 6; i++) {
+        for (const [context, meter] of window.__musicMeters) {
+          if (context.state !== 'running') continue;
+          const samples = new Float32Array(meter.fftSize);
+          meter.getFloatTimeDomainData(samples);
+          sum += samples.reduce((total, value) => total + value * value, 0) / samples.length;
+        }
+        await new Promise(resolve => setTimeout(resolve, 35));
+      }
+      return Math.sqrt(sum / 6);
+    });
+  }
+  try {
+    const nonce = Date.now().toString(36);
+    await register(host, 'DJ' + nonce);
+    await register(silent, 'Quiet' + nonce);
+    await register(listener, 'Room' + nonce);
+    const name = 'Music lab ' + nonce;
+    const server = await api(host, '/servers', { name });
+    if (server.code > 299) throw new Error(JSON.stringify(server));
+    const invite = await api(host, '/servers/' + server.value.id + '/invites', { uses: 4 });
+    for (const member of [silent, listener]) {
+      const result = await api(member, '/invites/join', { code: invite.value.code });
+      if (result.code > 299) throw new Error(JSON.stringify(result));
+    }
+    const bootstrap = await api(host, '/bootstrap');
+    const channel = bootstrap.value.channels.find(item => item.kind === 'voice' && item.serverId === server.value.id);
+    const route = '/voice/' + channel.id + '/music';
+    if ((await api(silent, route)).code !== 403) throw new Error('Music state exposed to someone outside voice');
+    for (const client of [host, silent, listener]) {
+      await client.reload();
+      await control(client, 'Open ' + name).click();
+      await control(client, 'Lounge').click();
+      await client.locator('.voice-panel-actions').getByRole('button', { name: 'Open music player', exact: true }).click();
+      await dialog(client).getByRole('textbox', { name: 'Search music' }).waitFor();
+      await control(client, 'Close music player').click();
+      await control(client, 'Mute microphone').click();
+      await control(client, 'Unmute microphone').waitFor();
+      await client.locator('.voice-panel-actions').getByRole('button', { name: 'Open music player', exact: true }).click();
+    }
+    for (const client of [host, silent, listener]) {
+      const official = (await api(client, route)).value.state.playlists.filter(list => list.original);
+      if (official.length !== 1 || official[0].tracks.length !== 28 || official[0].editable || official[0].manageable) throw new Error('Missing or editable official playlist');
+      await dialog(client).getByText('Official playlist', { exact: true }).waitFor();
+    }
+    const lockedPlaylist = await api(host, route, { action: 'deletePlaylist', playlist: 'dorham-original' });
+    if (lockedPlaylist.code !== 403) throw new Error('Operator playlist could be deleted');
+    if (!(await api(silent, route)).value.serverDeafened) throw new Error('Music API did not expose server-deafened status');
+    const retry = await api(host, route, { action: 'repeat', value: 'track' });
+    if (retry.code !== 200) throw new Error(JSON.stringify(retry));
+    const forbidden = await api(silent, route, { action: 'repeat', value: 'queue' });
+    if (forbidden.code !== 403) throw new Error('A listener could use DJ controls');
+    const hostMusic = dialog(host);
+    const catalog = (await api(host, route)).value;
+    const pinned = catalog.state.playlists.find(list => list.original);
+    const firstTrack = catalog.library.find(track => track.id === pinned.tracks[0]);
+    await hostMusic.getByRole('textbox', { name: 'Search music' }).fill(firstTrack.id);
+    await hostMusic.getByRole('button', { name: 'Play track', exact: true }).click();
+    await wait(async () => (await api(host, route)).value.state.status === 'playing', 'Worker did not enter playing state');
+    const before = await wait(async () => { const n = await rms(silent); return n > .001 ? n : false; }, 'No bot audio from speaker output');
+    await dialog(silent).getByRole('button', { name: 'Mute for me', exact: true }).click();
+    const zero = await wait(async () => { const n = await rms(silent); return n < .00008 ? { n } : false; }, 'Muted listener still hears music');
+    const others = await wait(async () => { const n = await rms(listener); return n > .001 ? n : false; }, 'Another listener lost music');
+    await control(host, 'Close music player').click();
+    await host.locator('.voice-panel').screenshot({ path: 'output/playwright/music-toolbar.png' });
+    await control(host, 'Unmute microphone').click();
+    const speech = await wait(async () => { const n = await rms(silent); return n > .001 ? n : false; }, 'Personal music mute also muted a human microphone');
+    await control(host, 'Mute microphone').click();
+    await control(silent, 'Close music player').click();
+    await control(host, 'Share screen').click();
+    const setup = host.getByRole('dialog', { name: 'Screen sharing', exact: true });
+    await setup.getByRole('button', { name: 'Choose screen', exact: true }).click();
+    await control(silent, 'Watch stream').click();
+    await wait(() => silent.locator('.screen video').evaluate(video => video.videoWidth > 0), 'Screen video never decoded');
+    const screenAudio = await wait(async () => { const n = await rms(silent); return n > .001 ? n : false; }, 'Screen audio was silenced by bot mute');
+    await control(host, 'Unmute microphone').click();
+    await silent.evaluate(() => { window.__voiceLoss = .4; });
+    await silent.getByText('Screen sharing paused to keep voice clear.').waitFor({ timeout: 15000 });
+    const videoFrames = () => silent.locator('.screen video').evaluate(video => video.getVideoPlaybackQuality().totalVideoFrames);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const pausedFrames = await videoFrames();
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (await videoFrames() !== pausedFrames) throw new Error('Incoming screen video continued during severe voice loss');
+    await wait(async () => (await rms(silent)) > .001, 'Screen fallback cut off the human microphone');
+    await silent.evaluate(() => { window.__voiceLoss = 0; });
+    await wait(async () => (await videoFrames()) > pausedFrames, 'Screen video did not recover after voice stabilized');
+    await control(host, 'Mute microphone').click();
+    await control(host, 'Stop sharing').click();
+    await silent.locator('.voice-panel-actions').getByRole('button', { name: 'Open music player', exact: true }).click();
+    const queue = await api(host, route, { action: 'add', track: 'starter-rain' });
+    if (queue.code !== 200) throw new Error(JSON.stringify(queue));
+    await host.locator('.voice-panel-actions').getByRole('button', { name: 'Open music player', exact: true }).click();
+    await hostMusic.getByRole('button', { name: /Queue/ }).first().click();
+    await hostMusic.getByText('Evening Rain', { exact: true }).waitFor();
+    await host.screenshot({ path: 'output/playwright/music-desktop-preview.png' });
+    await silent.setViewportSize({ width: 390, height: 844 });
+    await wait(() => dialog(silent).evaluate(el => el.scrollWidth <= el.clientWidth + 1), 'Music does not fit phone width');
+    await dialog(silent).getByRole('textbox', { name: 'Play from an audio or playlist link' }).waitFor();
+    await silent.screenshot({ path: 'output/playwright/music-phone-preview.png' });
+    await control(silent, 'Close music player').click();
+    await silent.setViewportSize({ width: 1280, height: 800 });
+    await control(silent, 'Disconnect voice').first().click();
+    await control(silent, 'Lounge').click();
+    await silent.locator('.voice-panel-actions').getByRole('button', { name: 'Open music player', exact: true }).click();
+    await dialog(silent).getByRole('button', { name: 'Unmute for me', exact: true }).waitFor();
+    const after = await wait(async () => { const n = await rms(silent); return n < .00008 ? { n } : false; }, 'Saved mute was lost on rejoin');
+    if ((await api(host, route, { action: 'policy', disabled: false, mode: 'approval', fair: true, allowExplicit: false, allowUploads: true, history: true, maxVolume: 100, djRole: '' })).code !== 200) throw new Error('Room policy update failed');
+    if ((await api(silent, route, { action: 'add', track: 'starter-caravan' })).code !== 200) throw new Error('Member could not request a track');
+    const pending = (await api(host, route)).value.state.pending[0];
+    if (!pending || pending.track.id !== 'starter-caravan') throw new Error('Request did not appear in the DJ approval queue');
+    if ((await api(host, route, { action: 'approve', entry: pending.id })).code !== 200) throw new Error('DJ could not approve a request');
+    const list = await api(host, route, { action: 'savePlaylist', name: 'Listening party', tracks: ['starter-rain', 'starter-caravan'], shared: true, collaborative: true });
+    if (list.code !== 200) throw new Error(JSON.stringify(list));
+    const shared = (await api(silent, route)).value.state.playlists.find(item => item.name === 'Listening party');
+    if (!shared?.editable || shared.manageable) throw new Error('Collaborative playlist permissions incorrect');
+    const schedule = await api(host, route, { action: 'schedule', title: 'Fixture launch', playlist: shared.id, at: Date.now() + 30000 });
+    if (schedule.code !== 200 || !(await api(host, route)).value.state.events?.length) throw new Error('Listening party could not be scheduled');
+    if (!(await api(host, route)).value.canUpload) throw new Error('FFprobe upload fixture is unavailable');
+    const community = route + '/community';
+    await hostMusic.getByRole('button', { name: 'Community', exact: true }).click();
+    await hostMusic.getByText('0 of 30 MB used').waitFor();
+    await hostMusic.getByRole('button', { name: 'New playlist', exact: true }).click();
+    await hostMusic.getByLabel('Playlist name').fill('Fixture playlist');
+    await hostMusic.getByRole('button', { name: 'Create playlist', exact: true }).click();
+    const own = await wait(async () => (await api(host, community)).value.lists.find(list => list.name === 'Fixture playlist'), 'Community playlist not created');
+    const quietBefore = await api(silent, community);
+    if (quietBefore.value.lists.some(list => list.id === own.id)) throw new Error('Private playlist was exposed');
+    const forbiddenVisibility = await api(silent, community, { action: 'visibility', list: own.id, public: true });
+    if (forbiddenVisibility.code !== 404) throw new Error('Someone other than the owner can publish a playlist');
+    const upload = (client, length = 0) => client.evaluate(async ({ route, id, length }) => {
+      const rate = 16000, count = rate * 2;
+      const buffer = new ArrayBuffer(length || 44 + count * 2), v = new DataView(buffer);
+      const text = (start, label) => [...label].forEach((c, i) => v.setUint8(start+i, c.charCodeAt(0)));
+      text(0, 'RIFF'); v.setUint32(4, 36 + count*2, true); text(8, 'WAVEfmt ');
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+      v.setUint32(28, rate*2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      text(36, 'data'); v.setUint32(40, count*2, true);
+      for (let i = 0; i < count; i++) v.setInt16(44 + i*2, Math.round(Math.sin(i*440/rate*2*Math.PI)*1000), true);
+      const me = await (await fetch('/api/v1/auth/me')).json();
+      const response = await fetch('/api/v1' + route + '/upload?name=Fixture%20audio&rights=yes&list=' + encodeURIComponent(id), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-CSRF-Token': me.csrf }, body: buffer });
+      return { code: response.status, value: await response.json() };
+    }, { route, id: own.id, length });
+    const privateUpload = await upload(host);
+    if (privateUpload.code !== 403) throw new Error('Private playlist accepted audio upload');
+    await hostMusic.getByRole('button', { name: 'Make public', exact: true }).click();
+    await hostMusic.getByRole('button', { name: 'Make private', exact: true }).waitFor();
+    const uploaded = await upload(host);
+    if (uploaded.code !== 200 || uploaded.value.source !== 'upload') throw new Error(JSON.stringify(uploaded));
+    const browse = await api(silent, community + '?q=Fixture%20audio');
+    if (!browse.value.lists.find(list => list.id === own.id)?.tracks.some(track => track.id === uploaded.value.id)) throw new Error('Processed audio missing from public playlist search');
+    const over = await upload(host, 30000000);
+    if (over.code !== 413 || over.value.error?.code !== 'MUSIC_QUOTA') throw new Error('Music quota was bypassed');
+    const shares = await api(host, community);
+    if (shares.value.allowance.usedBytes !== 64044) throw new Error('Upload allowance does not match source size');
+    const adminPath = '/admin/music/users/' + (await api(silent, '/auth/me')).value.user.id;
+    if ((await api(silent, adminPath)).code !== 403) throw new Error('Non-admin can view allowance administration');
+    if ((await api(host, '/admin/claim', { secret: 'local-music-admin-test' })).code !== 200) throw new Error('Could not claim fixture administrator');
+    const quota = await api(host, adminPath, { bonusMB: 42 });
+    if (quota.code !== 200 || (await api(silent, community)).value.allowance.limitBytes !== 72000000) throw new Error('Per-account bonus not applied');
+    const link = await api(host, community, { action: 'addLink', list: own.id, url: 'https://www.kozco.com/tech/piano2-CoolEdit.mp3' });
+    if (link.code !== 200) throw new Error(JSON.stringify(link));
+    const linked = (await api(host, community)).value;
+    const linkTrack = linked.lists.find(list => list.id === own.id)?.tracks.find(track => track.source === 'link');
+    if (!linkTrack || linked.allowance.usedBytes !== 64044) throw new Error('Direct link consumed upload storage');
+    await api(host, route, { action: 'stop' });
+    const linkField = hostMusic.getByRole('textbox', { name: 'Play from an audio or playlist link' });
+    await hostMusic.getByRole('button', { name: 'Play link', exact: true }).waitFor();
+    await linkField.fill('https://127.0.0.1/unavailable.mp3');
+    await linkField.press('Enter');
+    await hostMusic.getByRole('alert').getByText('This link did not provide supported audio or an M3U track list.').waitFor();
+    if (!(await linkField.inputValue()).includes('unavailable.mp3')) throw new Error('Failed link was cleared');
+    await linkField.fill('https://www.kozco.com/tech/piano2-CoolEdit.mp3');
+    await linkField.press('Enter');
+    await wait(async () => {
+      const state = (await api(host, route)).value.state;
+      return state.status === 'playing' && state.current?.track.source === 'link';
+    }, 'Linked audio did not play from the visible form', 20000);
+    await wait(async () => !(await linkField.inputValue()), 'Accepted link was not cleared');
+    await linkField.fill('https://www.kozco.com/tech/piano2-CoolEdit.mp3');
+    await hostMusic.locator('.music-link-bar').getByRole('button', { name: 'Add to queue', exact: true }).click();
+    await wait(async () => (await api(host, route)).value.state.queue?.some(entry => entry.track.source === 'link'), 'Link could not be queued while audio was playing');
+    await hostMusic.getByRole('button', { name: 'Library', exact: true }).click();
+    await host.screenshot({ path: 'output/playwright/music-link-desktop.png' });
+    await dialog(silent).getByText('Server deafened. Dorham Music cannot hear voice chat.').waitFor();
+    await control(silent, 'Close music player').click();
+    const bot = silent.locator('.voice-mini-members .music-bot-item');
+    await bot.getByRole('img', { name: 'Server deafened' }).waitFor();
+    await bot.getByRole('button', { name: 'Remove music bot from voice' }).click();
+    await bot.waitFor({ state: 'hidden' });
+    await wait(async () => {
+      const music = (await api(host, route)).value.state;
+      return music.disconnected && music.current === null && music.queue?.some(entry => entry.track.source === 'link');
+    }, 'A listener could not disconnect the bot and retain the queue');
+    await control(silent, 'Disconnect voice').first().waitFor();
+    if (errors.length) throw new Error(JSON.stringify(errors));
+    return { before, muted: zero.n, otherListener: others, humanVoiceWhileMusicMuted: speech, screenAudioWhileMusicMuted: screenAudio, rejoinMuted: after.n, queue: 'passed', mobileFit: 'passed', permissions: 'passed', requestApproval: 'passed', collaborativePlaylist: 'passed', scheduling: 'passed', upload: 'passed', communitySearch: 'passed', quota: 'passed', allowanceAdministration: 'passed', directLinkPlayback: 'passed', listenerDisconnect: 'passed', serverDeafened: 'passed', screenFallbackAndRecovery: 'passed' };
+  } finally {
+    await Promise.all(contexts.map(context => context.close()));
+  }
+}
+
+

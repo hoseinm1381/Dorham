@@ -30,7 +30,7 @@ internal sealed class FeatureAdminWindow : Window
         Title = "Dorham Monitor · Server tools";
         Width = 930; Height = 730; MinWidth = 650; MinHeight = 480;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        pages = [("Feature policies", Policies), ("Communities", Communities), ("Asset library", Catalog),
+        pages = [("Feature policies", Policies), ("Capacity", Capacity), ("Communities", Communities), ("Asset library", Catalog),
             ("Speech provider", Speech), ("Announcements", Announcements), ("Audit history", Audit), ("Backend metrics", Dashboard)];
 
         var root = new DockPanel { Margin = new Thickness(20) };
@@ -73,6 +73,19 @@ internal sealed class FeatureAdminWindow : Window
             if (workspace.Content is not StackPanel panel || panel.Children[0] is not TextBlock heading || heading.Text != pages[index].Name)
                 throw new InvalidOperationException("Server tools did not open " + pages[index].Name + ".");
         }
+        sections.SelectedItem = "Capacity";
+        var capacityPanel = (StackPanel)workspace.Content;
+        var fields = capacityPanel.Children.OfType<TextBox>().ToArray();
+        if (fields.Length != 2 || fields[0].Text != "250" || fields[1].Text != "50")
+            throw new InvalidOperationException("Capacity did not show the server's current limits.");
+        fields[0].Text = "5000";
+        fields[1].Text = "120";
+        var save = capacityPanel.Children.OfType<Button>().Single();
+        save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Dispatcher.InvokeAsync(() => { });
+        var saved = ((StackPanel)workspace.Content).Children.OfType<TextBox>().Select(field => field.Text);
+        if (!saved.SequenceEqual(new[] { "5000", "120" }))
+            throw new InvalidOperationException("Capacity did not save and reload both limits.");
     }
 
     private static JsonElement Get(JsonElement item, string key) =>
@@ -159,6 +172,29 @@ internal sealed class FeatureAdminWindow : Window
     private static string Pick(ComboBox combo) => combo.SelectedItem as string ?? throw new InvalidOperationException("Select a value first.");
     private async Task Put(string path, object value) { using var result = await client.FeatureRequest(HttpMethod.Put, "features/" + path, value); }
     private async Task ReloadUi() { await Reload(); ShowPage(); }
+
+    private StackPanel Capacity()
+    {
+        var current = Get(config, "capacity");
+        if (current.ValueKind != JsonValueKind.Object)
+            return Panel("Capacity controls will be available after the Dorham backend is updated.");
+
+        var panel = Panel("Set the total account limit, including guests, and the number of simultaneous Dorham connections. Each open app or browser tab counts as one connection. Changes take effect for new sign-ups and connections as soon as you save.");
+        var users = Field(panel, "Total accounts", Num(current, "users").ToString(CultureInfo.InvariantCulture));
+        var connections = Field(panel, "Simultaneous connections", Num(current, "connections").ToString(CultureInfo.InvariantCulture));
+        long revision = Num(current, "revision");
+        Action(panel, "Save capacity", async (_, _) => await Run(async () =>
+        {
+            const long maxCapacity = 9_007_199_254_740_991;
+            if (!long.TryParse(users.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out long accountLimit) || accountLimit is < 1 or > maxCapacity ||
+                !long.TryParse(connections.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out long connectionLimit) || connectionLimit is < 1 or > maxCapacity)
+                throw new FormatException("Enter a positive whole number for each limit.");
+
+            await Put("settings/capacity", new { users = accountLimit, connections = connectionLimit, revision });
+            await ReloadUi();
+        }));
+        return panel;
+    }
 
     private StackPanel Communities()
     {

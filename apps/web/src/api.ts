@@ -51,12 +51,14 @@ export async function request<T = any>(route: string, body?: unknown, method = b
   if (!native && route !== '/auth/renew' && webRenewal) await webRenewal;
   const credentialGeneration = webCredentialGeneration;
   const headers: Record<string, string> = { ...(access ? { Authorization: `Bearer ${access}` } : {}), ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(native ? { 'X-Dorham-Native': '1' } : {}) };
-  const payload = body && typeof body === 'object' && !(body instanceof FormData) ? { requestId: crypto.randomUUID(), ...body } : body;
-  if (payload && !(payload instanceof FormData)) headers['Content-Type'] = 'application/json';
+  const raw = body instanceof Blob;
+  const payload = !raw && body && typeof body === 'object' && !(body instanceof FormData) ? { requestId: crypto.randomUUID(), ...body } : body;
+  if (raw) headers['Content-Type'] = 'application/octet-stream';
+  else if (payload && !(payload instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (payload instanceof FormData) headers['X-Request-Id'] = crypto.randomUUID();
   const timeout = AbortSignal.timeout(options.timeoutMs ?? (route.startsWith('/auth/') ? 30000 : method === 'GET' ? 15000 : 20000));
   let response: Response;
-  try { response = await fetch(`${base}/api/v1${route}`, { method, credentials: 'include', headers, signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout, body: payload instanceof FormData ? payload : payload ? JSON.stringify(payload) : undefined }); }
+  try { response = await fetch(`${base}/api/v1${route}`, { method, credentials: 'include', headers, signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout, body: payload instanceof FormData || payload instanceof Blob ? payload : payload ? JSON.stringify(payload) : undefined }); }
   catch (e) { if (timeout.aborted) throw Object.assign(new Error('Connection timed out. Your message was not automatically resent.'), { code: 'TIMEOUT' }); throw e; }
   // Requests already in flight can carry the cookie retired by a renewal.
   // Retry only that race once, retaining the mutation's idempotency identifier.
@@ -78,7 +80,18 @@ export async function request<T = any>(route: string, body?: unknown, method = b
 }
 export async function signOut() { try { await request('/auth/logout', {}); } catch (e: any) { if (e.status !== 401) throw e; } finally { access = ''; csrf = ''; webSessionUserId = null; await setSecret(null); if ('caches' in window) { for (const key of await caches.keys()) await caches.delete(key); } } }
 export async function forgetSession() { access = ''; csrf = ''; webSessionUserId = null; await setSecret(null); }
-export function connectSocket(): Socket { return io(base || window.location.origin, { withCredentials: true, auth: callback => { if (native || !webSessionUserId) callback({ token: access || undefined, csrf }); else void synchronizeWebProof(webSessionUserId).then(() => callback({ csrf })).catch(() => callback({ csrf: '' })); }, reconnectionDelay: 500, reconnectionDelayMax: 5000, transports: ['websocket', 'polling'], tryAllTransports: true }); }
+export function connectSocket(): Socket {
+  return io(base || window.location.origin, {
+    withCredentials: true,
+    auth: callback => {
+      if (native && access && Capacitor.getPlatform() === 'android') {
+        void maintainSession().then(() => callback({ token: access || undefined, csrf }), () => callback({}));
+      } else if (native || !webSessionUserId) callback({ token: access || undefined, csrf });
+      else void synchronizeWebProof(webSessionUserId).then(() => callback({ csrf })).catch(() => callback({ csrf: '' }));
+    },
+    reconnectionDelay: 500, reconnectionDelayMax: 5000, transports: ['websocket', 'polling'], tryAllTransports: true,
+  });
+}
 
 export async function uploadAttachment(file: File, conversationId: string, signal?: AbortSignal) {
   const reserved = await request('/attachments', { name: file.name, size: file.size, conversationId });

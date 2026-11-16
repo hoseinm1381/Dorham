@@ -123,6 +123,15 @@ public sealed class AdminClient : IDisposable
         return temporary;
     }
 
+    public Task<JsonDocument> MusicAllowance(string userId, int? bonusMB = null)
+    {
+        if (!SignedIn) throw new InvalidOperationException("Sign in as an administrator.");
+        string path = "admin/music/users/" + Uri.EscapeDataString(userId);
+        return bonusMB.HasValue
+            ? Send(HttpMethod.Post, path, new { requestId = Guid.NewGuid().ToString(), bonusMB = bonusMB.Value })
+            : Send(HttpMethod.Get, path);
+    }
+
     public Task<JsonDocument> FeatureRequest(HttpMethod method, string path, object? body = null)
     {
         if (!SignedIn || !FeatureManagement) throw new InvalidOperationException("Feature management is unavailable.");
@@ -171,6 +180,7 @@ public sealed class AdminClient : IDisposable
                 "CONFIRMATION_REQUIRED" => "The username has changed. Refresh users and confirm the current username.",
                 "GUEST_ACCOUNT" => "Guest accounts do not have passwords.",
                 "ALREADY_APPLIED" => "The server already applied this request. Refresh the user list.",
+                "CAPACITY_CHANGED" => "Another administrator changed capacity. Reload settings before saving.",
                 "PASSWORD_CHANGE_REQUIRED" => "Change your temporary password in Dorham before signing in to Monitor.",
                 "SPEECH_PROVIDER_REGION" => "The speech provider refused requests from this server's region.",
                 "SPEECH_PROVIDER_AUTH" => "The speech provider refused authorization for the server credential.",

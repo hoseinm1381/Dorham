@@ -4,7 +4,7 @@ import type { Socket } from 'socket.io-client';
 
 const bridge = vi.hoisted(() => ({
   prepare: vi.fn(), join: vi.fn(), leave: vi.fn(), setState: vi.fn(),
-  updateRoom: vi.fn(), stopShare: vi.fn(), startShare: vi.fn(), addListener: vi.fn(),
+  updateRoom: vi.fn(), stopShare: vi.fn(), startShare: vi.fn(), addListener: vi.fn(), voiceKeepaliveStatus: vi.fn(),
 }));
 vi.mock('@capacitor/core', () => ({ registerPlugin: () => bridge }));
 import { NativeTransport } from '../packages/media/src/native';
@@ -18,13 +18,14 @@ class FakeSocket {
   events = new EventEmitter();
   sent: { event: string; payload: any }[] = [];
   replyResume?: (reply: Reply) => void;
+  nativeVoiceToken?: string;
   on = (event: string, handler: (...args: any[]) => void) => this.events.on(event, handler);
   off = (event: string, handler: (...args: any[]) => void) => this.events.off(event, handler);
   timeout() {
     return { emit: (event: string, payload: any, reply: Reply) => {
       this.sent.push({ event, payload });
       if (event === 'voice:resume' && this.replyResume) return this.replyResume(reply);
-      if (event === 'voice:join' || event === 'voice:resume') return reply(null, accepted({ ...ticket, room, iceServers: [] }));
+      if (event === 'voice:join' || event === 'voice:resume') return reply(null, accepted({ ...ticket, room, iceServers: [], nativeVoiceToken: this.nativeVoiceToken }));
       if (event === 'voice:sfu') return reply(null, accepted({ url: 'ws://local', token: 'local' }));
       reply(null, accepted());
     } };
@@ -49,9 +50,9 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-function fixture() {
+function fixture(serverOrigin?: string) {
   const socket = new FakeSocket(), emit = vi.fn();
-  const transport = new NativeTransport({ socket: socket as unknown as Socket, userId: 'self', emit });
+  const transport = new NativeTransport({ socket: socket as unknown as Socket, userId: 'self', serverOrigin, emit });
   return { socket, emit, transport };
 }
 
@@ -90,6 +91,31 @@ it('reopens ended Android media without prompting again or clearing mute and dea
     expect(bridge.join).toHaveBeenCalledTimes(2);
     expect(bridge.join).toHaveBeenLastCalledWith(expect.objectContaining({ recovering: true, muted: true, deafened: true }));
     expect(bridge.startShare).not.toHaveBeenCalled();
+  } finally { await transport.destroy(); }
+});
+
+it('keeps a background Android channel when only the native heartbeat is running', async () => {
+  const { socket, transport } = fixture('https://dorham.example');
+  try {
+    socket.nativeVoiceToken = 'native-voice-token';
+    bridge.voiceKeepaliveStatus.mockResolvedValue({ alive: true });
+    await transport.join('voice');
+    expect(bridge.join).toHaveBeenCalledWith(expect.objectContaining({
+      backgroundVoice: { origin: 'https://dorham.example', token: 'native-voice-token' },
+    }));
+    socket.disconnect();
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(socket.count('voice:heartbeat')).toBe(0);
+    expect(transport.room).toEqual(room);
+    socket.connect();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(socket.sent.find(entry => entry.event === 'voice:resume')?.payload).toMatchObject({ ...ticket, nativeKeepalive: true });
+    expect(bridge.join).toHaveBeenCalledTimes(1);
+
+    bridge.voiceKeepaliveStatus.mockResolvedValue({ alive: false });
+    socket.disconnect();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(transport.room).toBeNull();
   } finally { await transport.destroy(); }
 });
 

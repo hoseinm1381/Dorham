@@ -75,6 +75,11 @@ func (s *Service) voiceDirectoryAt(uid string, tx *DB, now int64) []M {
 			members = append(members, M{"user": PublicUser(Merge(vm, M{"id": vm["user_id"]})), "muted": B(vm["muted"]), "deafened": B(vm["deafened"]), "serverMuted": B(vm["server_muted"])})
 		}
 		shares := tx.One("SELECT COUNT(*) AS count FROM share_leases WHERE channel_id=? AND expires_at>=?", id, now)
+		if s.MusicEnabled {
+			if bot := musicRoster(tx, id); bot != nil {
+				members = append(members, M{"user": bot["user"], "kind": "music", "muted": false, "deafened": false, "serverMuted": false, "serverDeafened": bot["serverDeafened"]})
+			}
+		}
 		rooms = append(rooms, M{"channelId": id, "members": members, "shares": N(shares["count"])})
 	}
 	return rooms
@@ -100,7 +105,15 @@ func (s *Service) RoomView(tx *DB, id string) M {
 		shares = append(shares, ShareView(r, s.C))
 	}
 	coordinator := tx.One("SELECT * FROM coordinators WHERE channel_id=?", id)
-	return M{"channelId": id, "members": members, "shares": shares, "coordinatorId": serviceNullString(S(coordinator["user_id"])), "coordinatorEpoch": N(coordinator["epoch"]), "transport": s.C.MediaTransport}
+	result := M{"channelId": id, "members": members, "shares": shares, "coordinatorId": serviceNullString(S(coordinator["user_id"])), "coordinatorEpoch": N(coordinator["epoch"]), "transport": s.C.MediaTransport}
+	if s.MusicEnabled {
+		bot := musicRoster(tx, id)
+		if bot != nil {
+			result["members"] = append(members, bot)
+		}
+		result["musicAvailable"] = true
+	}
+	return result
 }
 func (s *Service) VoiceSnapshot(viewers []M) []M {
 	return s.DB.Tx(func(tx *DB) any {

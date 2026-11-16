@@ -12,7 +12,7 @@ var accountAdminActions = []string{"ban", "unban", "revoke", "resetPassword", "s
 func (a *App) registerAdmin() {
 	a.Route("GET", "/api/v1/admin/capabilities", true, func(r *Request) any {
 		Administrator(a.DB, r.UID())
-		return M{"version": 1, "userActions": accountAdminActions, "usersPagination": true, "deletionMode": "anonymizeKeepMessages", "featureManagement": true}
+		return M{"version": 1, "userActions": accountAdminActions, "usersPagination": true, "deletionMode": "anonymizeKeepMessages", "featureManagement": true, "musicAllowances": true}
 	})
 	a.Route("GET", "/api/v1/admin/users", true, func(r *Request) any {
 		Administrator(a.DB, r.UID())

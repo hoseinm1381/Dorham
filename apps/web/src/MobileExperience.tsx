@@ -1,6 +1,6 @@
 import { RankBadge } from './Features';
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
-import { Users, Mic, MicOff, Headphones, HeadphoneOff, PhoneOff, MonitorUp, Menu, Home, X } from 'lucide-react';
+import { Users, Mic, MicOff, Headphones, HeadphoneOff, PhoneOff, MonitorUp, Menu, Home, X, Volume2, VolumeX } from 'lucide-react';
 import type { PublicUser, VoiceMember } from '@dorham/contracts';
 import { Avatar } from './UserAvatar';
 import { SpeakingButton } from './LiveStatus';
@@ -36,8 +36,8 @@ export function VoiceMemberStatusIcon({ status, size }: { status: ReturnType<typ
   return <Icon size={size} role="img" aria-label={label}><title>{label}</title></Icon>;
 }
 
-export function ParticipantList({ members, actions }: { members: Participant[]; actions: (user: PublicUser, event: React.MouseEvent<HTMLElement>) => void }) {
-  return <div className="mobile-participants">{members.length ? members.map(member => {
+export function ParticipantList({ members, actions, musicRow }: { members: Participant[]; musicRow?: ReactNode; actions: (user: PublicUser, event: React.MouseEvent<HTMLElement>) => void }) {
+  return <div className="mobile-participants">{members.length ? members.filter(member => member.user.kind !== "music").map(member => {
     const status = voiceMemberStatus(member);
     return <SpeakingButton key={member.user.id} userId={member.user.id} onClick={e => actions(member.user, e)}>
       <Avatar user={member.user} small/>
@@ -45,11 +45,11 @@ export function ParticipantList({ members, actions }: { members: Participant[]; 
       <VoiceMemberStatusIcon status={status} size={17}/>
       <span className="participant-more" aria-hidden="true">⋯</span>
     </SpeakingButton>;
-  }) : <p>{t('No one is in this voice channel yet.')}</p>}</div>;
+  }) : <p>{t('No one is in this voice channel yet.')}</p>}{musicRow}</div>;
 }
 
-export function MobileCallBar({ name, count, muted, deafened, listenOnly, sharing, busy, status, participants, mute, deafen, share, soundboard, leave }: { name: string; count: number; muted: boolean; deafened: boolean; listenOnly: boolean; sharing: boolean; busy: boolean; status: string; participants: () => void; mute: () => void; deafen: () => void; share: () => void; soundboard?: ReactNode; leave: () => void }) {
-  return <section className="mobile-call-bar" aria-label={t('Call controls')}><button className="mobile-call-location" onClick={participants}><strong><bdi>{name}</bdi> · {formatNumber(count)}</strong><small>{t(listenOnly ? 'Listening only' : status || 'Voice connected')}</small></button><div><button aria-label={t(muted ? 'Unmute microphone' : 'Mute microphone')} aria-pressed={muted} disabled={listenOnly} onClick={mute}>{muted ? <MicOff/> : <Mic/>}</button><button aria-label={t(deafened ? 'Undeafen' : 'Deafen')} aria-pressed={deafened} onClick={deafen}>{deafened ? <HeadphoneOff/> : <Headphones/>}</button><button aria-label={t(sharing ? 'Stop sharing' : 'Share screen')} aria-pressed={sharing} disabled={busy} onClick={share}><MonitorUp/></button>{soundboard}<button className="danger" aria-label={t('Disconnect voice')} onClick={leave}><PhoneOff/></button></div></section>;
+export function MobileCallBar({ name, count, muted, deafened, listenOnly, sharing, busy, status, participants, mute, deafen, share, soundboard, music, musicMute, leave }: { name: string; count: number; muted: boolean; deafened: boolean; listenOnly: boolean; sharing: boolean; busy: boolean; status: string; participants: () => void; mute: () => void; deafen: () => void; share: () => void; soundboard?: ReactNode; music?: ReactNode; musicMute?: { muted: boolean; toggle: () => void }; leave: () => void }) {
+  return <section className="mobile-call-bar" aria-label={t('Call controls')}><button className="mobile-call-location" onClick={participants}><strong><bdi>{name}</bdi> · {formatNumber(count)}</strong><small>{t(listenOnly ? 'Listening only' : status || 'Voice connected')}</small></button><div><button aria-label={t(muted ? 'Unmute microphone' : 'Mute microphone')} aria-pressed={muted} disabled={listenOnly} onClick={mute}>{muted ? <MicOff/> : <Mic/>}</button><button aria-label={t(deafened ? 'Undeafen' : 'Deafen')} aria-pressed={deafened} onClick={deafen}>{deafened ? <HeadphoneOff/> : <Headphones/>}</button><button aria-label={t(sharing ? 'Stop sharing' : 'Share screen')} aria-pressed={sharing} disabled={busy} onClick={share}><MonitorUp/></button>{music}{musicMute && <button aria-label={t(musicMute.muted ? 'Unmute music for me' : 'Mute music for me')} aria-pressed={musicMute.muted} onClick={musicMute.toggle}>{musicMute.muted ? <VolumeX/> : <Volume2/>}</button>}{soundboard}<button className="danger" aria-label={t('Disconnect voice')} onClick={leave}><PhoneOff/></button></div></section>;
 }
 
 export function MobileNavigation({ home, channels, members }: { home: () => void; channels: () => void; members: () => void }) {

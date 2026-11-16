@@ -22,6 +22,10 @@ public static class AdminSelfTest
         public bool AuthenticatedRead;
         public bool RepeatPage;
         public int SpeechStatus = 400;
+        private readonly Dictionary<string, int> musicBonuses = new();
+        private long capacityUsers = 250;
+        private long capacityConnections = 50;
+        private long capacityRevision;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
@@ -45,13 +49,36 @@ public static class AdminSelfTest
             if (path.EndsWith("/admin/capabilities"))
                 return Modern ? Reply(new { version = 1, userActions = new[] { "ban", "unban", "revoke", "resetPassword", "setPassword", "delete" }, usersPagination = true, deletionMode = "anonymizeKeepMessages", featureManagement = true }, CapabilityStatus) : Reply(new { }, 404);
             if (path.EndsWith("/admin/features"))
-                return Reply(new { features = new[] { "screen1080", "ttsPlus", "profilePlus", "emojiPlus", "soundboardPlus", "uploadsPlus", "communityPlus" }, catalog = Array.Empty<object>() });
+                return Reply(new { features = new[] { "screen1080", "ttsPlus", "profilePlus", "emojiPlus", "soundboardPlus", "uploadsPlus", "communityPlus" }, catalog = Array.Empty<object>(), capacity = new { users = capacityUsers, connections = capacityConnections, revision = capacityRevision } });
+            if (path.EndsWith("/admin/features/settings/capacity") && request.Method == HttpMethod.Put)
+            {
+                using var payload = JsonDocument.Parse(body);
+                var change = payload.RootElement;
+                if (change.GetProperty("revision").GetInt64() != capacityRevision)
+                    return Reply(new { error = new { code = "CAPACITY_CHANGED" } }, 409);
+                capacityUsers = change.GetProperty("users").GetInt64();
+                capacityConnections = change.GetProperty("connections").GetInt64();
+                return Reply(new { users = capacityUsers, connections = capacityConnections, revision = ++capacityRevision });
+            }
             if (path.EndsWith("/admin/features/users/user-1"))
                 return Reply(new { rank = "pro", grants = new { ttsPlus = 0 }, plusSelected = false,
                     ttsPlusUsage = new { month = "2026-11", characters = 55, attempts = 3, reported = 2, priced = 1,
                         inputTokens = 40, outputTokens = 50, estimatedNanoUsd = 512000 } });
             if (path.EndsWith("/admin/features/speech/preview"))
                 return Reply(new { error = new { code = SpeechStatus == 502 ? "SPEECH_PREVIEW_FAILED" : "VALIDATION", message = "fixture-secret" } }, SpeechStatus);
+            if (path.Contains("/admin/music/users/"))
+            {
+                var id = path[(path.LastIndexOf('/') + 1)..];
+                if (request.Method == HttpMethod.Post)
+                {
+                    using var command = JsonDocument.Parse(body);
+                    if (!Guid.TryParse(command.RootElement.GetProperty("requestId").GetString(), out _))
+                        return Reply(new { error = "Missing request ID" }, 400);
+                    musicBonuses[id] = command.RootElement.GetProperty("bonusMB").GetInt32();
+                }
+                var bonus = musicBonuses.GetValueOrDefault(id);
+                return Reply(new { baseMB = 30, bonusMB = bonus, usedBytes = 64044, limitBytes = (30 + bonus) * 1_000_000 });
+            }
             if (path.Contains("/admin/users/"))
             {
                 Mutations++; LastBody = body;

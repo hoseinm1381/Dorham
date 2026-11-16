@@ -6,7 +6,7 @@ import './windows-overlay.css';
 import { speakingStore } from './LiveStatus';
 export type OverlayPreferences = { enabled: boolean; position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' };
 export type OverlayState = { channel: string; language: string; members: { id?: string; name: string; avatar?: string | null; muted: boolean; deafened: boolean; serverMuted: boolean; speaking: boolean }[] } | null;
-export function WindowsOverlayBridge({ room, name, language }: { room: VoiceRoom | null; name: string; language: string }) {
+export function WindowsOverlayBridge({ room, name, language, musicMuted = false }: { room: VoiceRoom | null; name: string; language: string; musicMuted?: boolean }) {
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
     let live = true;
@@ -19,7 +19,7 @@ export function WindowsOverlayBridge({ room, name, language }: { room: VoiceRoom
     return () => { live = false; remove?.(); };
   }, []);
   const speaking = useSyncExternalStore(enabled && room ? speakingStore.subscribeAll : noSubscription, enabled && room ? speakingStore.snapshot : emptySnapshot);
-  useWindowsVoiceOverlay(room, name, speaking, language, enabled);
+  useWindowsVoiceOverlay(room, name, speaking, language, enabled, musicMuted);
   return null;
 }
 const emptySpeaking: Record<string, boolean> = {};
@@ -30,11 +30,11 @@ function thumbnailSource(avatar: string | null) {
   // Canvas reads need CORS. Keep them separate from display-only image cache entries.
   return `${assetUrl(avatar)}?overlay=1`;
 }
-export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, speaking: Record<string, boolean>, language: string, enabled: boolean) {
+export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, speaking: Record<string, boolean>, language: string, enabled: boolean, musicMuted = false) {
   const thumbnails = useRef(new Map<string, string>()), previous = useRef(new Map<string, string>());
   const [revision, setRevision] = useState(0);
-  const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), latest = useRef({ room, name, language, speaking });
-  latest.current = { room, name, language, speaking };
+  const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), latest = useRef({ room, name, language, speaking, musicMuted });
+  latest.current = { room, name, language, speaking, musicMuted };
   const avatarSources = JSON.stringify([...new Set(enabled ? room?.members.map(m => thumbnailSource(m.user.avatar)).filter(Boolean) || [] : [])]);
   useEffect(() => {
     if (!window.desktop?.updateOverlay || !enabled) return;
@@ -67,17 +67,18 @@ export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, spe
     // Coalesce bursts of speaking events without a persistent polling timer.
     pending.current = setTimeout(() => {
       pending.current = undefined;
-      const { room, name, language, speaking } = latest.current;
+      const { room, name, language, speaking, musicMuted } = latest.current;
       if (!room) return;
       const next = new Map<string, string>();
       const members = room.members.map(member => {
         const id = member.user.id, avatar = thumbnails.current.get(thumbnailSource(member.user.avatar)) || '';
         next.set(id, avatar);
-        return { id, name: member.user.displayName, ...(previous.current.get(id) === avatar ? {} : { avatar: avatar || null }), muted: member.muted, deafened: member.deafened || member.serverDeafened === true, serverMuted: member.serverMuted, speaking: speaking[id] === true };
+                const bot = member.user.kind === 'music';
+        return { id, name: bot ? t('Dorham Music') + ' · ' + t('BOT') : member.user.displayName, ...(previous.current.get(id) === avatar ? {} : { avatar: avatar || null }), muted: bot ? musicMuted : member.muted, deafened: member.deafened || member.serverDeafened === true, serverMuted: member.serverMuted, speaking: speaking[id] === true };
       });
       previous.current = next; window.desktop?.updateOverlay?.({ channel: name, language, members });
     }, 40);
-  }, [room, name, language, speaking, enabled, revision]);
+  }, [room, name, language, speaking, enabled, revision, musicMuted]);
   useEffect(() => () => { if (pending.current) clearTimeout(pending.current); window.desktop?.updateOverlay?.(null); }, []);
 }
 export function WindowsVoiceOverlaySettings({ error }: { error: (error: unknown) => void }) {

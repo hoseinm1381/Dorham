@@ -48,6 +48,7 @@ type App struct {
 	Hub           *Hub
 	Media         *Media
 	Games         *Games
+	Music         *Music
 	Notifications *Notifications
 	Mux           *http.ServeMux
 	HTTP          *http.Server
@@ -86,6 +87,9 @@ func NewApp(c Config) *App {
 	a.DB.EnableRuntimeStorage()
 	a.Media = NewMedia(a)
 	a.Games = NewGames(a)
+	a.Music = newMusic(a)
+	a.Service.MusicEnabled = a.Music.enabled()
+	a.Music.register()
 	a.Service.Notify = a.Hub.Notify
 	a.Notifications = newNotifications(a)
 	a.Service.Notify = func(kind string, value any) {
@@ -362,6 +366,7 @@ func (a *App) Serve(l net.Listener) error  { return a.HTTP.Serve(l) }
 func (a *App) Close() {
 	a.closeOnce.Do(func() {
 		close(a.stop)
+		a.Music.close()
 		a.Hub.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

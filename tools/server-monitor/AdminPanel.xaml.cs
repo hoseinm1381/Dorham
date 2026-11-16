@@ -13,6 +13,8 @@ public partial class AdminPanel : UserControl
     private string? pendingAction;
     private ManagedUser? pendingUser;
     private bool busy;
+    private int allowanceRequest;
+    private bool allowanceReady;
     private string? temporaryPassword;
 
     public AdminPanel()
@@ -54,6 +56,8 @@ public partial class AdminPanel : UserControl
             users = []; selected = null; UserList.ItemsSource = null;
             CloseForm(); ClearPassword(); LoginPassword.Clear();
             AccessEditor.SelectAccount(null, null);
+            AccountTabs.Visibility = Visibility.Collapsed;
+            _ = LoadPlus();
         }
         UpdateButtons();
     }
@@ -92,9 +96,89 @@ public partial class AdminPanel : UserControl
         SelectedName.Text = selected?.Label ?? "Select an account";
         SelectedDetail.Text = selected?.Detail ?? "Choose a user to manage their access.";
         AccessEditor.SelectAccount(client, selected);
+        AccountTabs.Visibility = selected == null ? Visibility.Collapsed : Visibility.Visible;
+        _ = LoadPlus();
         AccountActions.Visibility = selected == null ? Visibility.Collapsed : Visibility.Visible;
         AccountActions.IsExpanded = false;
         CloseForm(); ClearPassword(); UpdateButtons();
+    }
+
+    private async void SelectAccountTab(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.Source == AccountTabs) await LoadPlus();
+    }
+
+    private async Task LoadPlus()
+    {
+        int serial = ++allowanceRequest;
+        allowanceReady = false;
+        if (SaveMusicBonus == null) return;
+        SaveMusicBonus.IsEnabled = false;
+        MusicBonus.IsEnabled = false;
+        MusicBonus.Clear();
+        MusicAllowance.Text = "";
+        PlusNotice.Text = "";
+        if (!PlusTab.IsSelected || client?.SignedIn != true || selected == null) return;
+        if (selected.Guest)
+        {
+            PlusNotice.Text = "Music upload allowances are available for registered accounts.";
+            return;
+        }
+
+        PlusNotice.Text = "Loading allowance…";
+        try
+        {
+            using var response = await client.MusicAllowance(selected.Id);
+            if (serial != allowanceRequest) return;
+            ShowMusicAllowance(response.RootElement);
+            PlusNotice.Text = "";
+        }
+        catch (Exception error)
+        {
+            if (serial != allowanceRequest) return;
+            PlusNotice.Text = error.Message;
+            if (client?.SignedIn != true) ShowSession();
+        }
+    }
+
+    private void ShowMusicAllowance(System.Text.Json.JsonElement value)
+    {
+        MusicAllowance.Text = $"Base {value.GetProperty("baseMB").GetInt32()} MB. Used {value.GetProperty("usedBytes").GetInt64() / 1_000_000.0:0.##} of {value.GetProperty("limitBytes").GetInt64() / 1_000_000.0:0.##} MB.";
+        MusicBonus.Text = value.GetProperty("bonusMB").GetInt32().ToString();
+        MusicBonus.IsEnabled = true;
+        SaveMusicBonus.IsEnabled = true;
+        allowanceReady = true;
+    }
+
+    private async void SavePlus(object sender, RoutedEventArgs e) => await SaveMusicAllowance();
+
+    private async Task SaveMusicAllowance()
+    {
+        if (!allowanceReady || !PlusTab.IsSelected || client?.SignedIn != true || selected == null) return;
+        if (!int.TryParse(MusicBonus.Text, out int bonus) || bonus is < 0 or > 8192)
+        {
+            PlusNotice.Text = "Enter a whole number from 0 to 8192.";
+            return;
+        }
+
+        int serial = ++allowanceRequest;
+        SaveMusicBonus.IsEnabled = false;
+        MusicBonus.IsEnabled = false;
+        PlusNotice.Text = "Saving allowance…";
+        try
+        {
+            using var response = await client.MusicAllowance(selected.Id, bonus);
+            if (serial != allowanceRequest) return;
+            ShowMusicAllowance(response.RootElement);
+            PlusNotice.Text = "Allowance saved.";
+        }
+        catch (Exception error)
+        {
+            if (serial != allowanceRequest) return;
+            PlusNotice.Text = error.Message;
+            if (client?.SignedIn != true) ShowSession();
+            else { SaveMusicBonus.IsEnabled = true; MusicBonus.IsEnabled = true; }
+        }
     }
     private void OpenFeatures(object sender, RoutedEventArgs e)
     {
@@ -261,6 +345,20 @@ public partial class AdminPanel : UserControl
                     text.Text.Contains("Cost estimate covers 1 of 3 attempts")))
                 throw new InvalidOperationException("The selected account's TTS Plus usage was not displayed.");
             capture?.Invoke();
+            AccountTabs.SelectedItem = PlusTab;
+            await LoadPlus();
+            if (!SaveMusicBonus.IsEnabled || MusicBonus.Text != "0" || !MusicAllowance.Text.Contains("30 MB"))
+                throw new InvalidOperationException("The Plus tab did not load the selected account's music allowance.");
+            MusicBonus.Text = "47";
+            await SaveMusicAllowance();
+            if (PlusNotice.Text != "Allowance saved." || !MusicAllowance.Text.Contains("77 MB"))
+                throw new InvalidOperationException("The Plus tab did not save the music allowance.");
+            UserList.SelectedIndex = 2;
+            await LoadPlus();
+            if (MusicBonus.Text != "0") throw new InvalidOperationException("The previous account's allowance leaked to another account.");
+            UserList.SelectedIndex = 1;
+            await LoadPlus();
+            if (MusicBonus.Text != "47") throw new InvalidOperationException("The saved account allowance did not persist.");
             var tools = new FeatureAdminWindow(fixture);
             try { await tools.VerifyNavigation(); }
             finally { tools.Close(); }

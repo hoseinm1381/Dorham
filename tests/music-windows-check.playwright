@@ -1,0 +1,37 @@
+async (page) => {
+  const local = await page.evaluate(async () => {
+    const desktop = window.desktop;
+    return { origin: location.origin, server: await desktop.getServer(), info: await desktop.getAppInfo() };
+  });
+  if (local.origin !== 'https://localhost' || local.server !== 'http://127.0.0.1:17889' || local.info.platform !== 'windows' || local.info.version !== '1.4.1') {
+    throw new Error('This check requires the isolated Windows music fixture');
+  }
+  const button = label => page.getByRole('button', { name: label, exact: true });
+  await button('Create an account').click();
+  const name = 'MusicWindows' + Date.now().toString(36);
+  await page.getByLabel('Display name', { exact: true }).fill('Windows music test');
+  await page.getByLabel('Username', { exact: true }).fill(name);
+  await page.getByLabel('Password', { exact: true }).fill('Music-Windows-local-fixture-only');
+  await button('Create account').click();
+  const recovery = page.getByRole('dialog', { name: 'Protect your account', exact: true });
+  await recovery.getByLabel('I have saved my recovery codes', { exact: true }).check();
+  await recovery.getByRole('button', { name: 'Continue to Dorham' }).click();
+  await button('Create a server').first().click();
+  await page.getByLabel('Server name', { exact: true }).fill('Windows music test');
+  await button('Create space').click();
+  await button('Lounge').click();
+  await page.locator('.voice-panel-actions').getByRole('button', { name: 'Open music player', exact: true }).click();
+  const music = page.getByRole('dialog', { name: 'Dorham Music', exact: true });
+  await music.getByText('Official playlist', { exact: true }).waitFor();
+  await music.getByRole('textbox', { name: 'Play from an audio or playlist link', exact: true }).fill('https://www.kozco.com/tech/piano2-CoolEdit.mp3');
+  await music.getByRole('button', { name: 'Play link', exact: true }).click();
+  await music.getByText('Playing', { exact: true }).waitFor();
+  await music.getByRole('button', { name: 'Mute for me', exact: true }).click();
+  await music.getByRole('button', { name: 'Unmute for me', exact: true }).waitFor();
+  await page.screenshot({ path: 'output/playwright/music-windows-preview.png' });
+  await button('Close music player').click();
+  await page.locator('.voice-mini-members .music-bot-row').first().waitFor();
+  await button('Disconnect voice').first().click();
+  return { ...local, directLink: 'playing', muteControl: true, botInRoster: true };
+}
+

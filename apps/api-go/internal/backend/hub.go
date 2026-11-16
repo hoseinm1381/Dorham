@@ -18,6 +18,7 @@ type peer struct {
 	voiceChannel, gameWatching, directoryKey, roomKey string
 	voiceEpoch                                        string
 	voiceRecoverable                                  bool
+	voiceNativeKeepalive                              bool
 	windowStart                                       int64
 	eventCount                                        int
 	latency                                           M
@@ -28,6 +29,7 @@ type Hub struct {
 	server         *sio.Server
 	mu             sync.RWMutex
 	peers          map[string]*peer
+	capacity       instanceCapacity
 	voiceResumeKey string
 	detachedVoice  map[string]detachedVoice
 	voiceRefresh   revisionFlight
@@ -51,9 +53,19 @@ func NewHub(a *App) *Hub {
 	recovery.SetMaxDisconnectionDuration(120000)
 	recovery.SetSkipMiddlewares(false)
 	opts.SetConnectionStateRecovery(recovery)
-	return &Hub{a: a, server: sio.NewServer(nil, opts), peers: map[string]*peer{}, voiceResumeKey: Token(), detachedVoice: map[string]detachedVoice{}}
+	return &Hub{a: a, server: sio.NewServer(nil, opts), peers: map[string]*peer{}, capacity: readCapacity(a.DB, a.C), voiceResumeKey: Token(), detachedVoice: map[string]detachedVoice{}}
 }
+
+func (h *Hub) updateCapacity(capacity instanceCapacity) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if capacity.Revision > h.capacity.Revision {
+		h.capacity = capacity
+	}
+}
+
 func (h *Hub) Register() {
+	h.a.Route("POST", "/api/v1/voice/native-heartbeat", false, h.nativeVoiceHeartbeat)
 	h.a.Mux.Handle("/socket.io/", h.server.ServeHandler(nil))
 	h.server.Use(func(s *sio.Socket, next func(*sio.ExtendedError)) {
 		h.mu.Lock()
@@ -85,7 +97,10 @@ func (h *Hub) Register() {
 			Check(Equal(Str(auth, "csrf"), Str(session, "csrf")), 403, "CSRF", "Invalid session proof.")
 		}
 		uid := Str(u, "id")
-		Check(h.Online(uid) || len(h.Users()) < h.a.C.MaxOnline, 409, "CAPACITY", "This instance is at its online capacity.")
+		h.mu.RLock()
+		full := int64(len(h.peers)) >= h.capacity.Connections
+		h.mu.RUnlock()
+		Check(!full, 409, "CAPACITY", "This instance is at its online capacity.")
 		s.SetData(&peer{socket: s, id: string(s.Id()), uid: uid, session: Str(session, "id"), windowStart: Now()})
 		next(nil)
 	})
@@ -102,15 +117,16 @@ func (h *Hub) Register() {
 			s.Disconnect(true)
 			return
 		}
-		h.peers[p.id] = p
-		h.workWG.Add(1)
-		h.mu.Unlock()
-		defer h.workWG.Done()
-		if len(h.Users()) > h.a.C.MaxOnline {
+		if int64(len(h.peers)) >= h.capacity.Connections {
+			h.mu.Unlock()
 			s.Emit("capacity", M{"message": "Online capacity reached."})
 			s.Disconnect(true)
 			return
 		}
+		h.peers[p.id] = p
+		h.workWG.Add(1)
+		h.mu.Unlock()
+		defer h.workWG.Done()
 		h.emit("presence", M{"userId": p.uid, "online": true})
 		h.safe(func() { h.a.Games.Presence(p.uid, true) })
 		h.handlers(p)
@@ -223,9 +239,15 @@ func (h *Hub) safe(fn func()) {
 }
 func (h *Hub) disconnected(p *peer, reason string) {
 	p.mu.Lock()
-	detached := detachedVoice{uid: p.uid, session: p.session, channel: p.voiceChannel, epoch: p.voiceEpoch, until: Now() + 30000}
+	detached := detachedVoice{uid: p.uid, session: p.session, channel: p.voiceChannel, epoch: p.voiceEpoch, until: Now() + 30000, native: p.voiceNativeKeepalive}
 	preserveVoice := p.voiceRecoverable && detached.epoch != "" && transientVoiceDisconnect(reason)
 	p.mu.Unlock()
+	if !preserveVoice && detached.native && detached.epoch != "" && reason == "server namespace disconnect" {
+		// An expired access token can close the WebView socket while the Android
+		// foreground service is still in the authenticated call.
+		preserveVoice = h.a.DB.One("SELECT id FROM sessions WHERE id=? AND native=1 AND access_expires<?", detached.session, Now()) != nil &&
+			nativeVoiceSessionActive(h.a.DB, detached.uid, detached.session, Now())
+	}
 	h.mu.Lock()
 	if h.peers[p.id] != p {
 		h.mu.Unlock()
@@ -305,6 +327,15 @@ func (h *Hub) Notify(kind string, payload any) {
 		h.emit(kind, payload)
 	}
 }
+func (h *Hub) musicChanged(channel string) {
+	h.refreshVoice()
+	for _, viewer := range h.Viewers() {
+		if Str(viewer, "channelId") == channel {
+			h.EmitSocket(Str(viewer, "socketId"), "music:changed", M{"channelId": channel})
+		}
+	}
+}
+
 func (h *Hub) refreshVoice() {
 	h.mu.Lock()
 	if h.closed {
@@ -475,9 +506,10 @@ func (h *Hub) handlers(p *peer) {
 		channel := VString(b, "channelId", 1, 80, false)
 		eligible := VBool(b, "eligible")
 		recoverable := b["recoverable"] != nil && VBool(b, "recoverable")
+		native := recoverable && B(b["nativeKeepalive"]) && nativeVoiceSessionActive(h.a.DB, p.uid, p.session, Now())
 		result := s.JoinVoice(p.uid, p.id, channel, eligible, p.session)
 		epoch := Str(result, "epoch")
-		h.bindVoice(p, channel, epoch, recoverable)
+		h.bindVoice(p, channel, epoch, recoverable, native)
 		if !p.socket.Connected() {
 			s.VoiceAction(p.uid, p.id, "leave", M{"epoch": epoch})
 			Fail(401, "UNAUTHENTICATED", "Voice connection closed.")
@@ -485,12 +517,16 @@ func (h *Hub) handlers(p *peer) {
 		if recoverable {
 			result["resumeToken"] = h.voiceResumeToken(p, channel, epoch)
 		}
+		if native {
+			result["nativeVoiceToken"] = p.session + "." + h.signNativeVoice(p.uid, p.session, channel, epoch)
+		}
 		return result
 	})
 	h.handle(p, "voice:resume", func(b M) any {
 		channel, epoch := h.validateVoiceResume(p, b)
 		result := s.ResumeVoice(p.uid, p.session, p.id, channel, epoch)
-		h.bindVoice(p, channel, epoch, true)
+		native := B(b["nativeKeepalive"]) && nativeVoiceSessionActive(h.a.DB, p.uid, p.session, Now())
+		h.bindVoice(p, channel, epoch, true, native)
 		return result
 	})
 	h.handle(p, "voice:leave", func(b M) any {
@@ -507,6 +543,7 @@ func (h *Hub) handlers(p *peer) {
 			p.voiceChannel = ""
 			p.voiceEpoch = ""
 			p.voiceRecoverable = false
+			p.voiceNativeKeepalive = false
 		}
 		p.mu.Unlock()
 		return result

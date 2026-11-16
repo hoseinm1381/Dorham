@@ -17,6 +17,7 @@ export class NativeTransport implements MediaTransport {
   private heartbeatAt = -Infinity;
   private nativePulseAt = -Infinity;
   private heartbeatBusy = false;
+  private nativeVoiceToken?: string;
   private leaving?: Promise<void>;
   private setListenOnly(value: boolean) { if (this.listenOnly === value) return; this.listenOnly = value; this.options.emit('listenOnly', value); if (value) this.options.emit('notice', listenOnlyNotice); }
   private heartbeat?: ReturnType<typeof setInterval>; private handles: PluginListenerHandle[] = []; private lease: Share | null = null;
@@ -47,7 +48,8 @@ export class NativeTransport implements MediaTransport {
     if (!current()) return;
     this.auxiliaryAudioSupported = credentials?.nativeScreenAudio === true;
     const joined = await NativeMedia.join({
-      selfId: this.options.userId, epoch: this.epoch, iceServers: this.iceServers, room, credentials,
+      selfId: this.options.userId, initialMusicVolume: this.options.initialMusicVolume?.() ?? .30, epoch: this.epoch, iceServers: this.iceServers, room, credentials,
+      ...(this.nativeVoiceToken && this.options.serverOrigin ? { backgroundVoice: { origin: this.options.serverOrigin, token: this.nativeVoiceToken } } : {}),
       muted: this.muted || this.listenOnly, deafened: this.deafened, recovering,
       language: globalThis.document?.documentElement.lang || 'en-US', channelName: this.options.channelName?.(room.channelId) || 'Voice channel',
     });
@@ -72,6 +74,7 @@ export class NativeTransport implements MediaTransport {
       waiting: () => options.emit('status', 'Reconnecting voice…'),
       restore: ({ room }, current) => this.restoreVoice(room, current),
       ended: () => this.endRecovery(),
+      mayWait: async () => Boolean(this.nativeVoiceToken && (await NativeMedia.voiceKeepaliveStatus()).alive),
     });
     options.socket.on('voice:move', this.onMoved);
     options.socket.on('voice:room', this.onRoom);
@@ -113,9 +116,10 @@ export class NativeTransport implements MediaTransport {
       checkCurrent();
       this.setListenOnly(prepared?.microphoneAvailable === false);
       this.audioSupported = prepared?.sharedAudio === true;
-      const result = await ack(this.options.socket, 'voice:join', { channelId, eligible: true, recoverable: true });
+      const result = await ack(this.options.socket, 'voice:join', { channelId, eligible: true, recoverable: true, ...(this.options.serverOrigin ? { nativeKeepalive: true } : {}) });
       checkCurrent();
       this.epoch = result.epoch;
+      this.nativeVoiceToken = this.options.serverOrigin ? result.nativeVoiceToken : undefined;
       this.room = result.room;
       this.iceServers = result.iceServers;
       this.heartbeatAt = performance.now();
@@ -126,7 +130,7 @@ export class NativeTransport implements MediaTransport {
       checkCurrent();
       await this.state();
       checkCurrent();
-      this.recovery.remember(channelId, result);
+      this.recovery.remember(channelId, result, Boolean(this.nativeVoiceToken));
       this.options.emit('room', this.room); this.options.emit('status', 'Native voice connected');
       if (!this.options.socket.connected) this.recovery.request();
     } catch (e) { if (current()) await this.leave(); throw e; } finally { if (current()) this.joining = false; }
@@ -183,6 +187,7 @@ export class NativeTransport implements MediaTransport {
     this.connected = false;
     this.channelId = null;
     this.epoch = '';
+    this.nativeVoiceToken = undefined;
     this.setListenOnly(false);
     clearInterval(this.heartbeat);
     this.heartbeatBusy = false;

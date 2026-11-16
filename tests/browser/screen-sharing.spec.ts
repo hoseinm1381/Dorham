@@ -6,7 +6,7 @@ async function register(p:Page,name:string){await p.goto('/');await p.getByRole(
 async function api(p:Page,route:string,body?:any){return p.evaluate(async({route,body})=>{const me=await(await fetch('/api/v1/auth/me')).json(),r=await fetch('/api/v1'+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf},body:body?JSON.stringify({requestId:crypto.randomUUID(),...body}):undefined});if(!r.ok)throw Error(await r.text());return r.json();},{route,body});}
 async function instrument(p:Page){await p.addInitScript(()=>{
   const Peer=RTCPeerConnection;(window as any).__sharePeers=[];(window as any).RTCPeerConnection=new Proxy(Peer,{construct(T,args){const pc=new T(args[0]);(window as any).__sharePeers.push(pc);return pc;}});
-  (window as any).__captures=[];navigator.mediaDevices.getDisplayMedia=async constraints=>{(window as any).__captures.push(constraints);if((window as any).__cancelCapture)throw new DOMException('Capture cancelled','NotAllowedError');const canvas=document.createElement('canvas');canvas.width=640;canvas.height=360;const c=canvas.getContext('2d')!;let n=0;const timer=setInterval(()=>{c.fillStyle=n++%2?'#9b7fec':'#3cb59d';c.fillRect(0,0,640,360);c.fillStyle='#fff';c.fillText(String(n),n%500,100);},33),stream=canvas.captureStream(30);if(constraints?.audio){const audio=new AudioContext(),tone=audio.createOscillator(),gain=audio.createGain(),out=audio.createMediaStreamDestination();tone.frequency.value=640;gain.gain.value=.04;tone.connect(gain).connect(out);tone.start();void audio.resume();stream.addTrack(out.stream.getAudioTracks()[0]);stream.getVideoTracks()[0].addEventListener('ended',()=>{tone.stop();void audio.close();});}stream.getTracks()[0].addEventListener('ended',()=>clearInterval(timer));return stream;};
+  (window as any).__captures=[];navigator.mediaDevices.getDisplayMedia=async constraints=>{(window as any).__captures.push(constraints);if((window as any).__cancelCapture)throw new DOMException('Capture cancelled','NotAllowedError');const canvas=document.createElement('canvas');canvas.width=640;canvas.height=360;const c=canvas.getContext('2d')!;let n=0;const timer=setInterval(()=>{c.fillStyle=n++%2?'#9b7fec':'#3cb59d';c.fillRect(0,0,640,360);c.fillStyle='#fff';c.fillText(String(n),n%500,100);},33),stream=canvas.captureStream(30);if(constraints?.audio&&!(window as any).__omitShareAudio){const audio=new AudioContext(),tone=audio.createOscillator(),gain=audio.createGain(),out=audio.createMediaStreamDestination();tone.frequency.value=640;gain.gain.value=.04;tone.connect(gain).connect(out);tone.start();void audio.resume();stream.addTrack(out.stream.getAudioTracks()[0]);stream.getVideoTracks()[0].addEventListener('ended',()=>{tone.stop();void audio.close();});}stream.getTracks()[0].addEventListener('ended',()=>clearInterval(timer));return stream;};
 });}
 async function limits(p:Page){return p.evaluate(()=>(window as any).__sharePeers.flatMap((pc:RTCPeerConnection)=>pc.getSenders().filter(sender=>sender.track?.kind==='video').flatMap(sender=>sender.getParameters().encodings.map(e=>({bitrate:e.maxBitrate,fps:e.maxFramerate})))));}
 
@@ -17,7 +17,11 @@ async function configure(p:Page, quality:string, bitrate:number, starting=false,
   await popup.getByRole('combobox',{name:'Screen resolution',exact:true}).selectOption(quality.startsWith('480')?'480':'720');
   await popup.getByRole('combobox',{name:'Screen FPS',exact:true}).selectOption(quality.endsWith('30')?'30':'15');
   await popup.getByRole('combobox',{name:'Screen bandwidth',exact:true}).selectOption(String(bitrate));
-  if(starting&&sound)await popup.getByRole('checkbox',{name:'Share sound',exact:true}).check();
+  if (starting) {
+    const shareSound = popup.getByRole('checkbox', { name: 'Share sound', exact: true });
+    await expect(shareSound).toBeChecked();
+    if (!sound) await shareSound.uncheck();
+  }
   await popup.getByRole('button',{name:starting?'Choose screen':'Apply sharing settings',exact:true}).click();
   await expect(popup).toBeHidden();
 }
@@ -48,6 +52,51 @@ test('sharing popup applies every bandwidth live without recapture and preserves
     await a.evaluate(()=>(window as any).__cancelCapture=true);await a.getByRole('button',{name:'Choose screen',exact:true}).click();await expect(a.getByRole('button',{name:'Choose screen',exact:true})).toBeEnabled();await expect.poll(async()=>(await api(a,`/voice/${channel.id}`)).shares.length).toBe(0);
     expect(errors).toEqual([]);await writeFile(`artifacts/evidence/v075-screen-sharing-${withAudio?'sfu':'mesh'}-browser.json`,JSON.stringify({transport:process.env.MEDIA_TRANSPORT||'mesh',popupOnly:true,startingChoiceHonored:true,bandwidths:results,sharedAudioWithinBudget:withAudio,liveChangesNoRecapture:true,sameLease:true,rewatchKeepsLimit:true,persisted:true,cancelReleasesLease:true,mobileNoOverflow:true,errors},null,2));
   }finally{await Promise.allSettled(contexts.map(c=>c.close()));}
+});
+
+test('browser keeps sharing and briefly warns when the picker returns video without sound', async ({ page }) => {
+  await instrument(page);
+  await register(page, 'SoundDefault' + Date.now().toString().slice(-7));
+  await api(page, '/servers', { name: 'Browser share sound' });
+  await page.getByRole('button', { name: 'Open Browser share sound', exact: true }).click();
+  await page.getByRole('button', { name: 'Lounge', exact: true }).click();
+
+  const startShare = async (audioAvailable: boolean, shareAudio = true) => {
+    await page.evaluate(available => { (window as any).__omitShareAudio = !available; }, audioAvailable);
+    await page.getByRole('button', { name: 'Share screen', exact: true }).click();
+    const setup = page.getByRole('dialog', { name: 'Screen sharing', exact: true });
+    const sound = setup.getByRole('checkbox', { name: 'Share sound', exact: true });
+    await expect(sound).toBeChecked();
+    if (!shareAudio) await sound.uncheck();
+    await setup.getByRole('button', { name: 'Choose screen', exact: true }).click();
+    await expect(setup).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Stop sharing', exact: true })).toBeVisible();
+  };
+  const stopShare = async () => {
+    await page.getByRole('button', { name: 'Stop sharing', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Share screen', exact: true })).toBeEnabled();
+  };
+  const channel = (await api(page, '/bootstrap')).channels.find((item: any) => item.kind === 'voice');
+  const audioInLease = async () => (await api(page, `/voice/${channel.id}`)).shares[0]?.includeAudio;
+  const hint = page.getByRole('status').filter({ hasText: 'Sharing without sound. Enable audio in the browser picker next time.' });
+
+  await startShare(false);
+  await expect(hint).toBeVisible({ timeout: 1500 });
+  await expect.poll(audioInLease).toBe(false);
+  await expect(hint).toBeHidden({ timeout: 3500 });
+  await expect(page.getByRole('button', { name: 'Stop sharing', exact: true })).toBeVisible();
+  await stopShare();
+
+  await startShare(true);
+  await expect.poll(audioInLease).toBe(true);
+  await expect(hint).toHaveCount(0);
+  await stopShare();
+
+  await startShare(false, false);
+  await expect.poll(audioInLease).toBe(false);
+  await expect(hint).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__captures.map((capture: DisplayMediaStreamOptions) => Boolean(capture.audio)))).toEqual([true, true, false]);
+  await stopShare();
 });
 
 test('phone web viewer keeps playing across rotation and expands without browser fullscreen', async ({ browser }) => {
