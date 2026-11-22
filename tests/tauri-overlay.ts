@@ -43,7 +43,7 @@ export async function proveOverlay(main: Page, server: string, token: string, di
   };
   const configure = (values: boolean[]) => main.evaluate(async states => {
     for (const enabled of states) {
-      await window.desktop!.configureOverlay!({ enabled, position: 'bottom-right' });
+      await window.desktop!.configureOverlay!({ enabled, position: 'bottom-right', opacity: 60 });
     }
   }, values);
   const assertShown = async () => {
@@ -60,6 +60,7 @@ export async function proveOverlay(main: Page, server: string, token: string, di
     await responsive();
   };
 
+  expect(await main.evaluate(() => window.desktop!.getOverlay!())).toMatchObject({ enabled: true, opacity: 60 });
   await configure([false]);
   await join();
   await expect(main.locator('.gaming-voice')).toBeVisible();
@@ -67,6 +68,15 @@ export async function proveOverlay(main: Page, server: string, token: string, di
   await configure([true]);
   // The preference event triggers a renderer overlay update on a short timer.
   await expect.poll(async () => { await responsive(); return overlays().length; }, { timeout: 15000 }).toBe(1);
+  await assertShown();
+  await main.evaluate(() => window.desktop!.configureOverlay!({ enabled: true, position: 'bottom-right', opacity: 25 }));
+  await expect(overlays()[0].locator('body')).toHaveCSS('opacity', '0.25');
+  await main.evaluate(() => window.desktop!.updateOverlay!({ channel: 'Lounge', language: 'en-US', sharing: true, members: [{ name: 'Fixture viewer', muted: true, deafened: false, serverMuted: false, speaking: false, watching: true }] }));
+  await expect(overlays()[0].locator('#audience')).toContainText('Stream viewers · 1');
+  await expect(overlays()[0].locator('.member')).toContainText('Fixture viewer');
+  await expect(overlays()[0].locator('.member [data-icon="eye-on"]')).toBeVisible();
+  await configure([false]);
+  await configure([true]);
   await assertShown();
   const pickerOpened = main.context().waitForEvent('page', { timeout: 15000 });
   const share = main.evaluate(async () => {

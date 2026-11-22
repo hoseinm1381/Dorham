@@ -22,6 +22,7 @@ export type MusicState = {
   disconnected?: boolean;
   repeat: 'off' | 'track' | 'queue';
   volume: number;
+  lowBandwidth?: boolean;
   autoplay?: string;
   policy: MusicPolicy;
   message?: string;

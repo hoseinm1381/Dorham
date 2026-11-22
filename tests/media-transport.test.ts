@@ -1,5 +1,6 @@
 import { it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { ConnectionQuality, RoomEvent, Track, VideoQuality, supportsVP9 } from 'livekit-client';
 vi.mock('livekit-client', async importOriginal => {
   const { EventEmitter } = await import('node:events');
   const original = await importOriginal<typeof import('livekit-client')>();
@@ -14,7 +15,7 @@ vi.mock('livekit-client', async importOriginal => {
     connect = vi.fn(async () => { this.state = 'connected'; }); startAudio = async () => {};
     disconnect = async () => { this.state = 'disconnected'; };
   }
-  return { ...original, Room };
+  return { ...original, Room, supportsVP9: vi.fn(() => false) };
 });
 import { LiveKitTransport } from '../packages/media/src/livekit';
 afterEach(() => vi.unstubAllGlobals());
@@ -30,10 +31,137 @@ function fixture() {
   const room = { channelId: 'room', members: [{user:{id:'member'},serverMuted:false,serverDeafened:false}],shares:[],transport:'livekit' };
   return {socket,events,transport,release:()=>joined(null,{ok:true,data:{room}})};
 }
+it('keeps watched video enabled at low quality when connection quality is lost', async () => {
+  const { transport, socket, release } = fixture();
+  try {
+    const joining = transport.join('room');
+    release();
+    await joining;
+    const media = (transport as any).media;
+    const publication = (source: Track.Source) => {
+      const pub = { source, isDesired: false, isSubscribed: false, setSubscribed: vi.fn((wanted: boolean) => { pub.isDesired = wanted; }),
+        setEnabled: vi.fn(), setVideoQuality: vi.fn(), setVideoFPS: vi.fn() };
+      return pub;
+    };
+    const video = publication(Track.Source.ScreenShare);
+    const sound = publication(Track.Source.ScreenShareAudio);
+    const microphone = publication(Track.Source.Microphone);
+    const trackPublications = new Map([['video', video], ['sound', sound], ['mic', microphone]]);
+    media.remoteParticipants.set('friend:epoch', { identity: 'friend:epoch', trackPublications, videoTrackPublications: new Map(), setVolume: vi.fn() });
+    const share = { id: 'screen', userId: 'friend', includeAudio: true } as Parameters<typeof transport.subscribe>[0];
+    socket.emit('voice:room', { ...transport.room, shares: [share] });
+    media.localParticipant.connectionQuality = ConnectionQuality.Lost;
+    media.emit(RoomEvent.ConnectionQualityChanged, ConnectionQuality.Lost, media.localParticipant);
+    await transport.subscribe(share, true);
+    expect(video.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(video.setEnabled).toHaveBeenLastCalledWith(true);
+    expect(video.setEnabled).not.toHaveBeenCalledWith(false);
+    expect(video.setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+    expect(video.setVideoFPS).toHaveBeenLastCalledWith(4);
+    expect(sound.setEnabled).toHaveBeenLastCalledWith(false);
+    expect(microphone.setEnabled).not.toHaveBeenCalled();
+    Object.assign(video, { simulcasted: false });
+    media.emit(RoomEvent.TrackPublished);
+    expect(video.setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+    expect(video.setVideoFPS).toHaveBeenLastCalledWith(4);
+    await transport.subscribe(share, false);
+    // A viewer may close before the SFU acknowledges the initial subscription.
+    expect(video.setSubscribed).toHaveBeenLastCalledWith(false);
+  } finally { await transport.destroy(); }
+});
 it('does not treat the socket initial connection as a second overlapping SFU join', async () => {
   const f = fixture(); try {
     const joining = f.transport.join('room'); f.socket.emit('connect'); f.release(); await joining;
     expect(f.events.filter(e => e === 'voice:join')).toHaveLength(1); expect(f.events).not.toContain('voice:leave'); expect(f.transport.room?.channelId).toBe('room');
+  } finally { await f.transport.destroy(); }
+});
+it('simulates independent uplink and downlink congestion through the screen transport', async () => {
+  const f = fixture();
+  try {
+    const joining = f.transport.join('room');
+    f.release();
+    await joining;
+    const transport = f.transport as any, media = transport.media;
+    const share = { id: 'remote', userId: 'friend', includeAudio: true } as Parameters<typeof f.transport.subscribe>[0];
+    let uplink = 700000, received = 0, lost = 0;
+    const baseline = { maxBitrate: 450000, maxFramerate: 30, scaleResolutionDownBy: 1, active: true };
+    let encoding = { ...baseline };
+    const sender = {
+      getParameters: () => ({ encodings: [{ ...encoding }] }),
+      setParameters: vi.fn(async ({ encodings }: { encodings: typeof baseline[] }) => {
+        expect(encodings).toHaveLength(1);
+        encoding = encodings[0];
+      }),
+    };
+    transport.lease = { id: 'local' };
+    const localPublication = {
+      options: { screenShareEncoding: { maxBitrate: 450000, maxFramerate: 30 } },
+      videoTrack: {
+        sender,
+        mediaStreamTrack: { getSettings: () => ({ width: 1280, height: 720 }) },
+        getRTCStatsReport: async () => new Map<string, unknown>([
+          ['transport', { type: 'transport', selectedCandidatePairId: 'selected' }],
+          ['selected', { type: 'candidate-pair', availableOutgoingBitrate: uplink }],
+          ['unused', { type: 'candidate-pair', availableOutgoingBitrate: 9000000 }],
+        ]),
+      },
+    };
+    media.localParticipant.getTrackPublication = (source: Track.Source) =>
+      source === Track.Source.ScreenShare ? localPublication : undefined;
+    const remote = (source: Track.Source) => ({
+      source, trackSid: source, isDesired: false,
+      setSubscribed(wanted: boolean) { this.isDesired = wanted; },
+      setVideoQuality: vi.fn(), setVideoFPS: vi.fn(), setEnabled: vi.fn(),
+      track: source === Track.Source.ScreenShare ? {
+        getRTCStatsReport: async () => new Map([['incoming', {
+          id: 'incoming', type: 'inbound-rtp', kind: 'video', packetsReceived: received, packetsLost: lost,
+        }]]),
+      } : undefined,
+    });
+    const video = remote(Track.Source.ScreenShare), sound = remote(Track.Source.ScreenShareAudio);
+    const mic = remote(Track.Source.Microphone);
+    media.remoteParticipants.set('friend:epoch', { identity: 'friend:epoch', setVolume: vi.fn(),
+      trackPublications: new Map([['video', video], ['sound', sound], ['mic', mic]]),
+      audioTrackPublications: new Map([['mic', mic], ['sound', sound]]), videoTrackPublications: new Map([['video', video]]),
+    });
+    f.socket.emit('voice:room', { ...f.transport.room, shares: [share, { id: 'local', userId: 'member' }] });
+    await f.transport.subscribe(share, true);
+    const sample = async (packets = 100, drops = 0) => {
+      received += packets;
+      lost += drops;
+      await transport.sampleVoicePriority();
+    };
+    await sample();
+    expect(encoding).toEqual(baseline);
+    expect(video.setVideoFPS).toHaveBeenLastCalledWith(0);
+    uplink = 262000;
+    await sample();
+    expect(encoding).toMatchObject({ maxBitrate: 160000, maxFramerate: 14, scaleResolutionDownBy: 720 / 432 });
+    expect(video.setVideoFPS).toHaveBeenLastCalledWith(0);
+    uplink = 149000;
+    await sample();
+    expect(encoding).toMatchObject({ maxBitrate: 40000, maxFramerate: 6, scaleResolutionDownBy: 3 });
+    uplink = 700000;
+    await sample();
+    expect(encoding.maxBitrate).toBeGreaterThan(40000);
+    expect(encoding.maxBitrate).toBeLessThan(baseline.maxBitrate);
+    for (let i = 0; i < 10; i++) await sample();
+    expect(encoding).toEqual(baseline);
+    const writesBeforeViewerLoss = sender.setParameters.mock.calls.length;
+    await sample(95, 5);
+    expect(video.setVideoFPS).toHaveBeenLastCalledWith(10);
+    await sample(80, 20);
+    expect(video.setVideoFPS).toHaveBeenLastCalledWith(4);
+    expect(sound.setEnabled).toHaveBeenLastCalledWith(false);
+    expect(video.setEnabled).not.toHaveBeenCalledWith(false);
+    expect(mic.setEnabled).not.toHaveBeenCalled();
+    expect(sender.setParameters).toHaveBeenCalledTimes(writesBeforeViewerLoss);
+    await sample();
+    await sample();
+    expect(sound.setEnabled).toHaveBeenLastCalledWith(false);
+    await sample();
+    expect(video.setVideoFPS).toHaveBeenLastCalledWith(0);
+    expect(sound.setEnabled).toHaveBeenLastCalledWith(true);
   } finally { await f.transport.destroy(); }
 });
 it('a cancelled pending join cannot resurrect a voice room or start its heartbeat', async () => {
@@ -65,14 +193,21 @@ it('passes selected-window audio to native Chrome and publishes screen audio ind
     await f.transport.startShare('720p15', { includeAudio: true });
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ windowAudio: 'window', systemAudio: 'include', audio: expect.objectContaining({ restrictOwnAudio: true }), selfBrowserSurface: 'exclude' }));
     expect(participant.publishTrack).toHaveBeenCalledWith(video, expect.objectContaining({
-      source: 'screen_share', simulcast: true,
-      screenShareEncoding: { maxBitrate: 302000, maxFramerate: 15, priority: 'low' },
-      screenShareSimulcastLayers: [expect.objectContaining({ width: 320, height: 180, encoding: expect.objectContaining({ maxBitrate: 100000, maxFramerate: 4 }) })]
+      source: 'screen_share', videoCodec: 'vp8', simulcast: false, backupCodec: false,
+      screenShareEncoding: { maxBitrate: 402000, maxFramerate: 15, priority: 'low' },
     }));
     expect(participant.publishTrack).toHaveBeenCalledWith(audio, expect.objectContaining({ source: 'screen_share_audio', forceStereo: true, audioPreset: { maxBitrate: 48000 } }));
     await f.transport.stopShare(); expect(video.stop).toHaveBeenCalled(); expect(audio.stop).toHaveBeenCalled();
     published.clear(); await f.transport.startShare('720p15', { includeAudio: false });
     expect(capture).toHaveBeenLastCalledWith(expect.objectContaining({ windowAudio: 'exclude', systemAudio: 'exclude', audio: false }));
+    await f.transport.stopShare();
+    published.clear();
+    vi.stubGlobal('RTCRtpSender', {});
+    vi.mocked(supportsVP9).mockReturnValueOnce(true);
+    await f.transport.startShare('720p15', { includeAudio: false });
+    expect(participant.publishTrack).toHaveBeenLastCalledWith(video, expect.objectContaining({
+      videoCodec: 'vp9', simulcast: false, backupCodec: false,
+    }));
   } finally { await f.transport.destroy(); }
 });
 it('a stream sound gesture resumes suspended playback while mute never wakes it', async () => {
@@ -194,13 +329,13 @@ it('applies live screen limits and keeps the new bandwidth for later quality and
   const f=fixture();try{
     const transport=f.transport as any,media=transport.media,lease={id:'screen',policyRevision:1,maxFrameRate:30,includeAudio:true};transport.lease=lease;transport.options.screenPolicy={maxBitrate:1500000,maxFrameRate:30};
     (f.socket as any).timeout=()=>({emit:(name:string,_body:any,reply:any)=>reply(null,{ok:true,data:{lease:{...lease,policyRevision:2}}})});
-    let parameters:any={encodings:[{rid:'q',active:true,maxBitrate:100000,maxFramerate:4},{rid:'h',active:true,maxBitrate:302000,maxFramerate:15}]};
+    let parameters:any={encodings:[{active:true,maxBitrate:402000,maxFramerate:15}]};
     const sender={getParameters:()=>structuredClone(parameters),setParameters:vi.fn(async(value:any)=>{parameters=value;})};
     const track={sender,mediaStreamTrack:{applyConstraints:vi.fn(async()=>{})}},publication={videoTrack:track,options:{screenShareEncoding:{maxBitrate:402000,maxFramerate:15}}};media.localParticipant.getTrackPublication=()=>publication;
     await f.transport.setShareQuality('480p30',1500000);
-    expect(parameters.encodings).toEqual([{rid:'q',active:true,maxBitrate:100000,maxFramerate:4},{rid:'h',active:true,maxBitrate:1352000,maxFramerate:30}]);
-    expect(publication.options.screenShareEncoding).toEqual({maxBitrate:1352000,maxFramerate:30,priority:'low'});
-    await f.transport.setShareQuality('720p15');expect(parameters.encodings[1]).toMatchObject({maxBitrate:1352000,maxFramerate:15});expect(track.mediaStreamTrack.applyConstraints).toHaveBeenLastCalledWith(expect.objectContaining({height:{ideal:720,max:720}}));
+    expect(parameters.encodings).toEqual([{active:true,maxBitrate:1452000,maxFramerate:30,scaleResolutionDownBy:1}]);
+    expect(publication.options.screenShareEncoding).toEqual({maxBitrate:1452000,maxFramerate:30,priority:'low'});
+    await f.transport.setShareQuality('720p15');expect(parameters.encodings[0]).toMatchObject({maxBitrate:1452000,maxFramerate:15});expect(track.mediaStreamTrack.applyConstraints).toHaveBeenLastCalledWith(expect.objectContaining({height:{ideal:720,max:720}}));
   }finally{await f.transport.destroy();}
 });
 it('stops a partly applied screen when encoder changes fail instead of displaying a false applied limit',async()=>{

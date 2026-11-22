@@ -10,6 +10,7 @@ use std::sync::{
     mpsc,
 };
 use std::thread;
+use windows_version::OsVersion;
 
 const PACKET: usize = 7680;
 const MAX_PACKETS: usize = 6;
@@ -28,19 +29,7 @@ impl Audio {
         selection: &Selection,
         browser_pid: u32,
     ) -> Result<(Self, mpsc::Receiver<bool>), String> {
-        let owner = std::process::id().to_string();
-        let args = match selection.audio_scope {
-            AudioScope::Application => vec![
-                "include-window".into(),
-                selection.source.handle.to_string(),
-                owner,
-                selection.source.pid.to_string(),
-            ],
-            AudioScope::System if browser_pid != 0 => {
-                vec!["exclude-process".into(), browser_pid.to_string(), owner]
-            }
-            _ => return Err("Choose a supported Windows audio source first".into()),
-        };
+        let args = audio_arguments(selection, browser_pid, std::process::id(), OsVersion::current().build)?;
         let mut helper = Command::new(binary)
             .args(args)
             .creation_flags(NO_CONSOLE)
@@ -90,6 +79,26 @@ impl Audio {
     }
 }
 
+fn audio_arguments(selection: &Selection, browser_pid: u32, owner_pid: u32, build: u32) -> Result<Vec<String>, String> {
+        let owner = owner_pid.to_string();
+        Ok(match selection.audio_scope {
+            AudioScope::Application if build < 20348 => return Err("Application-only sound needs a newer Windows version".into()),
+            AudioScope::Application => vec![
+                "include-window".into(),
+                selection.source.handle.to_string(),
+                owner,
+                selection.source.pid.to_string(),
+            ],
+            AudioScope::System if build < 20348 => {
+                vec!["output-system".into(), "1".into(), owner]
+            }
+            AudioScope::System if browser_pid != 0 => {
+                vec!["exclude-process".into(), browser_pid.to_string(), owner]
+            }
+            _ => return Err("Choose a supported Windows audio source first".into()),
+        })
+}
+
 fn take_batch(queue: &mut VecDeque<[u8; PACKET]>) -> Vec<u8> {
     let packets = queue.len().min(MAX_BATCH_PACKETS);
     let mut result = Vec::with_capacity(packets * PACKET);
@@ -121,6 +130,26 @@ impl Drop for Audio {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_10_requires_explicit_computer_audio_and_never_broadens_application_audio() {
+        let mut selection = Selection {
+            source: super::super::sources::Source {
+                id: "owned-window".into(), name: "Game".into(),
+                kind: super::super::sources::Kind::Window, minimized: false,
+                handle: 555, pid: 123,
+            },
+            audio_scope: AudioScope::None,
+        };
+        assert!(audio_arguments(&selection, 200, 100, 19045).is_err());
+        selection.audio_scope = AudioScope::Application;
+        assert!(audio_arguments(&selection, 200, 100, 19045).is_err());
+        assert_eq!(audio_arguments(&selection, 200, 100, 22631).unwrap(), ["include-window", "555", "100", "123"]);
+        selection.audio_scope = AudioScope::System;
+        assert_eq!(audio_arguments(&selection, 0, 100, 19045).unwrap(), ["output-system", "1", "100"]);
+        assert_eq!(audio_arguments(&selection, 200, 100, 22631).unwrap(), ["exclude-process", "200", "100"]);
+        assert!(audio_arguments(&selection, 0, 100, 22631).is_err());
+    }
 
     #[test]
     fn audio_batches_preserve_fifo_order_and_leave_pending_packets() {

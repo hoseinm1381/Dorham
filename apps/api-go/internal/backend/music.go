@@ -67,6 +67,7 @@ type musicState struct {
 	Disconnected  bool            `json:"disconnected,omitempty"`
 	Repeat        string          `json:"repeat"`
 	Volume        int             `json:"volume"`
+	LowBandwidth  bool            `json:"lowBandwidth,omitempty"`
 	Autoplay      string          `json:"autoplay,omitempty"`
 	Policy        musicPolicy     `json:"policy"`
 	Votes         []string        `json:"votes"`

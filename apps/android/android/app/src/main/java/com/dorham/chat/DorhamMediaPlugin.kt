@@ -30,7 +30,6 @@ import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.room.participant.ConnectionQuality
 import io.livekit.android.room.participant.VideoTrackPublishOptions
-import io.livekit.android.room.track.CustomVideoPreset
 import io.livekit.android.room.track.Track as LiveTrack
 import io.livekit.android.room.track.VideoQuality
 import io.livekit.android.room.track.LocalVideoTrackOptions
@@ -85,6 +84,12 @@ class DorhamMediaPlugin : Plugin() {
     private var sfu: Room? = null
     private var sfuReady = false
     private var sfuScreenPriority = ScreenPlayback.FULL
+    private var dataSaver = false
+    private var outgoingScreenRatio = 1.0
+    private var appliedOutgoingScreenFormat: Triple<Int, Int, Int>? = null
+    private var receiveScreenFps: Int? = null
+    private var incomingScreenLoss = 0.0
+    private var incomingScreenPackets = emptyMap<String, Pair<Double, Double>>()
     private var screenRecoverySamples = 0
     private var microphoneAvailable = false
     private val microphoneLock = Mutex()
@@ -139,6 +144,7 @@ class DorhamMediaPlugin : Plugin() {
         val runningService = if (recovering) VoiceService.instance else null
         release(stopService = runningService == null); generation++; active = this; language = call.getString("language") ?: "en-US"; callName = call.getString("channelName") ?: "Dorham"; selfId = call.getString("selfId") ?: error("Missing identity").let { "" }; room = call.getObject("room") ?: JSONObject()
         volumes["dorham-music"] = call.getDouble("initialMusicVolume")?.coerceIn(0.0, 1.0) ?: 0.30; microphoneAvailable = canUseMicrophone(); muted = call.getBoolean("muted") ?: false; deafened = call.getBoolean("deafened") ?: false
+        dataSaver = call.getBoolean("dataSaver") == true
         if (runningService == null) {
             context.startForegroundService(Intent(context, VoiceService::class.java).putExtra("microphone", microphoneAvailable).putExtra("language", language).putExtra("channelName", callName))
         } else {
@@ -200,7 +206,11 @@ class DorhamMediaPlugin : Plugin() {
                     launch {
                         while (sfu === live && generation == joinGeneration) {
                             delay(2000)
-                            if (sfu === live && generation == joinGeneration) updateSfuScreenPriority(live.localParticipant.connectionQuality, sampled = true)
+                            if (sfu === live && generation == joinGeneration) {
+                                updateSfuScreenPriority(live.localParticipant.connectionQuality, sampled = true)
+                                sampleOutgoingScreen(live, joinGeneration)
+                                sampleIncomingScreen(live, joinGeneration)
+                            }
                         }
                     }
                 } catch (e: Exception) { if (sfu === live && generation == joinGeneration) release(stopService = !recovering); call.reject("SFU connection failed: ${e.message}") }
@@ -304,13 +314,15 @@ class DorhamMediaPlugin : Plugin() {
         }
     }
 
-    private enum class ScreenPlayback { FULL, REDUCED, PAUSED }
+    private enum class ScreenPlayback { FULL, REDUCED }
 
     private fun updateSfuScreenPriority(quality: ConnectionQuality, sampled: Boolean) {
+        val poor = quality == ConnectionQuality.LOST || quality == ConnectionQuality.POOR
+        val constrained = poor || dataSaver || incomingScreenLoss >= .035
+        emit("networkPressure", JSONObject().put("poor", poor))
         val pressure = when {
             watched.isEmpty() -> ScreenPlayback.FULL
-            quality == ConnectionQuality.LOST -> ScreenPlayback.PAUSED
-            quality == ConnectionQuality.POOR -> ScreenPlayback.REDUCED
+            constrained -> ScreenPlayback.REDUCED
             else -> ScreenPlayback.FULL
         }
         val previous = sfuScreenPriority
@@ -321,26 +333,90 @@ class DorhamMediaPlugin : Plugin() {
             }
             pressure == previous -> screenRecoverySamples = 0
             sampled && ++screenRecoverySamples == 3 -> {
-                sfuScreenPriority = ScreenPlayback.entries[previous.ordinal - 1]
+                sfuScreenPriority = ScreenPlayback.FULL
                 screenRecoverySamples = 0
             }
         }
-        if (previous == sfuScreenPriority) return
+        val previousFps = receiveScreenFps
+        val connectionFactor = when {
+            quality == ConnectionQuality.LOST -> .25
+            poor || dataSaver -> .55
+            else -> 1.0
+        }
+        val receiveFactor = minOf(connectionFactor, maxOf(0.0, 1 - incomingScreenLoss * 8))
+        receiveScreenFps = if (sfuScreenPriority == ScreenPlayback.FULL) null else maxOf(4, kotlin.math.round(16 * receiveFactor).toInt())
+        if (previous == sfuScreenPriority && previousFps == receiveScreenFps) return
         sfu?.remoteParticipants?.values?.forEach { participant ->
             participant.trackPublications.values.filterIsInstance<RemoteTrackPublication>().forEach(::applySfuScreenPriority)
         }
-        if (sfuScreenPriority == ScreenPlayback.PAUSED) emit("status", JSONObject().put("message", "Screen sharing paused to keep voice clear."))
-        else if (previous == ScreenPlayback.PAUSED) emit("status", JSONObject().put("message", "Voice connected"))
     }
+
+    private fun sampleIncomingScreen(live: io.livekit.android.room.Room, joinGeneration: Long) {
+        if (watched.isEmpty()) { incomingScreenPackets = emptyMap(); incomingScreenLoss = 0.0; return }
+        live.getSubscriberRTCStats { report ->
+            val counters = report.statsMap.values.filter { it.type == "inbound-rtp" && it.members["kind"] == "video" }.mapNotNull { stat ->
+                val received = (stat.members["packetsReceived"] as? Number)?.toDouble() ?: return@mapNotNull null
+                val lost = (stat.members["packetsLost"] as? Number)?.toDouble() ?: return@mapNotNull null
+                stat.id to (received to lost)
+            }.toMap()
+            main.post {
+                if (sfu !== live || generation != joinGeneration || watched.isEmpty()) return@post
+                incomingScreenLoss = counters.maxOfOrNull { (id, current) ->
+                    val previous = incomingScreenPackets[id]
+                    if (previous == null) 0.0 else {
+                        val received = current.first - previous.first
+                        val lost = current.second - previous.second
+                        if (received >= 0 && lost > 0) lost / (received + lost) else 0.0
+                    }
+                } ?: 0.0
+                incomingScreenPackets = counters
+                updateSfuScreenPriority(live.localParticipant.connectionQuality, sampled = false)
+            }
+        }
+    }
+
+    private fun sampleOutgoingScreen(live: io.livekit.android.room.Room, joinGeneration: Long) {
+        val lease = screenLease ?: return
+        live.getPublisherRTCStats { report ->
+            val stats = report.statsMap
+            val transport = stats.values.firstOrNull { it.type == "transport" && it.members["selectedCandidatePairId"] is String }
+            val pair = transport?.members?.get("selectedCandidatePairId") as? String
+            val estimate = pair?.let { (stats[it]?.members?.get("availableOutgoingBitrate") as? Number)?.toDouble() }
+            main.post {
+                if (sfu === live && generation == joinGeneration && screenLease == lease) {
+                    applyOutgoingScreen(live, estimate?.takeIf { it.isFinite() && it >= 0 }?.let { maxOf(0.0, it - 100_000) })
+                }
+            }
+        }
+    }
+
+    private fun applyOutgoingScreen(live: io.livekit.android.room.Room, available: Double?) {
+        val quality = live.localParticipant.connectionQuality
+        val poor = dataSaver || quality == ConnectionQuality.POOR || quality == ConnectionQuality.LOST
+        val ratio = ((available ?: screenBitrate.toDouble()) / screenBitrate).coerceIn(0.0, if (poor) .55 else 1.0)
+        outgoingScreenRatio = minOf(ratio, outgoingScreenRatio + .1)
+        val track = live.localParticipant.trackPublications.values.firstNotNullOfOrNull { it.track as? LocalScreencastVideoTrack } ?: return
+        val shortEdge = minOf(screenWidth, screenHeight)
+        val targetEdge = minOf(shortEdge, maxOf(240, kotlin.math.round(shortEdge * kotlin.math.sqrt(outgoingScreenRatio) / 16).toInt() * 16))
+        val scale = if (outgoingScreenRatio >= 1) 1.0 else targetEdge.toDouble() / shortEdge
+        val width = (screenWidth * scale).toInt().coerceAtLeast(2) / 2 * 2
+        val height = (screenHeight * scale).toInt().coerceAtLeast(2) / 2 * 2
+        val fps = minOf(screenFps, maxOf(4, kotlin.math.round(screenFps * Math.pow(outgoingScreenRatio, .75)).toInt()))
+        val format = Triple(width, height, fps)
+        if (appliedOutgoingScreenFormat == format) return
+        runCatching { track.capturer.changeCaptureFormat(width, height, fps) }
+            .onSuccess { appliedOutgoingScreenFormat = format }
+    }
+
 
     private fun applySfuScreenPriority(publication: RemoteTrackPublication) {
         if (!publication.subscribed) return
         val full = sfuScreenPriority == ScreenPlayback.FULL
         when (publication.source) {
             LiveTrack.Source.SCREEN_SHARE -> {
-                publication.setVideoQuality(if (full) VideoQuality.HIGH else VideoQuality.LOW)
-                publication.setVideoFps(if (full) null else 4)
-                publication.setEnabled(sfuScreenPriority != ScreenPlayback.PAUSED)
+                publication.setVideoQuality(VideoQuality.HIGH)
+                publication.setVideoFps(receiveScreenFps)
+                publication.setEnabled(true)
             }
             LiveTrack.Source.SCREEN_SHARE_AUDIO -> publication.setEnabled(full)
             else -> {}
@@ -375,6 +451,7 @@ class DorhamMediaPlugin : Plugin() {
         if (Build.VERSION.SDK_INT >= 31) require(audio.setCommunicationDevice(target)) { "Could not change audio route" } else { audio.stopBluetoothSco(); audio.isBluetoothScoOn = bluetooth; audio.isSpeakerphoneOn = target.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER; if (bluetooth) audio.startBluetoothSco() }; emitRoutes(); call.resolve()
     }
     @PluginMethod fun setStreamVolume(call: PluginCall) = ui(call) { val lease = call.getString("leaseId") ?: ""; streamVolumes[lease] = (call.getDouble("volume") ?: 1.0).coerceIn(0.0, 2.0); updatePeers(); call.resolve() }
+    @PluginMethod fun setDataSaver(call: PluginCall) = ui(call) { dataSaver = call.getBoolean("enabled") == true; sfu?.let { updateSfuScreenPriority(it.localParticipant.connectionQuality, sampled = false) }; call.resolve() }
     @PluginMethod fun setVideoView(call: PluginCall) = ui(call) { require(active === this) { "Join voice first" }; videoViews.update(call.data); call.resolve() }
     @PluginMethod fun removeVideoView(call: PluginCall) = ui(call) { videoViews.remove(call.getString("id") ?: ""); call.resolve() }
     fun visibility(visible: Boolean) { main.post { videoViews.visibility(visible) } }
@@ -382,33 +459,33 @@ class DorhamMediaPlugin : Plugin() {
     fun stopShareFromSystem() { main.post { stopCapture(); emit("captureStopped", JSONObject()) } }
     private fun shareSettings(call: PluginCall) {
         val quality = call.getString("quality") ?: "720p15"
-        require(quality in listOf("480p15", "480p30", "720p15", "720p30", "1080p15")) { "Unsupported screen quality" }
-        val width = when (quality) { "1080p15" -> 1920; "480p15", "480p30" -> 854; else -> 1280 }
+        require(quality in listOf("480p15", "480p30", "720p15", "720p30", "1080p15", "1080p30")) { "Unsupported screen quality" }
+        val width = when (quality) { "1080p15", "1080p30" -> 1920; "480p15", "480p30" -> 854; else -> 1280 }
         val height = when (width) { 1920 -> 1080; 854 -> 480; else -> 720 }
         screenWidth = (call.getInt("width") ?: width).coerceIn(160, width)
         screenHeight = (call.getInt("height") ?: height).coerceIn(90, height)
         val display = activity.resources.displayMetrics
         val dimensions = AndroidMediaPolicy.captureSize(maxOf(screenWidth, screenHeight), display.widthPixels, display.heightPixels)
         screenWidth = dimensions.first; screenHeight = dimensions.second
-        screenFps = (call.getInt("fps") ?: if (quality.endsWith("15")) 15 else 30).coerceIn(1, if (quality == "1080p15") 15 else 30)
+        screenFps = (call.getInt("fps") ?: if (quality.endsWith("15")) 15 else 30).coerceIn(1, if (quality.endsWith("15")) 15 else 30)
+        appliedOutgoingScreenFormat = null
         screenBitrate = (call.getInt("bitrate") ?: 800000).coerceIn(64000, 1500000)
         sfu?.localParticipant?.let { participant ->
             participant.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(isScreencast = true, captureParams = VideoCaptureParameter(screenWidth, screenHeight, screenFps))
             val options = sfuShareOptions()
             participant.screenShareTrackPublishDefaults = participant.screenShareTrackPublishDefaults.copy(
                 videoEncoding = options.videoEncoding, simulcast = options.simulcast, videoCodec = options.videoCodec,
-                simulcastLayers = options.simulcastLayers,
+                backupCodec = null, simulcastLayers = emptyList(),
             )
         }
     }
     private fun sfuShareOptions(): VideoTrackPublishOptions {
-        val fallback = minOf(100_000, screenBitrate / 4)
         return VideoTrackPublishOptions(
-            videoEncoding = VideoEncoding(screenBitrate - fallback, screenFps),
-            simulcast = true,
+            videoEncoding = VideoEncoding(screenBitrate, screenFps),
+            simulcast = false,
             videoCodec = "vp8",
+            backupCodec = null,
             source = LiveTrack.Source.SCREEN_SHARE,
-            simulcastLayers = listOf(CustomVideoPreset(VideoCaptureParameter(320, 180, 4), VideoEncoding(fallback, 4))),
         )
     }
     @PluginMethod fun setShareQuality(call: PluginCall) = ui(call) {
@@ -456,6 +533,8 @@ class DorhamMediaPlugin : Plugin() {
     @PluginMethod fun stopShare(call: PluginCall) = ui(call) { stopCapture(); call.resolve() }
     private fun stopCapture() {
         pendingProjectionGeneration = -1
+        outgoingScreenRatio = 1.0
+        appliedOutgoingScreenFormat = null
         screenAudio?.close(); screenAudio = null
         if (screenLease == null && capturer == null) return
         screenLease = null; peers.values.forEach { it.screenSender?.setTrack(null, false) }; screenTrack?.dispose(); screenTrack = null
@@ -512,6 +591,9 @@ class DorhamMediaPlugin : Plugin() {
         voiceKeepalive.stop()
         sfuScreenPriority = ScreenPlayback.FULL
         screenRecoverySamples = 0
+        receiveScreenFps = null
+        incomingScreenLoss = 0.0
+        incomingScreenPackets = emptyMap()
         speechPlayer.stop(); soundboardPlayer.stop(); generation++; videoViews.clear(); watched.clear(); streamVolumes.clear(); speakingStates.clear(); closeViewer(); main.removeCallbacks(meter); stopCapture(); peers.values.forEach { it.pc.close(); it.pc.dispose() }; peers.clear(); microphone?.dispose(); microphone = null; audioSource?.dispose(); audioSource = null; factory?.dispose(); factory = null; egl?.release(); egl = null; sfuReady = false; sfu?.disconnect(); sfu?.release(); sfu = null; sfuVideos.clear()
         networkCallback?.let { try { context.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } catch (_: Exception) {} }; networkCallback = null
         val audio = context.getSystemService(AudioManager::class.java); audio.unregisterAudioDeviceCallback(routesCallback); audioFocus?.let { audio.abandonAudioFocusRequest(it) }; audioFocus = null; if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice() else { audio.stopBluetoothSco(); audio.isBluetoothScoOn = false; audio.isSpeakerphoneOn = previousSpeaker }; if (active === this) audio.mode = previousAudioMode

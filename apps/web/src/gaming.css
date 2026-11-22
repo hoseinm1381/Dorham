@@ -60,3 +60,7 @@ dialog.modal-backdrop::backdrop { background:#0009; }
 .gaming-voice .stream-view:fullscreen .stream-volume { flex-shrink:0; min-height:44px; flex-wrap:wrap; }
 .gaming-voice .stream-view:fullscreen .stream-volume input { width:clamp(100px,25vw,320px); }
 .stream-no-audio { flex-shrink:0; font-size:11px; color:#b6bdd0; padding:6px 8px; margin:0; }
+
+.stream-audience{position:relative;flex:none}.stream-audience summary{display:flex;align-items:center;gap:5px;list-style:none;cursor:pointer;padding:5px 8px;border-radius:8px;color:var(--accent);background:var(--surface-hover,rgba(125,200,190,.10))}.stream-audience summary::-webkit-details-marker{display:none}.stream-audience-list{position:absolute;inset-block-start:calc(100% + 6px);inset-inline-end:0;z-index:4;min-width:160px;max-width:min(230px,70vw);max-height:220px;overflow:auto;border:1px solid var(--line,#3a3947);background:var(--panel,#242431);color:var(--text,#f0efff);border-radius:10px;padding:10px 12px;box-shadow:0 6px 24px #0005}.stream-audience-list strong,.stream-audience-list small{display:block}.stream-audience-list ul{margin:7px 0 0;padding-inline-start:18px;overflow-wrap:anywhere}
+
+.share-list>div:has(.stream-audience[open]){flex-wrap:wrap;align-items:flex-start}.stream-audience-list{position:static;margin-top:6px}

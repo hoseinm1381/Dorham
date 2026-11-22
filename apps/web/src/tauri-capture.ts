@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { NativeVideo, ScreenCaptureSettings } from '../../../packages/media/src/screen-capture';
 
 type Selection = NativeVideo['selection'] & { id: number };
@@ -47,6 +48,9 @@ export async function captureNativeVideo(settings: ScreenCaptureSettings, audio:
   let sharedBuffer: ArrayBuffer | undefined;
   let bufferArrived: (() => void) | undefined;
   let closed = false;
+  let unlisten: (() => void) | undefined;
+  let wake: (() => void) | undefined;
+  let pending = true;
   const onBuffer = (event: SharedVideoEvent, buffer: ArrayBuffer) => {
     if (closed || !useShared || event.additionalData?.dorhamVideoId !== selection.id || event.additionalData.capacity !== buffer.byteLength) return false;
     if (sharedBuffer) webview?.releaseBuffer?.(sharedBuffer);
@@ -65,6 +69,8 @@ export async function captureNativeVideo(settings: ScreenCaptureSettings, audio:
     if (closed) return;
     closed = true;
     stopped.abort();
+    unlisten?.();
+    wake?.();
     releaseShared();
     void invoke('capture_stop', { id: selection.id }).catch(() => {});
     void writer.abort().catch(() => {}).finally(() => writer.releaseLock());
@@ -97,29 +103,41 @@ export async function captureNativeVideo(settings: ScreenCaptureSettings, audio:
       throw new Error('Windows returned an invalid capture frame.');
     }
     const videoFrame = new VideoFrame(new Uint8Array(data, 8, length - 8), {
-      format: 'BGRA', codedWidth: width, codedHeight: height,
+      format: 'BGRX', codedWidth: width, codedHeight: height,
       timestamp: Math.round(performance.now() * 1000),
     });
     try { await writer.write(videoFrame); } finally { videoFrame.close(); }
     return true;
   };
-  const interval = 1000 / settings.fps;
-  try {
-    const deadline = performance.now() + 9000;
-    while (!await pull()) {
-      if (performance.now() >= deadline) throw new Error('The selected source did not provide video. Open it and share again.');
-      await delay(interval);
+  // Windows paces the producer. A hidden WebView can throttle JavaScript timers
+  // while the user is interacting with the window they are sharing.
+  const nextFrame = async () => {
+    while (!closed) {
+      if (!pending) await new Promise<void>(resolve => { wake = resolve; });
+      wake = undefined;
+      if (closed) return;
+      pending = false;
+      if (await pull()) return;
     }
+  };
+  try {
+    unlisten = await listen<number>('capture-frame-ready', event => {
+      if (event.payload !== selection.id) return;
+      pending = true;
+      wake?.();
+    });
+    let startup: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([nextFrame(), new Promise<never>((_, reject) => {
+        startup = setTimeout(() => reject(new Error('The selected source did not provide video. Open it and share again.')), 9000);
+      })]);
+    } finally { clearTimeout(startup); }
   } catch (error) {
     stop();
     throw error instanceof Error ? error : new Error(String(error));
   }
   void (async () => {
-    while (!closed) {
-      const started = performance.now();
-      await pull();
-      await delay(Math.max(0, interval - (performance.now() - started)));
-    }
+    while (!closed) await nextFrame();
   })().catch(() => {
     if (!closed) {
       stop();

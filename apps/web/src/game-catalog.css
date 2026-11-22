@@ -1,0 +1,159 @@
+.catalog-dialog {
+  background: radial-gradient(ellipse at 8% 0%, #6d53a333, transparent 42%), #191d27;
+}
+
+.catalog-dialog .games-catalog-heading {
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.games-catalog-title,
+.game-sound-toggle,
+.game-catalog-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.games-catalog-title h2 { margin: 0; }
+
+.games-catalog-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: #efe7ff;
+  background: #9f79f338;
+  border: 1px solid #bd9ff663;
+  border-radius: 13px;
+  flex: none;
+}
+
+.game-catalog-intro { margin: 14px 0; color: #d1d4e6; }
+.game-catalog-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.game-catalog-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding-inline: 12px;
+  border: 1px solid #aaa1d350;
+  border-radius: 10px;
+  color: #e2dcfa;
+  background: #ae9aec12;
+  font-size: 13px;
+  text-decoration: none;
+}
+.game-catalog-links a:is(:hover, :focus-visible) { border-color: #c5b9ff; background: #ae9aec28; }
+.game-catalog-group { --card-accent: #efc988; margin-block: 22px 12px; }
+.game-catalog-group.theme-table { --card-accent: #a1e2cf; }
+.game-catalog-group.theme-creative { --card-accent: #e7aedf; }
+.game-catalog-group h3 { color: var(--card-accent); margin: 0 0 10px; scroll-margin-block-start: 12px; }
+.game-catalog-group h3:focus { outline-offset: 4px; }
+.game-catalog-group .arcade-catalog { margin: 0; grid-auto-rows: 1fr; }
+
+.game-catalog-group .arcade-catalog .game-catalog-card {
+  gap: 7px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--card-accent) 11%, #272938), #232635 66%);
+  padding: 14px;
+  transition: transform 140ms ease-out, border-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+
+.game-catalog-group .arcade-catalog .game-catalog-card:not(:disabled):is(:hover, :focus-visible) {
+  border-color: var(--card-accent);
+  box-shadow: 0 5px 18px #0e101d78;
+  transform: translateY(-2px);
+}
+
+.game-catalog-group .arcade-catalog .game-catalog-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  color: var(--card-accent);
+  background: color-mix(in srgb, var(--card-accent) 15%, #202334);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.game-catalog-meta { margin-top: auto; padding-top: 4px; flex-wrap: wrap; }
+.game-catalog-meta > small { color: var(--card-accent); }
+
+:is(.arcade-dialog, .chess-dialog) details.game-sound-settings {
+  position: relative;
+  margin: 0;
+  align-self: stretch;
+}
+
+.game-sound-settings > summary {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-height: 38px;
+  height: 100%;
+  width: 38px;
+  padding: 8px;
+  border: 1px solid #44465f;
+  border-radius: 8px;
+  background: #2b2e42;
+}
+
+.game-sound-settings > label {
+  position: absolute;
+  z-index: 8;
+  inset-inline-end: 0;
+  top: calc(100% + 6px);
+  width: min(168px, 44vw);
+  padding: 12px;
+  border: 1px solid #5c5377;
+  border-radius: 10px;
+  background: #242639;
+  box-shadow: 0 8px 24px #11121d99;
+}
+
+.game-sound-settings input { width: 100%; padding: 0; accent-color: #b6a2ff; }
+.game-sound-settings > summary:focus-visible { outline: 3px solid #a69afa; outline-offset: 2px; }
+.catalog-dialog .game-live-list { padding: 13px; border: 1px solid #6aa79159; border-radius: 12px; background: #76dab50d; }
+.catalog-dialog .game-live-list h3 { margin: 0 0 2px; font-size: 15px; color: #c2ecdc; }
+
+.game-playing-dialog .game-status.game-result {
+  border-color: #d5af71;
+  background: linear-gradient(100deg, #6e4f3261, #303042);
+  color: #ffe4af;
+  animation: game-result-arrival 240ms ease-out both;
+}
+
+.game-playing-dialog .game-status.game-paused { border-color: #d9af735e; }
+
+@keyframes game-result-arrival {
+  from { opacity: .75; transform: scale(.99); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 540px) {
+  .catalog-dialog .games-catalog-heading { flex-wrap: wrap; }
+  .catalog-dialog .game-nav { justify-content: flex-start; }
+  .catalog-dialog .game-nav button { min-height: 42px; }
+  .game-catalog-links a { min-height: 44px; }
+  .catalog-dialog .game-catalog-group .arcade-catalog .game-catalog-card { padding: 10px; }
+  .game-catalog-meta > small { width: 100%; }
+  :is(.game-playing-dialog, .game-setup-dialog) > header > div { min-width: 0; }
+  :is(.game-playing-dialog, .game-setup-dialog) > header h2 { overflow-wrap: anywhere; }
+  :is(.game-playing-dialog, .game-setup-dialog) > header .game-nav {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    justify-content: end;
+    gap: 6px;
+    max-width: none;
+    flex: none;
+  }
+  :is(.game-playing-dialog, .game-setup-dialog) > header .game-nav button { padding: 7px 9px; font-size: 12px; }
+  :is(.game-playing-dialog, .game-setup-dialog) > header .game-sound-toggle { justify-content: center; }
+  :is(.game-playing-dialog, .game-setup-dialog) > header .game-sound-settings > summary { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-catalog-group .arcade-catalog .game-catalog-card { transition: none; }
+  .game-catalog-group .arcade-catalog .game-catalog-card:not(:disabled):is(:hover, :focus-visible) { transform: none; }
+  .game-playing-dialog .game-status.game-result { animation: none; }
+}

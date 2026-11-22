@@ -8,11 +8,12 @@ import { request } from './api';
 import { t, formatNumber } from './i18n';
 import './member-moderation.css';
 
-type Target = { user: PublicUser; serverId: string | null; x: number; y: number; trigger: HTMLElement };
+type Target = { user: PublicUser; serverId: string | null; x: number; y: number; trigger: HTMLElement; openRosterProfile?: () => void };
 type LocalAudio = { level: number; restore: number; change: (level: number) => void };
 type Options = { me?: PublicUser; serverId: string | null; servers: Server[]; channels: Channel[]; members: ServerMember[]; presence: VoicePresence[]; room: VoiceRoom | null; transport: MediaTransport | null; volumes: Record<string, number>; setVolume: (id: string, level: number) => void; profile: (user: PublicUser) => void; soundboard?: { mutedSenders: ReadonlySet<string>; toggleSender: (id: string) => void }; error: (error: unknown) => void; changed: () => Promise<void> };
 export function useMemberModeration(o: Options) {
  const [target, setTarget] = useState<Target | null>(null), [drag, setDrag] = useState<{ userId: string; channelId: string; serverId: string } | null>(null), [over, setOver] = useState('');
+ const closeMenu = () => setTarget(null);
  const audible = useRef<Record<string, number>>({});
  useEffect(() => { audible.current = {}; }, [o.me?.id]);
  useEffect(() => { setTarget(null); setDrag(null); setOver(''); }, [o.serverId, o.me?.id]);
@@ -21,13 +22,17 @@ export function useMemberModeration(o: Options) {
   const ch = o.channels.find(c => c.id === channelId), server = o.servers.find(s => s.id === ch?.serverId), member = o.members.find(m => m.user.id === user.id), actor = o.members.find(m => m.user.id === o.me?.id);
   return Boolean(ch?.permissions.moderate && server?.id === o.serverId && member && user.id !== o.me?.id && canMoveMember(actor?.authority || server!.role, member.authority || member.role));
  }
+ function openMenu(user: PublicUser, serverId: string | null, trigger: HTMLElement, x?: number, y?: number, openRosterProfile?: () => void) {
+  const rect = trigger.getBoundingClientRect();
+  setTarget({ user, serverId, x: x ?? rect.left + 10, y: y ?? rect.bottom, trigger, openRosterProfile });
+ }
  function bind(user: PublicUser, channelId = source(user)) {
   return {
    onContextMenu: (e: MouseEvent<HTMLElement>) => {
     const serverId = o.channels.find(c => c.id === channelId)?.serverId || o.serverId;
     if (!serverId && user.id !== o.me?.id) return;
-    e.preventDefault(); e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect();
-    setTarget({ user, serverId, x: e.clientX || rect.left + 10, y: e.clientY || rect.bottom, trigger: e.currentTarget });
+    e.preventDefault(); e.stopPropagation();
+    openMenu(user, serverId, e.currentTarget, e.type === 'contextmenu' ? e.clientX || undefined : undefined, e.type === 'contextmenu' ? e.clientY || undefined : undefined);
    },
    draggable: allowed(user, channelId),
    onDragStart: (e: DragEvent<HTMLElement>) => {
@@ -36,6 +41,12 @@ export function useMemberModeration(o: Options) {
     e.dataTransfer.setData('application/x-dorham-voice', JSON.stringify(value)); e.dataTransfer.effectAllowed = 'move'; setDrag(value); setTarget(null);
    },
    onDragEnd: () => { setDrag(null); setOver(''); }
+  };
+ }
+ function bindRoster(user: PublicUser, openProfile: () => void) {
+  const { draggable, onDragStart, onDragEnd } = bind(user);
+  return { draggable, onDragStart, onDragEnd,
+   openMenu: (trigger: HTMLElement, x?: number, y?: number) => openMenu(user, o.serverId, trigger, x, y, openProfile),
   };
  }
  function drop(channel: Channel) {
@@ -59,24 +70,28 @@ export function useMemberModeration(o: Options) {
   muted: o.soundboard.mutedSenders.has(audioId),
   toggle: () => o.soundboard?.toggleSender(audioId)
  } : undefined;
- return { bind, drop, menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}`} target={target} channels={o.channels} audio={audio} soundboard={soundboard} microphone={target.user.id === o.me?.id ? { transport: o.transport, error: o.error } : undefined} close={() => setTarget(null)} profile={o.profile} changed={o.changed}/> };
+ const rosterServer = target?.openRosterProfile && o.servers.find(server => server.id === target.serverId);
+ const rosterMember = rosterServer && rosterServer.ownerId === o.me?.id && rosterServer.memberListRevision !== undefined
+  ? o.members.find(member => member.user.id === audioId) : undefined;
+ return { bind, bindRoster, drop, closeMenu, menuOpen: Boolean(target), menu: target && <MemberContextMenu key={`${target.serverId}:${target.user.id}:${Boolean(target.openRosterProfile)}`} target={target} channels={o.channels} audio={audio} soundboard={soundboard} microphone={target.user.id === o.me?.id ? { transport: o.transport, error: o.error } : undefined} rosterMember={rosterMember} close={closeMenu} profile={o.profile} changed={o.changed}/> };
 }
 
-function MemberContextMenu({ target, channels, audio, soundboard, microphone, close, profile, changed }: { target: Target; channels: Channel[]; audio?: LocalAudio; soundboard?: { muted: boolean; toggle: () => void }; microphone?: { transport: MediaTransport | null; error: (error: unknown) => void }; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
+function MemberContextMenu({ target, channels, audio, soundboard, microphone, rosterMember, close, profile, changed }: { target: Target; channels: Channel[]; audio?: LocalAudio; soundboard?: { muted: boolean; toggle: () => void }; microphone?: { transport: MediaTransport | null; error: (error: unknown) => void }; rosterMember?: ServerMember; close: () => void; profile: (user: PublicUser) => void; changed: () => Promise<void> }) {
  const ref = useRef<HTMLDivElement>(null), [info, setInfo] = useState<MemberModerationInfo | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [moving, setMoving] = useState(false), [confirm, setConfirm] = useState<'kick' | 'ban' | 'timeout' | null>(null), [seconds, setSeconds] = useState(600), [reason, setReason] = useState('');
  const [position, setPosition] = useState({ left: target.x, top: target.y });
  useEffect(() => { if (microphone || !target.serverId) return; let active = true; void request<MemberModerationInfo>(`/servers/${target.serverId}/members/${target.user.id}/moderation`).then(value => { if (active) setInfo(value); }).catch(() => { if (active) setError('Member controls are unavailable.'); }); return () => { active = false; }; }, []);
  useLayoutEffect(() => { const rect = ref.current?.getBoundingClientRect(); if (rect) setPosition({ left: Math.max(8, Math.min(target.x, innerWidth - rect.width - 8)), top: Math.max(8, Math.min(target.y, innerHeight - rect.height - 8)) }); }, [info, moving, confirm, target.x, target.y]);
  useEffect(() => {
   const outside = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
-  const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); close(); target.trigger.focus(); } };
-  document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape); window.addEventListener('resize', close);
+  const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); target.trigger.focus(); } };
+  document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape, true); window.addEventListener('resize', close);
   ref.current?.querySelector<HTMLButtonElement>('button')?.focus();
-  return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); window.removeEventListener('resize', close); };
+  return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape, true); window.removeEventListener('resize', close); };
  }, []);
  useEffect(() => { ref.current?.querySelector<HTMLElement>(confirm ? 'select,input,button' : '[role^=menuitem]')?.focus(); }, [confirm]);
- async function action(route: string, body: unknown) { setBusy(true); setError(''); try { await request(route, body); await changed(); close(); } catch (e) { setError(e instanceof Error ? e.message : 'Action failed. Try again.'); setBusy(false); } }
- const memberRoute = `/servers/${target.serverId}/members/${target.user.id}/moderate`;
+ async function action(route: string, body: unknown, method = 'POST') { setBusy(true); setError(''); try { await request(route, body, method); await changed(); close(); } catch (e) { setError(e instanceof Error ? e.message : 'Action failed. Try again.'); setBusy(false); } }
+ const memberPath = `/servers/${target.serverId}/members/${target.user.id}`;
+ const memberRoute = memberPath + '/moderate';
  const voiceAction = (actionName: string) => { if (info?.voice) void action(`/voice/${info.voice.channelId}/moderate`, { userId: target.user.id, action: actionName }); };
  const destinations = channels.filter(c => c.serverId === target.serverId && c.kind === 'voice' && c.id !== info?.voice?.channelId && c.permissions.moderate);
  return createPortal(<div ref={ref} className="member-context-menu" role={confirm ? 'dialog' : 'menu'} aria-label={t(confirm ? 'Confirm moderation action' : 'Member actions')} style={position} onContextMenu={e => e.preventDefault()} onKeyDown={e => {
@@ -90,7 +105,10 @@ function MemberContextMenu({ target, channels, audio, soundboard, microphone, cl
    <label>{t('Reason (optional)')}<input maxLength={320} value={reason} disabled={busy} onChange={e => setReason(e.target.value)}/></label>
    <div className="context-confirm-buttons"><button type="button" disabled={busy} onClick={() => setConfirm(null)}>{t('Cancel')}</button><button className="danger" type="submit" disabled={busy}>{t(confirm === 'ban' ? 'Confirm ban' : confirm === 'kick' ? 'Confirm kick' : 'Apply timeout')}</button></div>
   </form> : <>
-   <button role="menuitem" disabled={busy} onClick={() => { close(); profile(target.user); }}>{t('View profile')}</button>
+   <button role="menuitem" disabled={busy} onClick={() => { close(); if (target.openRosterProfile) target.openRosterProfile(); else profile(target.user); }}>{t('View profile')}</button>
+   {rosterMember && <button role="menuitem" disabled={busy} onClick={() => {
+    void action(memberPath + '/visibility', { hidden: !rosterMember.hiddenFromMemberList }, 'PATCH');
+   }}>{t(rosterMember.hiddenFromMemberList ? 'Show in member list' : 'Hide from member list')}</button>}
    {microphone && <MicrophoneGainControl transport={microphone.transport} onError={microphone.error} compact/>}
    {audio && <div className="member-local-audio" role="group" aria-label={t('Personal voice volume')}>
     <label><span>{t('Voice volume for {name}', { name: target.user.displayName })}<output>{formatNumber(audio.level)}%</output></span><input type="range" min={0} max={200} step={1} value={audio.level} aria-label={t('Voice volume for {name}', { name: target.user.displayName })} title={t('0% mutes this person; 100% is original volume; 200% doubles the audio signal.')} onChange={e => audio.change(Number(e.target.value))}/></label>
@@ -108,11 +126,11 @@ function MemberContextMenu({ target, channels, audio, soundboard, microphone, cl
    {info?.actions.ban && <button className="danger" role="menuitem" disabled={busy} onClick={() => setConfirm('ban')}>{t('Ban from server')}</button>}
   </>}
   {error && <p role="alert">{t(error)}</p>}
- </div>, document.body);
+ </div>, target.trigger.closest('dialog') || document.body);
 }
 
-export function ServerBanList({ serverId, error }: { serverId: string; error: (error: unknown) => void }) {
- const [open, setOpen] = useState(false), [bans, setBans] = useState<{ userId: string; displayName: string; reason: string; canUnban: boolean }[]>([]), [busy, setBusy] = useState(false);
+export function ServerBanList({ serverId, error, initiallyOpen = false }: { serverId: string; error: (error: unknown) => void; initiallyOpen?: boolean }) {
+ const [open, setOpen] = useState(initiallyOpen), [bans, setBans] = useState<{ userId: string; displayName: string; reason: string; canUnban: boolean }[]>([]), [busy, setBusy] = useState(initiallyOpen);
  async function load() { setBusy(true); try { setBans((await request<{bans: typeof bans}>(`/servers/${serverId}/bans`)).bans); } catch (e) { error(e); } finally { setBusy(false); } }
  return <details className="server-ban-list" open={open} onToggle={e => { const value = e.currentTarget.open; setOpen(value); if (value) void load(); }}><summary>{t('Server bans')}</summary>{open && <>{bans.length === 0 && !busy && <p>{t('No banned members.')}</p>}{bans.map(b => <div key={b.userId}><span><bdi>{b.displayName}</bdi><small dir="auto">{b.reason}</small></span>{b.canUnban && <button className="secondary" disabled={busy} onClick={() => { setBusy(true); void request(`/servers/${serverId}/members/${b.userId}/moderate`, { action: 'unban' }).then(load).catch(e => { error(e); setBusy(false); }); }}>{t('Unban')}</button>}</div>)}</>}</details>;
 }

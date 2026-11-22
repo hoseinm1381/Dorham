@@ -10,6 +10,8 @@ translations['Preview unavailable'] = 'پیش‌نمایش در دسترس نی�
 translations['Window minimized'] = 'پنجره کوچک شده است';
 translations['Restore window'] = 'بازگرداندن پنجره';
 translations['Open the window from the taskbar, then select Refresh.'] = 'پنجره را از نوار وظیفه باز کنید، سپس فهرست را تازه‌سازی کنید.';
+translations['All sound on the default output'] = 'همهٔ صدای خروجی پیش‌فرض';
+translations['Windows 10 shares all sound on your default output, including notifications and Dorham voices. To avoid echo, use a different output for Dorham calls. Only enable this if you want to share that sound.'] = 'ویندوز ۱۰ همهٔ صدای خروجی پیش‌فرض، از جمله اعلان‌ها و صدای تماس دورهم را ارسال می‌کند. برای جلوگیری از اکو، خروجی دیگری برای تماس دورهم انتخاب کنید. فقط اگر می‌خواهید این صداها ارسال شوند، این گزینه را فعال کنید.';
 const previewObserver = new window.IntersectionObserver(entries => {
   for (const { target, isIntersecting } of entries) target.toggleAttribute('data-visible', isIntersecting);
   schedulePreviews(100);
@@ -78,9 +80,9 @@ async function pollPreviews() {
 }
 function audioScope() {
   const scope = byId('scope'), source = model.sources.find(item => item.id === selected);
-  scope.querySelector('[value=application]').disabled = source?.kind !== 'window';
-  if (scope.value === 'application' && source?.kind !== 'window') scope.value = model.audioRequested && model.audioSupported ? 'system' : 'none';
-  byId('scope-description').textContent = text(scope.value === 'application' ? 'Only sound from the selected application is shared.' : scope.value === 'system' ? 'Other apps may be audible. Dorham call audio is excluded.' : 'Video only. No application or computer sound is shared.');
+  scope.querySelector('[value=application]').disabled = source?.kind !== 'window' || model.processAudioSupported === false;
+  if (scope.value === 'application' && (source?.kind !== 'window' || model.processAudioSupported === false)) scope.value = model.processAudioSupported === false ? 'none' : model.audioRequested && model.audioSupported ? 'system' : 'none';
+  byId('scope-description').textContent = text(model.processAudioSupported === false && model.audioRequested ? 'Windows 10 shares all sound on your default output, including notifications and Dorham voices. To avoid echo, use a different output for Dorham calls. Only enable this if you want to share that sound.' : scope.value === 'application' ? 'Only sound from the selected application is shared.' : scope.value === 'system' ? 'Other apps may be audible. Dorham call audio is excluded.' : 'Video only. No application or computer sound is shared.');
 }
 function updateShareButton() {
   const source = model.sources.find(item => item.id === selected);
@@ -104,7 +106,7 @@ function render() {
     const name = document.createElement('span'); name.textContent = source.name; label.append(name); button.append(preview, label);
     button.onclick = () => {
       const changed = selected !== source.id; selected = source.id;
-      if (changed && model.audioRequested && model.audioSupported) byId('scope').value = source.kind === 'window' ? 'application' : 'system';
+      if (changed && model.audioRequested && model.audioSupported && model.processAudioSupported !== false) byId('scope').value = source.kind === 'window' ? 'application' : 'system';
       for (const item of list.children) item.setAttribute('aria-selected', String(item === button));
       byId('status').textContent = ''; updateShareButton(); audioScope();
       schedulePreviews();
@@ -123,6 +125,7 @@ async function refresh() {
     previewGeneration++; previews.clear();
     for (const [id, value] of Object.entries({ title: 'Choose what to share', refresh: 'Refresh', windows: 'Applications', screens: 'Screens', 'audio-label': 'Share sound', cancel: 'Cancel', share: 'Share' })) byId(id).textContent = text(value);
     for (const option of byId('scope').options) option.textContent = text({ none: 'No sound', application: 'Selected application only', system: 'Computer sound, excluding Dorham' }[option.value]);
+    if (model.processAudioSupported === false) byId('scope').querySelector('[value=system]').textContent = text('All sound on the default output');
     byId('search').placeholder = text('Search sources'); byId('search').setAttribute('aria-label', text('Search sources'));
     byId('scope').disabled = !model.audioRequested || !model.audioSupported;
     if (!model.audioRequested || !model.audioSupported) byId('scope').value = 'none';

@@ -303,6 +303,51 @@ func TestCoreVoiceTagLocksLimitsAndDirectoryPrivacy(t *testing.T) {
 	f.s.ChangeTag(owner, ID(), f.server, M{"tagId": tag, "userId": member, "assigned": false})
 	coreRequire(t, f.db.One("SELECT user_id FROM voice_members WHERE user_id=?", member) == nil, "tag revoke must evict voice immediately")
 }
+func TestCoreVoicePermissionChangesAffectConnectedMembers(t *testing.T) {
+	f := newCoreFixture(t)
+	owner, admin, member := f.users["owner"], f.users["admin"], f.users["member"]
+	f.s.JoinVoice(member, "member-socket", f.voice, true)
+	override := func(role string, revision int, permissions M) {
+		f.s.ChangeChannel(owner, ID(), f.voice, M{"role": role, "expectedRevision": revision, "permissions": permissions})
+	}
+	muted := func() bool {
+		return B(f.db.One("SELECT server_muted FROM voice_members WHERE user_id=?", member)["server_muted"])
+	}
+	override("member", 0, M{"speak": false})
+	coreRequire(t, muted(), "denying speak must mute a connected member")
+	override("member", 1, M{})
+	coreRequire(t, !muted(), "restoring speak must unmute without rejoining")
+	f.s.Moderate(owner, ID(), f.voice, member, "mute")
+	override("member", 2, M{"speak": true})
+	coreRequire(t, muted(), "changing permissions must preserve an explicit moderator mute")
+	f.s.Moderate(owner, ID(), f.voice, member, "unmute")
+	coreRequire(t, !muted(), "explicit unmute must restore permitted speech")
+
+	info := func() M { return f.s.ModerationInfo(admin, f.server, member) }
+	coreRequire(t, B(Obj(info()["actions"])["voice"]), "administrator can moderate the lower-ranked participant")
+	override("administrator", 0, M{"moderate": false})
+	actions := Obj(info()["actions"])
+	coreRequire(t, !B(actions["voice"]) && !B(actions["move"]) && B(actions["timeout"]), "channel override governs only voice actions")
+	coreWantError(t, "FORBIDDEN", func() { f.s.Moderate(admin, ID(), f.voice, member, "mute") })
+	override("administrator", 1, M{"view": false})
+	coreRequire(t, info()["voice"] == nil, "a hidden voice channel must not appear in the moderation response")
+	override("administrator", 2, M{})
+
+	f.s.Moderate(admin, ID(), f.voice, member, "deafen")
+	presence := f.s.VoiceDirectory(admin)
+	coreRequire(t, len(presence) == 1 && B(Obj(Arr(presence[0]["members"])[0])["serverDeafened"]), "sidebar presence must show the server deafen state")
+	f.s.Moderate(admin, ID(), f.voice, member, "undeafen")
+	coreRequire(t, !B(Obj(Arr(f.s.VoiceDirectory(admin)[0]["members"])[0])["serverDeafened"]), "sidebar presence must clear the server deafen state")
+	f.s.Share(member, "member-socket", ID(), false, false)
+	f.s.Moderate(admin, ID(), f.voice, member, "stopShare")
+	coreRequire(t, f.db.One("SELECT id FROM share_leases WHERE user_id=?", member) == nil, "stop share must revoke the current share")
+	f.s.Moderate(admin, ID(), f.voice, member, "denyShare")
+	coreWantError(t, "FORBIDDEN", func() { f.s.Share(member, "member-socket", ID(), false, false) })
+	f.s.Moderate(admin, ID(), f.voice, member, "allowShare")
+	f.s.Share(member, "member-socket", ID(), false, false)
+	f.s.Moderate(admin, ID(), f.voice, member, "kick")
+	coreRequire(t, f.db.One("SELECT user_id FROM voice_members WHERE user_id=?", member) == nil, "voice disconnect must remove the participant")
+}
 func TestCoreShareTierPromotionRevisionAndLeaseOwnership(t *testing.T) {
 	f := newCoreFixture(t)
 	f.s.C.StandardShareSlots = 1

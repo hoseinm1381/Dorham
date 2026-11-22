@@ -27,6 +27,7 @@ import (
 type job struct {
 	Endpoint, Token, File, URL, FFmpeg string
 	PublicLink                         bool
+	LowBandwidth                       bool
 	Position                           int64
 	Volume                             int
 }
@@ -88,7 +89,9 @@ func publish(ctx context.Context, work job) error {
 	if work.URL != "" {
 		filter = "volume=" + gain + ",alimiter=limit=0.80:level=0"
 	}
-	args = append(args, "-map", "0:a:0", "-vn", "-sn", "-dn", "-af", filter, "-ar", "48000", "-ac", "2", "-c:a", "libopus", "-application", "audio", "-b:a", "96k", "-fec", "1", "-packet_loss", "10", "-frame_duration", "20", "-page_duration", "20000", "-flush_packets", "1", "-f", "ogg", "pipe:1")
+	channels, bitrate := "2", "96k"
+	if work.LowBandwidth { channels, bitrate = "1", "48k" }
+	args = append(args, "-map", "0:a:0", "-vn", "-sn", "-dn", "-af", filter, "-ar", "48000", "-ac", channels, "-c:a", "libopus", "-application", "audio", "-b:a", bitrate, "-fec", "1", "-packet_loss", "10", "-frame_duration", "20", "-page_duration", "20000", "-flush_packets", "1", "-f", "ogg", "pipe:1")
 	ff := exec.CommandContext(ctx, work.FFmpeg, args...)
 	ff.Stdin = input
 	ff.WaitDelay = 2 * time.Second

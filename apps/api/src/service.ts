@@ -120,7 +120,7 @@ export class Service {
     return this.db.transaction(async connection => {
       const tx = readSnapshot(connection);
       const me = await tx.one('SELECT * FROM users WHERE id=?', [userId]);
-      const servers = (await tx.all('SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at', [userId, me!.instance_admin])).map(s => ({ id: s.id, name: s.name, ownerId: s.owner_id, icon: s.icon, role: me!.instance_admin ? 'owner' : s.role, allowGuests: Boolean(s.allow_guests), allowMemberInvites: Boolean(s.allow_member_invites) }));
+      const servers = (await tx.all('SELECT s.*,m.role FROM servers s LEFT JOIN members m ON m.server_id=s.id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY s.created_at', [userId, me!.instance_admin])).map(s => ({ id: s.id, name: s.name, ownerId: s.owner_id, icon: s.icon, role: me!.instance_admin ? 'owner' : s.role, allowGuests: Boolean(s.allow_guests), allowMemberInvites: Boolean(s.allow_member_invites), memberListRevision: Number(s.member_list_revision) }));
       for (const server of servers) Object.assign(server, { permissions: await this.memberPermissions(tx, server.role as Role, userId, server.id) });
       const allChannels = await tx.all('SELECT c.* FROM channels c LEFT JOIN members m ON c.server_id=m.server_id AND m.user_id=? WHERE m.user_id IS NOT NULL OR ?=1 ORDER BY c.created_at', [userId, me!.instance_admin]);
       const channels = [];
@@ -201,10 +201,10 @@ export class Service {
           if (Number(old?.revision || 0) !== body.expectedRevision) fail(409, 'STALE_PERMISSIONS', 'Permissions changed. Reload them before saving.');
           await tx.run('INSERT INTO channel_overrides(channel_id,role,permissions,revision) VALUES(?,?,?,?) ON CONFLICT(channel_id,role) DO UPDATE SET permissions=excluded.permissions,revision=excluded.revision', [channelId, body.role, JSON.stringify(body.permissions), body.expectedRevision! + 1]);
         }
-        for (const vm of await tx.all('SELECT * FROM voice_members WHERE channel_id=?', [channelId])) {
-          try { await this.channel(tx, vm.user_id, channelId); } catch { await tx.run('DELETE FROM voice_members WHERE user_id=?', [vm.user_id]); continue; }
-          try { await this.channel(tx, vm.user_id, channelId, 'speak'); } catch { await tx.run('UPDATE voice_members SET server_muted=1 WHERE user_id=?', [vm.user_id]); }
-          try { await this.channel(tx, vm.user_id, channelId, 'share'); } catch { await tx.run('DELETE FROM share_leases WHERE user_id=?', [vm.user_id]); }
+        if (body.permissions) {
+          for (const vm of await tx.all('SELECT user_id FROM voice_members WHERE channel_id=?', [channelId])) {
+            await this.revalidateVoiceMember(tx, vm.user_id, channelId);
+          }
         }
       }
       return { success: true };
@@ -279,9 +279,37 @@ export class Service {
     }); await this.notify('state:changed', {}); return result;
   }
   async members(userId: string, serverId: string) {
-    await this.member(this.db, userId, serverId);
-    const rows = await this.db.all('SELECT u.*,m.role,COALESCE(t.expires_at,0) AS timeout_until FROM members m JOIN users u ON u.id=m.user_id LEFT JOIN server_timeouts t ON t.server_id=m.server_id AND t.user_id=m.user_id WHERE m.server_id=? ORDER BY m.joined_at', [serverId]);
-    return Promise.all(rows.map(async u => ({ user: { ...publicUser(u), tags: (await this.db.all('SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?', [u.id, serverId])).map(t => ({ id: t.id, serverId: t.server_id, name: t.name, color: t.color })) }, role: u.role, timeoutUntil: Number(u.timeout_until || 0), authority: u.instance_admin ? 'owner' : await this.authority(this.db, { role: u.role, user_id: u.id, server_id: serverId }), customRoles: await this.assignedRoles(this.db, u.id, serverId) })));
+    return this.db.transaction(async tx => {
+      await this.member(tx, userId, serverId);
+      const rows = await tx.all(`SELECT u.*,m.role,m.hidden_from_member_list,COALESCE(t.expires_at,0) AS timeout_until
+        FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id
+        LEFT JOIN server_timeouts t ON t.server_id=m.server_id AND t.user_id=m.user_id
+        WHERE m.server_id=? AND (m.hidden_from_member_list=0 OR s.owner_id=?) ORDER BY m.joined_at`, [serverId, userId]);
+      return Promise.all(rows.map(async u => ({
+        user: { ...publicUser(u), tags: (await tx.all('SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?', [u.id, serverId])).map(t => ({ id: t.id, serverId: t.server_id, name: t.name, color: t.color })) },
+        role: u.role, timeoutUntil: Number(u.timeout_until || 0),
+        authority: u.instance_admin ? 'owner' : await this.authority(tx, { role: u.role, user_id: u.id, server_id: serverId }),
+        customRoles: await this.assignedRoles(tx, u.id, serverId),
+        ...(u.hidden_from_member_list ? { hiddenFromMemberList: true } : {}),
+      })));
+    });
+  }
+  async changeMemberVisibility(actorId: string, requestId: string, serverId: string, targetId: string, hidden: boolean) {
+    const payload = { serverId, targetId, hidden };
+    const result = await this.mutate(actorId, requestId, 'member.visibility', payload, async tx => {
+      await this.member(tx, actorId, serverId);
+      if ((await tx.one('SELECT owner_id FROM servers WHERE id=?', [serverId]))?.owner_id !== actorId) fail(403, 'FORBIDDEN', 'Only the owner can change member list visibility.');
+      const target = await tx.one('SELECT hidden_from_member_list FROM members WHERE server_id=? AND user_id=?', [serverId, targetId]);
+      if (!target) fail(404, 'NOT_FOUND', 'Member not found.');
+      if (Boolean(target?.hidden_from_member_list) !== hidden) {
+        await tx.run('UPDATE members SET hidden_from_member_list=? WHERE server_id=? AND user_id=?', [Number(hidden), serverId, targetId]);
+        await tx.run('UPDATE servers SET member_list_revision=member_list_revision+1 WHERE id=?', [serverId]);
+        await audit(tx, actorId, 'member.visibility', targetId, payload);
+      }
+      return { hiddenFromMemberList: hidden };
+    });
+    await this.notify('state:changed', {});
+    return result;
   }
   async changeMember(actorId: string, requestId: string, serverId: string, targetId: string, body: { role?: Role; remove?: boolean }) {
     const result = await this.mutate(actorId, requestId, 'member.change', { serverId, targetId, ...body }, async tx => {
@@ -294,13 +322,7 @@ export class Service {
       } else {
         await tx.run('UPDATE members SET role=? WHERE server_id=? AND user_id=?', [body.role!, serverId, targetId]);
         const voice = await tx.one('SELECT channel_id FROM voice_members WHERE user_id=? AND channel_id IN (SELECT id FROM channels WHERE server_id=?)', [targetId, serverId]);
-        if (voice) {
-          try {
-            const access = await this.channel(tx, targetId, voice.channel_id);
-            if (!access.permissions.speak) await tx.run('UPDATE voice_members SET server_muted=1 WHERE user_id=?', [targetId]);
-            if (!access.permissions.share) await tx.run('DELETE FROM share_leases WHERE user_id=?', [targetId]);
-          } catch { await tx.run('DELETE FROM voice_members WHERE user_id=?', [targetId]); }
-        }
+        if (voice) await this.revalidateVoiceMember(tx, targetId, voice.channel_id);
       }
       await audit(tx, actorId, 'member.change', targetId, { serverId, ...body });
       return { success: true };
@@ -470,7 +492,7 @@ export class Service {
     const rooms: VoicePresence[] = [];
     for (const ch of await tx.all('SELECT DISTINCT channel_id FROM voice_members WHERE heartbeat>=?', [now - 30000])) {
       try { await this.channel(tx, userId, ch.channel_id); } catch { continue; }
-      const members = (await tx.all('SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? AND v.heartbeat>=? ORDER BY v.joined_at', [ch.channel_id, now - 30000])).map(vm => ({ user: publicUser({ ...vm, id: vm.user_id }), muted: Boolean(vm.muted), deafened: Boolean(vm.deafened), serverMuted: Boolean(vm.server_muted) }));
+      const members = (await tx.all('SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? AND v.heartbeat>=? ORDER BY v.joined_at', [ch.channel_id, now - 30000])).map(vm => ({ user: publicUser({ ...vm, id: vm.user_id }), muted: Boolean(vm.muted), deafened: Boolean(vm.deafened), serverMuted: Boolean(vm.server_muted), serverDeafened: Boolean(vm.server_deafened) }));
       const shares = await tx.one('SELECT COUNT(*) AS count FROM share_leases WHERE channel_id=? AND expires_at>=?', [ch.channel_id, now]);
       rooms.push({ channelId: ch.channel_id, members, shares: Number(shares!.count) });
     }
@@ -622,14 +644,22 @@ export class Service {
     }); await this.notify('voice:changed', {}); return result;
   }
   async revalidateVoice(tx: Connection, serverId: string) {
-    for (const vm of await tx.all('SELECT v.* FROM voice_members v JOIN channels c ON c.id=v.channel_id WHERE c.server_id=?', [serverId])) {
-      try {
-        const access = await this.channel(tx, vm.user_id, vm.channel_id);
-        const restriction = await tx.one('SELECT muted FROM voice_restrictions WHERE channel_id=? AND user_id=?', [vm.channel_id, vm.user_id]);
-        await tx.run('UPDATE voice_members SET server_muted=? WHERE user_id=?', [Number(!access.permissions.speak || Boolean(restriction?.muted)), vm.user_id]);
-        if (!access.permissions.share) await tx.run('DELETE FROM share_leases WHERE user_id=?', [vm.user_id]);
-      } catch { await tx.run('DELETE FROM voice_members WHERE user_id=?', [vm.user_id]); }
+    for (const vm of await tx.all('SELECT v.user_id,v.channel_id FROM voice_members v JOIN channels c ON c.id=v.channel_id WHERE c.server_id=?', [serverId])) {
+      await this.revalidateVoiceMember(tx, vm.user_id, vm.channel_id);
     }
+  }
+  private async revalidateVoiceMember(tx: Connection, userId: string, channelId: string) {
+    let access;
+    try {
+      access = await this.channel(tx, userId, channelId);
+    } catch (error) {
+      if (!(error instanceof AppError) || ![403, 404].includes(error.status)) throw error;
+      await tx.run('DELETE FROM voice_members WHERE user_id=?', [userId]);
+      return;
+    }
+    const restriction = await tx.one('SELECT muted FROM voice_restrictions WHERE channel_id=? AND user_id=?', [channelId, userId]);
+    await tx.run('UPDATE voice_members SET server_muted=? WHERE user_id=?', [Number(!access.permissions.speak || Boolean(restriction?.muted)), userId]);
+    if (!access.permissions.share) await tx.run('DELETE FROM share_leases WHERE user_id=?', [userId]);
   }
   async voicePolicy(actorId: string, rid: string, channelId: string, body: { locked: boolean; userLimit: number; tagMode: 'ANY' | 'ALL'; requiredTags: string[] }) {
     const result = await this.mutate(actorId, rid, 'voice.policy', { channelId, ...body }, async tx => {

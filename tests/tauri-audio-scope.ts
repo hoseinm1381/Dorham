@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 export async function proveAudioScopes(page: Page, fixture: string) {
   const sources = ['selected', 'unrelated'].map(label => spawn(path.resolve(fixture), [label, 'tones'], {
@@ -62,7 +63,31 @@ export async function proveAudioScopes(page: Page, fixture: string) {
       });
       void captured.catch(() => {});
       const picker = await opening;
+      await expect(picker).toHaveURL('https://localhost/capture-picker.html');
+      await expect(picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true })).toBeVisible();
+      if (scope === 'system') {
+        // Exercise the shipped picker with Windows 10 capabilities. Native
+        // endpoint-loopback PCM is verified separately, without faking audio.
+        const script = await readFile('apps/desktop/capture-picker.js', 'utf8');
+        await picker.evaluate(`(() => {
+          const bridge = window.capturePicker;
+          const fixture = { ...bridge, model: async () => ({ ...await bridge.model(), processAudioSupported: false }) };
+          const proxy = {
+            capturePicker: fixture,
+            IntersectionObserver: window.IntersectionObserver,
+            setTimeout: window.setTimeout.bind(window),
+            clearTimeout: window.clearTimeout.bind(window),
+            addEventListener: window.addEventListener.bind(window),
+          };
+          ((window) => { ${script} })(proxy);
+        })()`);
+        await expect(picker.locator('#scope')).toHaveValue('none');
+        await expect(picker.locator('#scope option[value=application]')).toBeDisabled();
+        await expect(picker.locator('#scope option[value=system]')).toHaveText('All sound on the default output');
+        await expect(picker.locator('#scope-description')).toContainText('including notifications and Dorham voices');
+      }
       await picker.getByRole('option', { name: 'Dorham owned capture fixture selected', exact: true }).click();
+      if (scope === 'system') await expect(picker.locator('#scope')).toHaveValue('none');
       await picker.locator('#scope').selectOption(scope);
       await picker.getByRole('button', { name: 'Share', exact: true }).click();
       const measured = await captured;

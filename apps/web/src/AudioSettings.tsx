@@ -27,13 +27,14 @@ export function AudioSettings({ account, transport, error }: { account: string; 
       });
     } catch (e) { error(e); } finally { setBusy(false); }
   }
-  return <fieldset className="audio-settings" disabled={busy} aria-label={t('Audio')}><p className="audio-intro">{t('Sound good. Keep it simple.')}</p>
+  return <fieldset className="audio-settings" disabled={busy} aria-label={t('Audio')}>
+    <div className="audio-input-card"><VoiceInputSettings/></div>
     <MicrophoneGainControl transport={transport} onError={error}/>
     <label>{t('Noise removal')}<select aria-label={t('Noise removal')} disabled={busy || Boolean(native)} value={mode} onChange={e => { void choose(e.target.value as NoiseRemoval); }}>
       <option value="off">{t('Off')}</option><option value="standard">{t('Standard')}</option><option value="strong">{t('Strong')}</option>
     </select></label>
     <p className="audio-noise-help" role="status">{t(native ? 'Android manages microphone noise and echo processing automatically.' : busy || state?.status === 'loading' ? 'Starting noise removal…' : state?.status === 'fallback' ? 'Strong noise removal is unavailable; Standard is active.' : mode === 'strong' ? 'Stronger background-noise removal on your device. Uses more processing.' : mode === 'off' ? 'Background-noise removal is off. Echo settings stay unchanged.' : 'Everyday background-noise removal with low processing use.')}</p>
-    <AudioDeviceSettings account={account} transport={transport} error={error} advancedControls={<><MicrophoneGainControl transport={transport} onError={error} advanced/><VoiceInputSettings/><AudioProcessingControls transport={transport} onError={error} onBusyChange={setBusy}/></>}/>
+    <AudioDeviceSettings account={account} transport={transport} error={error} advancedControls={<><MicrophoneGainControl transport={transport} onError={error} advanced/><AudioProcessingControls transport={transport} onError={error} onBusyChange={setBusy}/></>}/>
 
   </fieldset>;
 }

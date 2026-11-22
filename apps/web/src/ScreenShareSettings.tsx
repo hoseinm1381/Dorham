@@ -4,7 +4,7 @@ import type { Share } from '@dorham/contracts';
 import { t } from './i18n';
 export type ScreenPreferences={quality:ScreenQuality;bandwidth:number};
 const key='dorham.screen-sharing.v1';
-export function readScreenPreferences():ScreenPreferences{try{const value=JSON.parse(localStorage.getItem(key)||'null');if(value&&value.quality!=='1080p15'&&screenQualities.includes(value.quality)&&screenBandwidths.includes(value.bandwidth))return value;}catch{/* Use conservative defaults without storage. */}return {quality:'720p15',bandwidth:450000};}
+export function readScreenPreferences():ScreenPreferences{try{const value=JSON.parse(localStorage.getItem(key)||'null');if(value&&screenQualities.includes(value.quality)&&screenBandwidths.includes(value.bandwidth))return value;}catch{/* Use conservative defaults without storage. */}return {quality:'720p15',bandwidth:450000};}
 export function saveScreenPreferences(value:ScreenPreferences){try{localStorage.setItem(key,JSON.stringify(value));}catch{/* Current session still works. */}}
 export function effectiveScreenPreferences(value:ScreenPreferences,share?:Pick<Share,'requestedFrameRate'>):ScreenPreferences{return share?.requestedFrameRate===15?{...value,quality:value.quality.replace('30','15') as ScreenQuality}:value;}
 export function screenSummary(value:ScreenPreferences,policy?:ScreenPolicy,share?:Pick<Share,'requestedFrameRate'|'maxFrameRate'|'includeAudio'|'maxHeight'|'maxBitrate'>){const s=screenSettings(effectiveScreenPreferences(value,share).quality,policy,share,value.bandwidth);return `${s.height}p · ${s.fps}fps · ${Math.round((s.bitrate+s.audioBitrate)/1000)} ${t('kbps')}`;}

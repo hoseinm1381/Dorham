@@ -5,6 +5,8 @@ import type { VoiceRoom } from '@dorham/contracts';
 import type { VoiceTts, VoiceTtsProgress } from '../../../packages/contracts/src/tts';
 import { acceptTtsProgress, clearTtsProgress } from './TtsProgress';
 import { speechAudio } from './api';
+import { mediaCongested } from '../../../packages/media/src/network-pressure';
+import { storageSettings } from './offline-storage';
 import { readAudioChoices } from './AudioDevices';
 import { currentLanguage, t } from './i18n';
 import { onDemandDesktopAudio } from './notifications';
@@ -40,7 +42,7 @@ export function useVoiceTts(socket: React.RefObject<Socket | null>, room: VoiceR
       if (processing || !queue.length || (!androidSpeech && context?.state !== 'running')) return;
       processing = true; const event = queue.shift()!, epoch = generation;
       try {
-        if (!allowed(event)) return;
+        if (!allowed(event) || mediaCongested() || event.loadingLanguage && storageSettings().dataSaver) return;
         let audio: ArrayBuffer;
         if (event.loadingLanguage) {
           const asset = event.loadingLanguage === 'fa' ? loadingPersian : loadingEnglish;

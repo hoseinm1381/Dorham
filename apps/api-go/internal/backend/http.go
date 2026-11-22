@@ -181,8 +181,8 @@ func (a *App) middleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, X-Request-Id, X-Dorham-Native, Range")
-		w.Header().Set("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, X-Request-Id, X-Dorham-Native, Range, If-Range")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, ETag")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -269,7 +269,7 @@ func (a *App) rateRequest(r *Request) {
 		key = "account:" + Str(u, "id")
 	}
 	a.takeRate(key, 600, 60000)
-	if r.R.Method == "POST" && Contains([]string{"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/recover", "/api/v1/auth/guest", "/api/v1/auth/refresh"}, r.R.URL.Path) {
+	if r.R.Method == "POST" && Contains([]string{"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/recover", "/api/v1/auth/guest", "/api/v1/auth/refresh", "/api/v1/auth/refresh-safe"}, r.R.URL.Path) {
 		a.takeRate("auth-source:"+source, 60, 900000)
 		if name := Str(r.Body, "username"); name != "" && len(name) <= 32 {
 			a.takeRate("auth-account:"+Hash(strings.ToLower(name)), 60, 900000)

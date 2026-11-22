@@ -32,7 +32,7 @@ test('simple audio defaults, advanced boost, saved noise modes and mobile Persia
   await page.getByRole('button', { name: 'Reset microphone gain', exact: true }).click(); await expect(volume).toHaveValue('100');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await settings(page); await page.getByRole('tab', { name: 'Audio', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 }); expect(await page.locator('.modal').evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true); await capture(page, 'audio-mobile');
-  await page.getByRole('tab', { name: 'Profile', exact: true }).click(); await page.locator('.language-picker select').selectOption('fa-IR');
+  await page.getByRole('tab', { name: 'Language', exact: true }).click(); await page.locator('.language-picker select').selectOption('fa-IR');
   await page.getByRole('tab', { name: 'صدا', exact: true }).click(); await expect(page.getByLabel('حذف نویز', { exact: true })).toBeVisible();
   expect(await page.locator('.modal').evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true); await capture(page, 'audio-persian');
 });

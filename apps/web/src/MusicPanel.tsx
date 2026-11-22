@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, Check, Disc3, Heart, HeadphoneOff, Headphones, Link2, ListMusic, LogOut, Music2, Pause, Play, Plus, Radio, Repeat, Repeat1, Search, Settings2, Shuffle, SkipBack, SkipForward, Trash2, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Heart, HeadphoneOff, Headphones, Link2, ListMusic, LogOut, Music2, Pause, Play, Plus, Radio, Repeat, Repeat1, Search, Settings2, Shuffle, SkipBack, SkipForward, Trash2, Volume2, VolumeX, X } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
 import { normalizePeopleSearch } from '../../../packages/contracts/src/persian';
 import { request } from './api';
@@ -21,25 +21,9 @@ const time = (value: number) => {
 function artIndex(track?: MusicTrack) {
   return (track?.id || '').split('').reduce((sum, letter) => sum + letter.charCodeAt(0), 0) % 3;
 }
-export function MusicAvatar({ track, large = false }: { track?: MusicTrack; large?: boolean }) {
-  const Icon = track?.live ? Radio : large ? Disc3 : Music2;
-  return <span className={'music-art' + (large ? ' music-art-large' : '')} data-palette={artIndex(track)} aria-hidden="true"><Icon size={large ? 46 : 18}/></span>;
-}
-
-export function MusicVoiceButton({ open }: { open: () => void }) {
-  const label = t('Open music player');
-  return <button type="button" className="icon-button music-compact" aria-label={label} title={label} aria-haspopup="dialog" onClick={open}><Music2 size={19} aria-hidden="true"/></button>;
-}
-
-export function MusicBotRow({ title, active, muted, serverDeafened, open, toggle, remove, removing }: { title?: string; active?: boolean; muted?: boolean; serverDeafened?: boolean; open: () => void; toggle?: () => void; remove?: () => void; removing?: boolean }) {
-  return <div className="music-bot-item"><button className="music-bot-row" type="button" onClick={open} onContextMenu={event => { event.preventDefault(); open(); }}>
-    <MusicAvatar/><span className="music-bot-name"><strong>{t('Dorham Music')} <small>{t('BOT')}</small></strong>{title && <span><bdi>{title}</bdi></span>}</span>
-    {serverDeafened && <HeadphoneOff className="music-deafened" size={14} role="img" aria-label={t('Server deafened')}><title>{t('Server deafened. Dorham Music cannot hear voice chat.')}</title></HeadphoneOff>}
-    {active && !muted && <span className="music-wave" aria-label={t('Playing')}><i/><i/><i/></span>}
-  </button>
-    {toggle && <MusicIcon label={muted ? 'Unmute music for me' : 'Mute music for me'} pressed={muted} onClick={toggle}>{muted ? <VolumeX size={15}/> : <Volume2 size={15}/>}</MusicIcon>}
-    {remove && <MusicIcon label="Remove music bot from voice" disabled={removing} onClick={remove}><LogOut size={15}/></MusicIcon>}
-  </div>;
+export function MusicAvatar({ track }: { track?: MusicTrack }) {
+  const Icon = track?.live ? Radio : Music2;
+  return <span className="music-art" data-palette={artIndex(track)} aria-hidden="true"><Icon size={18}/></span>;
 }
 
 function MusicIcon({ label, children, onClick, disabled, pressed }: { label: string; children: ReactNode; onClick: () => void; disabled?: boolean; pressed?: boolean }) {
@@ -50,6 +34,7 @@ export function MusicPanel({ channel, name, account, socket, listening, close }:
   const node = useRef<HTMLDialogElement>(null);
   const [data, setData] = useState<MusicData>();
   const [tab, setTab] = useState<Tab>('Library');
+  const [moreOpen, setMoreOpen] = useState(false);
   const [link, setLink] = useState('');
   const [checkingLink, setCheckingLink] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,8 +72,9 @@ export function MusicPanel({ channel, name, account, socket, listening, close }:
     const update = (event?: { channelId: string }) => { if (!event || event.channelId === channel) void refresh(controller.signal); };
     update();
     socket?.on('music:changed', update);
-    const timer = setInterval(update, 6000);
-    return () => { controller.abort(); socket?.off('music:changed', update); clearInterval(timer); };
+    socket?.on('connect', update);
+    const timer = setInterval(() => { if (!socket?.connected && document.visibilityState === 'visible' && navigator.onLine !== false) update(); }, 15000);
+    return () => { controller.abort(); socket?.off('music:changed', update); socket?.off('connect', update); clearInterval(timer); };
   // The panel is keyed by channel. Its socket and fetches are replaced together.
   }, [channel, socket]);
 
@@ -115,7 +101,7 @@ export function MusicPanel({ channel, name, account, socket, listening, close }:
   const position = state?.status === 'playing' ? (state.position || 0) + Math.max(0, clock - received) : state?.position || 0;
   const playable = state?.status === 'playing' || state?.status === 'buffering';
   const stage = state?.policy.disabled ? t('Music is disabled in this channel.') : state?.disconnected ? t('Music disconnected') : t(labels[state?.status || 'idle']);
-  const tabs: Tab[] = ['Library', 'Queue', 'Playlists', 'Community', 'Music settings'];
+  const extraTabs: Tab[] = ['Playlists', 'Community', 'Music settings'];
   const canAddLink = data?.canRequest && !state?.policy.disabled;
   const linkAction = state?.policy.mode === 'approval' && !data?.canDJ ? 'Request track' : current ? 'Add to queue' : 'Play link';
 
@@ -154,10 +140,10 @@ export function MusicPanel({ channel, name, account, socket, listening, close }:
         <div className="music-layout">
           <section className="music-playing" aria-label={t('Now playing')}>
             <div className="music-hero">
-              <MusicAvatar large track={current?.track}/>
-              <div className="music-track-head"><span className={'music-stage music-stage-' + state.status}>{stage}</span>
+              {current && <MusicAvatar track={current.track}/>}
+              <div className="music-track-head">{(current || state.disconnected || state.policy.disabled) && <span className={'music-stage music-stage-' + state.status}>{stage}</span>}
                 <h3><bdi>{current?.track.title || t('Nothing playing yet')}</bdi></h3>
-                {current ? <p><bdi>{current.track.artist}</bdi>{current.track.explicit && <span className="music-explicit" title={t('Explicit')}>E</span>}</p> : <p>{t('Choose a track from the library to get started.')}</p>}
+                {current && <p><bdi>{current.track.artist}</bdi>{current.track.explicit && <span className="music-explicit" title={t('Explicit')}>E</span>}</p>}
               </div>
             </div>
             {current && !current.track.live && current.track.duration > 0 && <div className="music-timeline">
@@ -165,8 +151,7 @@ export function MusicPanel({ channel, name, account, socket, listening, close }:
               <div dir="ltr"><span>{time(seeking ?? Math.min(position, current.track.duration))}</span><span>{time(current.track.duration)}</span></div>
             </div>}
             {current?.track.live && <p className="music-live"><span/> {t(current.track.source === 'link' ? 'Linked audio' : 'Live radio')}</p>}
-            {current?.name && <p className="music-requester">{t('Requested by {name}', { name: current.name })}</p>}
-            {data.canDJ && <div className="music-transport">
+            {data.canDJ && (current || queued.length > 0) && <div className="music-transport">
               <MusicIcon label="Previous track" disabled={busy || !state.history?.length} onClick={() => void command('previous')}><SkipBack size={20}/></MusicIcon>
               <button type="button" className="music-play" disabled={busy || (!current && !queued.length) || state.policy.disabled} aria-label={t(playable ? 'Pause music' : 'Resume music')} onClick={() => void command(current ? playable ? 'pause' : 'resume' : 'start')}>
                 {playable ? <Pause size={23} fill="currentColor"/> : <Play size={23} fill="currentColor"/>}
@@ -184,8 +169,12 @@ export function MusicPanel({ channel, name, account, socket, listening, close }:
             </div>
           </section>
           <section className="music-content">
-            <nav className="music-tabs" aria-label={t('Music views')}>{tabs.map(next => <button key={next} type="button" aria-current={tab === next ? 'page' : undefined} onClick={() => setTab(next)}>{next === 'Music settings' ? <Settings2 size={17} aria-hidden="true"/> : null}{t(next)}{next === 'Queue' && queued.length > 0 && <small>{formatNumber(queued.length)}</small>}</button>)}</nav>
-            {tab === 'Library' && <MusicLibrary data={data} busy={busy} command={command} listening={listening} playlists={() => setTab("Playlists")}/>}
+            <nav className="music-tabs" aria-label={t('Music views')}>
+              {(['Library', 'Queue'] as const).map(next => <button key={next} type="button" aria-current={tab === next ? 'page' : undefined} onClick={() => { setTab(next); setMoreOpen(false); }}>{t(next)}{next === 'Queue' && queued.length > 0 && <small>{formatNumber(queued.length)}</small>}</button>)}
+              <button type="button" aria-expanded={moreOpen} aria-current={extraTabs.includes(tab) ? 'page' : undefined} onClick={() => setMoreOpen(value => !value)}>{t('More')}</button>
+            </nav>
+            {moreOpen && <div className="music-more">{extraTabs.map(next => <button className="secondary" key={next} type="button" aria-current={tab === next ? 'page' : undefined} onClick={() => { setTab(next); setMoreOpen(false); }}>{next === 'Music settings' && <Settings2 size={15} aria-hidden="true"/>}{t(next)}</button>)}</div>}
+            {tab === 'Library' && <MusicLibrary data={data} busy={busy} command={command} listening={listening} playlists={() => { setTab('Playlists'); setMoreOpen(false); }}/>}
             {tab === 'Queue' && <MusicQueue data={data} busy={busy} command={command} account={account}/>}
             {tab === 'Playlists' && <MusicPlaylists data={data} busy={busy} command={command}/>}
             {tab === 'Community' && <MusicCommunity route={route} data={data} queue={command}/>}
@@ -221,13 +210,13 @@ function MusicLibrary({ data, busy, listening, command, playlists }: { playlists
   const allowed = !busy && data.canRequest && !data.state.policy.disabled;
   const play = data.state.policy.mode === 'approval' && !data.canDJ ? 'Request track' : data.state.current ? 'Add to queue' : 'Play track';
   return <div className="music-pane">
+    <div className="music-search"><Search size={18} aria-hidden="true"/><input aria-label={t('Search music')} placeholder={t('Search by title, artist, or album')} value={query} onChange={event => setQuery(event.target.value)}/></div>
+    <div className="music-filter">{(['All tracks', 'Favorites', 'Radio'] as const).map(value => <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(value)}</button>)}</div>
     {official && !text && filter === 'All tracks' && <div className="music-official">
       <MusicAvatar/>
       <button className="music-track-text" type="button" onClick={playlists}><strong><bdi>{t(official.name)}</bdi></strong><small>{t('Official playlist')}</small></button>
       {data.canRequest && <button className="secondary" type="button" disabled={!allowed || !official.tracks?.length} onClick={() => void command('import', { playlist: official.id })}><Play size={15}/>{t(data.state.current ? 'Add to queue' : 'Play playlist')}</button>}
     </div>}
-    <div className="music-search"><Search size={18} aria-hidden="true"/><input aria-label={t('Search music')} placeholder={t('Search by title, artist, or album')} value={query} onChange={event => setQuery(event.target.value)}/></div>
-    <div className="music-filter">{(['All tracks', 'Favorites', 'Radio'] as const).map(value => <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(value)}</button>)}</div>
     {album.length > 1 && allowed && <div className="music-filter"><button onClick={() => void command('import', { tracks: album.map(track => track.id) })}><ListMusic size={16}/>{t('Add album')}</button></div>}
     {!tracks.length && <p className="music-empty">{t(text ? 'No tracks match your search.' : 'There are no tracks here yet.')}</p>}
     <div className="music-list">{tracks.map(track => <TrackRow key={track.id} track={track} subtitle={track.album ? <> · <bdi>{track.album}</bdi></> : undefined}>
@@ -331,6 +320,7 @@ function MusicSettings({ data, busy, listening, command }: { data: MusicData; bu
     {data.canDJ && <div className="music-form"><h3>{t('Room playback')}</h3>
       <label>{t('Room music level')}<input type="range" min={0} max={data.state.policy.maxVolume} value={roomVolume} onChange={event => setRoomVolume(Number(event.target.value))}/><output>{formatNumber(roomVolume)}%</output></label>
       <button type="button" className="secondary" disabled={busy || data.state.policy.disabled || roomVolume === data.state.volume} onClick={() => void command('volume', { value: roomVolume })}>{t('Set room level')}</button>
+      <label className="check-row"><input type="checkbox" checked={Boolean(data.state.lowBandwidth)} disabled={busy || data.state.policy.disabled} onChange={event => { void command('quality', { lowBandwidth: event.target.checked }); }}/>{t('Use less data for room music')}</label>
       <label>{t('Continue with a shared playlist')}<select disabled={busy || data.state.policy.disabled} value={data.state.autoplay || ''} onChange={event => void command('autoplay', { playlist: event.target.value })}><option value="">{t('Off')}</option>{playlists.map(list => <option key={list.id} value={list.id}>{list.name}</option>)}</select></label>
     </div>}
     {data.canDJ && <MusicEvents data={data} busy={busy} command={command}/>}

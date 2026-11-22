@@ -70,9 +70,31 @@ func TestFeatureCatalogAndVoicePolicies(t *testing.T) {
 		t.Fatal("selected policy leaked")
 	}
 	lease := Obj(action("share:start", M{"protocolVersion": 2, "height": 1080, "includeAudio": false}, true)["lease"])
-	if N(lease["maxHeight"]) != 1080 || N(lease["maxBitrate"]) != 1400000 || N(lease["maxFrameRate"]) != 15 {
+	if N(lease["maxHeight"]) != 1080 || N(lease["maxBitrate"]) != 1400000 || N(lease["maxFrameRate"]) != 30 {
 		t.Fatalf("incorrect HD lease: %v", lease)
 	}
+	lease = Obj(action("share:update", M{"leaseId": lease["id"], "expectedRevision": lease["policyRevision"], "frameRate": 30}, true)["lease"])
+	if N(lease["requestedFrameRate"]) != 30 || N(lease["maxHeight"]) != 1080 {
+		t.Fatalf("1080p share failed to apply 30 FPS: %v", lease)
+	}
+	viewer, _, viewerToken, _ := integrationSession(a, true)
+	a.DB.Run("INSERT INTO members(server_id,user_id,role,joined_at) VALUES(?,?,'member',?)", space, viewer, Now())
+	watchSocket, ok := integrationSocket(t, server.URL, "capacitor://localhost", "", M{"token": viewerToken})
+	if !ok {
+		t.Fatal("viewer socket refused")
+	}
+	if result := voiceSocketAction(t, watchSocket, "voice:join", M{"channelId": channel, "eligible": true}); !B(result["ok"]) {
+		t.Fatalf("viewer could not join: %v", result)
+	}
+	watch := voiceSocketAction(t, watchSocket, "share:audience", M{"watching": []any{lease["id"]}})
+	if !B(watch["ok"]) || len(Obj(watch["data"])["viewers"].([]any)) != 0 {
+		t.Fatalf("viewer report failed or leaked the roster: %v", watch)
+	}
+	audience := action("share:audience", M{"watching": []any{}}, true)["viewers"].([]any)
+	if len(audience) != 1 || audience[0] != viewer {
+		t.Fatalf("streamer did not receive the viewer: %v", audience)
+	}
+	_ = watchSocket.Close()
 	grant("screen1080", false)
 	if row := a.DB.One("SELECT quality_height FROM share_leases WHERE user_id=?", user); N(row["quality_height"]) != 720 {
 		t.Fatal("revocation did not downgrade active share")

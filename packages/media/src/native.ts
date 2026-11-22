@@ -5,6 +5,7 @@ import { ack } from './signaling';
 import type { MediaOptions, MediaTransport, RemoteScreen } from './index';
 import { listenOnlyNotice } from './microphone-access';
 import { VoiceRecovery } from './voice-recovery';
+import { reportMediaPressure } from './network-pressure';
 export const NativeMedia = registerPlugin<any>('DorhamMedia');
 export class NativeTransport implements MediaTransport {
   getCapabilities() { return { audio: true, screenCapture: true, nativeVideo: true, amplification: true, sharedAudio: this.audioSupported && this.auxiliaryAudioSupported && this.room?.transport === 'livekit' }; }
@@ -21,7 +22,7 @@ export class NativeTransport implements MediaTransport {
   private leaving?: Promise<void>;
   private setListenOnly(value: boolean) { if (this.listenOnly === value) return; this.listenOnly = value; this.options.emit('listenOnly', value); if (value) this.options.emit('notice', listenOnlyNotice); }
   private heartbeat?: ReturnType<typeof setInterval>; private handles: PluginListenerHandle[] = []; private lease: Share | null = null;
-  private onRoom = (r: VoiceRoom) => { if (r.channelId === this.channelId) { this.room = r;const own=r.shares.find(s=>s.userId===this.options.userId);if (this.lease && own) { const previous = this.lease; this.lease = own; if (!this.updatingScreenQuality && previous.maxHeight === 1080 && (own.maxHeight !== 1080 || previous.maxBitrate !== own.maxBitrate)) void this.applyScreenQuality(own.maxHeight === 1080 ? '1080p15' : '720p15').catch(error => this.options.emit('error', error.message)); } void NativeMedia.updateRoom({ room: r, selfId: this.options.userId }).catch((error: Error) => this.options.emit('error', error.message)); this.publishScreens(); this.options.emit('room', r); if (this.lease && !r.shares.some(s => s.id === this.lease!.id)) void this.stopShare(); } };
+  private onRoom = (r: VoiceRoom) => { if (r.channelId === this.channelId) { this.room = r;const own=r.shares.find(s=>s.userId===this.options.userId);if (this.lease && own) { const previous = this.lease; this.lease = own; if (!this.updatingScreenQuality && previous.maxHeight === 1080 && (own.maxHeight !== 1080 || previous.maxBitrate !== own.maxBitrate)) void this.applyScreenQuality(own.maxHeight === 1080 ? (own.requestedFrameRate === 30 ? '1080p30' : '1080p15') : (own.requestedFrameRate === 30 && (own.maxFrameRate ?? 15) >= 30 ? '720p30' : '720p15')).catch(error => this.options.emit('error', error.message)); } void NativeMedia.updateRoom({ room: r, selfId: this.options.userId }).catch((error: Error) => this.options.emit('error', error.message)); this.publishScreens(); this.options.emit('room', r); if (this.lease && !r.shares.some(s => s.id === this.lease!.id)) void this.stopShare(); } };
   private onSignal = (s: Signal) => { if (s.channelId === this.channelId) void NativeMedia.signal({ signal: s }); };
   private onMoved = (move: { channelId: string }) => { void this.leave().then(() => this.join(move.channelId)).catch(e => this.options.emit('error', e.message)); };
   private onRemoved = (event?: { epoch?: string }) => { if (this.channelId && (!event?.epoch || event.epoch === this.epoch)) void this.leave(false); };
@@ -51,6 +52,7 @@ export class NativeTransport implements MediaTransport {
       selfId: this.options.userId, initialMusicVolume: this.options.initialMusicVolume?.() ?? .30, epoch: this.epoch, iceServers: this.iceServers, room, credentials,
       ...(this.nativeVoiceToken && this.options.serverOrigin ? { backgroundVoice: { origin: this.options.serverOrigin, token: this.nativeVoiceToken } } : {}),
       muted: this.muted || this.listenOnly, deafened: this.deafened, recovering,
+      dataSaver: this.options.dataSaver?.() === true,
       language: globalThis.document?.documentElement.lang || 'en-US', channelName: this.options.channelName?.(room.channelId) || 'Voice channel',
     });
     if (!current()) return;
@@ -111,6 +113,7 @@ export class NativeTransport implements MediaTransport {
       });
       await listen('video', () => this.publishScreens());
       await listen('status', event => { if (!this.recovery.pending) this.options.emit('status', event.message); });
+      await listen('networkPressure', event => reportMediaPressure('voice', event.poor === true));
       await listen('nativeMuted', event => { window.dispatchEvent(new CustomEvent('dorham-native-mute', { detail: event.muted })); });
       const prepared = await NativeMedia.prepare();
       checkCurrent();
@@ -146,7 +149,7 @@ export class NativeTransport implements MediaTransport {
     const result = await ack(this.options.socket, 'share:start', { requestId: crypto.randomUUID(),protocolVersion:2, includeAudio, ...shareHeight(quality) }); this.lease = result.lease;
     try { if(quality.endsWith('30')&&(this.lease!.maxFrameRate||15)>=30){const updated=await ack(this.options.socket,'share:update',{requestId:crypto.randomUUID(),leaseId:this.lease!.id,expectedRevision:this.lease!.policyRevision,frameRate:30});this.lease=updated.lease;}const audioCredentials = includeAudio ? await ack(this.options.socket, 'voice:sfu', { channelId: this.channelId, purpose: 'screenAudio', leaseId: this.lease!.id }) : null;
       if (includeAudio && audioCredentials?.identity !== `${this.options.userId}:${this.epoch}:screen:${this.lease!.id}`) throw new Error('Sound sharing requires the updated server.');
-      await NativeMedia.startShare({ leaseId: this.lease!.id, quality: quality === '1080p15' && this.lease?.maxHeight !== 1080 ? '720p15' : quality, includeAudio, audioCredentials, ...screenSettings(quality, this.options.screenPolicy,this.lease!,options.bandwidth) }); if (generation !== this.captureGeneration || !this.channelId) { await NativeMedia.stopShare(); return; } this.captureActive = true; this.publishScreens(); } catch (e) { await this.stopShare(); throw e; }
+      await NativeMedia.startShare({ leaseId: this.lease!.id, quality: quality.startsWith('1080') && this.lease?.maxHeight !== 1080 ? '720p15' : quality, includeAudio, audioCredentials, ...screenSettings(quality, this.options.screenPolicy,this.lease!,options.bandwidth) }); if (generation !== this.captureGeneration || !this.channelId) { await NativeMedia.stopShare(); return; } this.captureActive = true; this.publishScreens(); } catch (e) { await this.stopShare(); throw e; }
   }
   private updatingScreenQuality = false;
   async setShareQuality(quality: ScreenQuality, bandwidth?: number) {
@@ -160,7 +163,7 @@ export class NativeTransport implements MediaTransport {
   }
   private async applyScreenQuality(requested: ScreenQuality, bandwidth?: number) {
     if (!this.captureActive || !this.lease) return;
-    const quality = requested === '1080p15' && this.lease.maxHeight !== 1080 ? '720p15' : requested;
+    const quality = requested.startsWith('1080') && this.lease.maxHeight !== 1080 ? '720p15' : requested;
     await NativeMedia.setShareQuality({ quality, ...screenSettings(quality, this.options.screenPolicy, this.lease, bandwidth) });
   }
   private publishScreens() {
@@ -195,6 +198,7 @@ export class NativeTransport implements MediaTransport {
     const notify = notifyServer && was && this.options.socket.connected ? ack(this.options.socket, 'voice:leave', ticket ?? {}).catch(() => {}) : undefined;
     await this.stopShare().catch(() => {});
     await NativeMedia.leave().catch(() => {});
+    reportMediaPressure('voice', false);
     for (const handle of handles) await handle.remove().catch(() => {});
     this.room = null;
     this.delivered.clear();

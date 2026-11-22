@@ -19,7 +19,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::webview::NewWindowResponse;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use windows_core::w;
 use windows_version::OsVersion;
 
@@ -130,7 +130,7 @@ impl Capture {
     }
 
     pub fn shared_audio(&self) -> bool {
-        OsVersion::current().build >= 20348 && self.audio_binary.is_file()
+        self.supported() && self.audio_binary.is_file()
     }
 
     pub fn picker_open(&self) -> bool {
@@ -276,6 +276,7 @@ pub fn capture_picker_model(window: WebviewWindow) -> Result<Value, String> {
         "language": if host.persian.load(Ordering::Acquire) { "fa-IR" } else { "en-US" },
         "audioRequested": picker.audio,
         "audioSupported": audio_supported,
+        "processAudioSupported": OsVersion::current().build >= 20348,
     }))
 }
 
@@ -412,6 +413,9 @@ pub fn capture_picker_select(window: WebviewWindow, choice: Choice) -> Result<()
         if choice.audio_scope == AudioScope::Application && fresh.kind != Kind::Window {
             return Err("Choose a window for application audio".into());
         }
+        if choice.audio_scope == AudioScope::Application && OsVersion::current().build < 20348 {
+            return Err("This Windows version supports computer sound only. Choose that option explicitly.".into());
+        }
         Some(Selection {
             source: fresh,
             audio_scope: choice.audio_scope,
@@ -524,9 +528,12 @@ pub async fn capture_video(
     let stopped = Arc::new(AtomicBool::new(false));
     let output = latest.clone();
     let failed = stopped.clone();
+    let app = window.app_handle().clone();
     thread::spawn(move || {
-        let _ = read_frames(stdout, output, settings);
+        let notify = || { let _ = app.emit_to(crate::MAIN, "capture-frame-ready", generation); };
+        let _ = read_frames(stdout, output, settings, &notify);
         failed.store(true, Ordering::Release);
+        notify();
     });
     let result = json!({
         "id": generation, "sourceName": selected.source.name,
@@ -572,11 +579,13 @@ fn start_video_helper(
         .spawn()
 }
 
-fn read_frames(mut source: impl Read, latest: LatestFrame, settings: Settings) -> io::Result<()> {
+fn read_frames(mut source: impl Read, latest: LatestFrame, settings: Settings, notify: impl Fn()) -> io::Result<()> {
     loop {
         let (buffer, _, _) = read_frame(&mut source, &settings)?;
-        if let Ok(mut latest) = latest.lock() {
-            *latest = Some(buffer);
+        let first_pending = latest.lock().map_err(|_| io::Error::other("capture stopped"))?
+            .replace(buffer).is_none();
+        if first_pending {
+            notify();
         }
     }
 }

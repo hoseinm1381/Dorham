@@ -3,6 +3,7 @@ import type { GameKind, GameView } from '../../../packages/contracts/src/games';
 import { isQuickGame } from '../../../packages/contracts/src/games';
 import { t } from './i18n';
 import { useGameCue, type GameSound } from './game-sound';
+import { arcadeCue } from './game-cues';
 
 export const gameGuide: Record<GameKind|'chess', {tag:string;goal:string;steps:string[]}> = {
   chess:{tag:'Strategy',goal:'Protect your king and checkmate your opponent.',steps:['Choose Standard for familiar chess, or Elixer to buy pieces with coins.','Select a piece, then a marked square. Elixer purchases go on your home two ranks.','Human-match clocks start when someone takes the open seat. Closing the viewer keeps your match and voice connected.']},
@@ -61,11 +62,22 @@ export function GameCountdown({ view, receivedAt, sound, connected }: { view: Ga
   const end = view.pausedUntil || view.deadline;
   useEffect(() => {
     if (!end || view.status === 'finished') return;
-    const update = () => { if (!document.hidden) render(n => n + 1); };
-    const timer = setInterval(update, 250);
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      if (document.hidden) return;
+      const remaining = end - view.serverNow - (performance.now() - receivedAt);
+      if (remaining > 0) timer = setTimeout(update, (remaining % 1000 || 1000) + 16);
+    };
+    function update() {
+      clearTimeout(timer);
+      if (document.hidden) return;
+      render(n => n + 1);
+      schedule();
+    }
+    schedule();
     document.addEventListener('visibilitychange', update);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update); };
-  }, [view.status, end]);
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', update); };
+  }, [view.status, end, view.serverNow, receivedAt]);
   const seconds = Math.max(0, Math.ceil((end - view.serverNow - (performance.now() - receivedAt)) / 1000));
   const [label, duration] = clockDetails(view);
   const urgent = seconds > 0 && seconds <= Math.min(10, duration / 3);
@@ -79,41 +91,14 @@ export function GameCountdown({ view, receivedAt, sound, connected }: { view: Ga
 }
 
 export function useArcadeCue(view: GameView | null, sound: GameSound, connected: boolean) {
-  const s = view?.state;
-  const previousTokens = useRef<string | undefined>(undefined);
-  const tokens = view?.kind === 'ludo' ? s?.tokens?.flat().join(',') : undefined;
-  let event: string | undefined, cue: Parameters<typeof useGameCue>[3] = 'move';
-  if (view?.status === 'finished') {
-    event = 'finish'; cue = 'finish';
-  } else if (view?.status === 'playing' && s && !view.pausedUntil) {
-    switch (view.kind) {
-      case 'four': event = `drop-${s.last ?? 'start'}`; break;
-      case 'domino': event = `tile-${s.round}-${s.chain.length}`; break;
-      case 'ludo':
-        event = `ludo-${tokens}-${s.die}-${s.turn}-${s.phase}`;
-        cue = s.die && previousTokens.current === tokens ? 'roll' : 'move';
-        break;
-      case 'poker': event = `cards-${s.hand}-${s.board.length}-${s.phase}`; cue = 'card'; break;
-      case 'telephone': event = `page-${s.step}-${s.submitted}`; cue = s.submitted ? 'success' : 'turn'; break;
-      case 'drawing': event = `drawing-${s.token}-${s.guessed.length}`; cue = s.phase === 'reveal' || s.guessed.length ? 'success' : 'turn'; break;
-      case 'words': event = `words-${s.phase}-${s.team}-${s.revealed.filter(Boolean).length}`; cue = 'turn'; break;
-      default:
-        if (isQuickGame(view.kind)) {
-          if (s.round) {
-            event = `${s.token}-${s.phase}-${s.ownEntry ?? ''}`;
-            cue = s.phase === 'quick-reveal'
-              ? s.gains?.[view.self] > 0 ? 'success' : view.kind === 'target-dice' ? 'roll' : 'card'
-              : s.ownEntry !== null ? 'move' : 'turn';
-          } else {
-            event = `quick-${s.move}-${s.phase}-${s.turn}`;
-            cue = view.kind === 'memory-match' ? 'card' : 'move';
-          }
-        }
-        break;
-    }
-  }
-  useGameCue(sound, connected ? view?.id : undefined, event, cue);
-  useEffect(() => { previousTokens.current = tokens; }, [tokens]);
+  const previous = useRef<GameView | null>(null);
+  useEffect(() => {
+    const prior = previous.current;
+    previous.current = connected ? view : null;
+    if (!connected || !prior || !view) return;
+    const cue = arcadeCue(prior, view);
+    if (cue) sound.play(cue);
+  }, [view, sound, connected]);
 }
 export function TurnPrompt({view}:{view:GameView}){
   const s=view.state;
@@ -133,6 +118,13 @@ export function TurnPrompt({view}:{view:GameView}){
     else if(s.phase==='quick-pick')message=view.self<0?t('Watch the group’s progress.'):mine?t('Make your choice before time runs out.'):t('Choice locked. Waiting for the other players.');
     else message=mine?t('Your turn'):t('Waiting for {name}',{name:seatName(view,s.turn)});
   }
-  else{mine=view.self===s.turn;message=mine?t(view.kind==='ludo'?(s.phase==='roll'?'Your turn: roll the dice.':'Your turn: choose a token to move.'):view.kind==='poker'?'Your turn: check, call, raise, or fold.':view.kind==='domino'?'Your turn: play a matching tile, draw, or pass.':'Your turn: choose a column.'):t('Waiting for {name}',{name:seatName(view,s.turn)});}
+  else {
+    mine = view.self === s.turn;
+    const prompt = view.kind === 'ludo' ? (s.phase === 'roll' ? 'Your turn: roll the dice.' : 'Your turn: choose a token to move.')
+      : view.kind === 'poker' ? 'Your turn: check, call, raise, or fold.'
+      : view.kind === 'domino' ? (view.settings.domino === 'block' ? 'Your turn: play a matching tile or pass.' : 'Your turn: play a matching tile, draw, or pass.')
+      : 'Your turn: choose a column.';
+    message = mine ? t(prompt) : t('Waiting for {name}', { name: seatName(view, s.turn) });
+  }
   return <p className={`game-turn-prompt ${mine&&!view.pausedUntil?'your-turn':''}`} role="status">{message}</p>;
 }

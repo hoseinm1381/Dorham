@@ -14,6 +14,7 @@ import (
 type musicJob struct {
 	Endpoint, Token, File, URL, FFmpeg string
 	PublicLink                         bool
+	LowBandwidth                       bool
 	Position                           int64
 	Volume                             int
 }
@@ -38,7 +39,7 @@ func (m *Music) runChannel(channel string, s musicState) {
 	identity := musicIdentity + ":" + p.epoch + ":music"
 	m.sessions.Store(channel, identity)
 	token := mediaJWT(m.a.C.LivekitKey, m.a.C.LivekitSecret, identity, M{"roomJoin": true, "room": channel, "canSubscribe": false, "canPublish": true, "canPublishSources": []string{"microphone"}, "canPublishData": false, "canUpdateOwnMetadata": false}, 60)
-	job := musicJob{Endpoint: m.a.C.LivekitURL, Token: token, File: asset.File, URL: asset.URL, PublicLink: asset.Source == "link", FFmpeg: m.ffmpeg, Position: s.Position, Volume: s.Volume}
+	job := musicJob{Endpoint: m.a.C.LivekitURL, Token: token, File: asset.File, URL: asset.URL, PublicLink: asset.Source == "link", FFmpeg: m.ffmpeg, Position: s.Position, Volume: s.Volume, LowBandwidth: s.LowBandwidth}
 	m.wg.Go(func() {
 		if previous != nil {
 			select {

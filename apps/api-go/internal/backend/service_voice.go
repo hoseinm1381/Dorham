@@ -14,7 +14,7 @@ func ShareView(row M, c Config) M {
 	}
 	result := M{"id": row["id"], "channelId": row["channel_id"], "userId": row["user_id"], "expiresAt": N(row["expires_at"]), "tier": row["tier"], "startedAt": N(row["started_at"]), "requestedFrameRate": N(row["requested_fps"]), "maxFrameRate": min(fps, int64(c.ScreenMaxFrameRate)), "includeAudio": B(row["include_audio"]), "policyRevision": N(row["policy_revision"])}
 	if N(row["quality_height"]) == 1080 {
-		result["maxHeight"], result["maxBitrate"], result["maxFrameRate"] = 1080, N(row["quality_bitrate"]), 15
+		result["maxHeight"], result["maxBitrate"] = 1080, N(row["quality_bitrate"])
 	}
 	return result
 }
@@ -72,7 +72,7 @@ func (s *Service) voiceDirectoryAt(uid string, tx *DB, now int64) []M {
 		}
 		members := []M{}
 		for _, vm := range tx.All("SELECT v.*,u.username,u.display_name,u.bio,u.avatar,u.status,u.rank_badge,u.profile_frame,u.profile_badge,u.profile_badge_award,u.catalog_avatar FROM voice_members v JOIN users u ON u.id=v.user_id WHERE v.channel_id=? AND v.heartbeat>=? ORDER BY v.joined_at", id, now-30000) {
-			members = append(members, M{"user": PublicUser(Merge(vm, M{"id": vm["user_id"]})), "muted": B(vm["muted"]), "deafened": B(vm["deafened"]), "serverMuted": B(vm["server_muted"])})
+			members = append(members, M{"user": PublicUser(Merge(vm, M{"id": vm["user_id"]})), "muted": B(vm["muted"]), "deafened": B(vm["deafened"]), "serverMuted": B(vm["server_muted"]), "serverDeafened": B(vm["server_deafened"])})
 		}
 		shares := tx.One("SELECT COUNT(*) AS count FROM share_leases WHERE channel_id=? AND expires_at>=?", id, now)
 		if s.MusicEnabled {
@@ -313,15 +313,12 @@ func (s *Service) UpdateShare(uid, socket, rid string, body M) M {
 				bitrate = screenHDAdmission(tx, uid, s.C)
 			}
 		}
-		if N(body["frameRate"]) > 0 && height < 1080 {
+		if N(body["frameRate"]) > 0 {
 			Check(N(body["frameRate"]) <= N(ShareView(Merge(row, M{"quality_height": height}), s.C)["maxFrameRate"]), 409, "SHARE_TIER", "30fps is not available for this share yet.")
 		}
 		fps := row["requested_fps"]
 		if body["frameRate"] != nil {
 			fps = body["frameRate"]
-		}
-		if height == 1080 {
-			fps = 15
 		}
 		audio := row["include_audio"]
 		if v, ok := body["includeAudio"]; ok && !B(v) {
@@ -377,17 +374,24 @@ func (s *Service) Moderate(uid, rid, id, targetID, action string) M {
 	return serviceResult(result)
 }
 func (s *Service) RevalidateVoice(tx *DB, server string) {
-	for _, vm := range tx.All("SELECT v.* FROM voice_members v JOIN channels c ON c.id=v.channel_id WHERE c.server_id=?", server) {
-		if serviceAttempt(func() {
-			access := s.Channel(tx, S(vm["user_id"]), S(vm["channel_id"]))
-			restriction := tx.One("SELECT muted FROM voice_restrictions WHERE channel_id=? AND user_id=?", vm["channel_id"], vm["user_id"])
-			tx.Run("UPDATE voice_members SET server_muted=? WHERE user_id=?", serviceBoolInt(!B(Obj(access["permissions"])["speak"]) || B(restriction["muted"])), vm["user_id"])
-			if !B(Obj(access["permissions"])["share"]) {
-				tx.Run("DELETE FROM share_leases WHERE user_id=?", vm["user_id"])
-			}
-		}) != nil {
-			tx.Run("DELETE FROM voice_members WHERE user_id=?", vm["user_id"])
+	for _, vm := range tx.All("SELECT v.user_id,v.channel_id FROM voice_members v JOIN channels c ON c.id=v.channel_id WHERE c.server_id=?", server) {
+		s.revalidateVoiceMember(tx, S(vm["user_id"]), S(vm["channel_id"]))
+	}
+}
+func (s *Service) revalidateVoiceMember(tx *DB, user, channel string) {
+	var access M
+	if err := serviceAttempt(func() { access = s.Channel(tx, user, channel) }); err != nil {
+		if !serviceAuthorizationError(err) {
+			panic(err)
 		}
+		tx.Run("DELETE FROM voice_members WHERE user_id=?", user)
+		return
+	}
+	p := Obj(access["permissions"])
+	restriction := tx.One("SELECT muted FROM voice_restrictions WHERE channel_id=? AND user_id=?", channel, user)
+	tx.Run("UPDATE voice_members SET server_muted=? WHERE user_id=?", serviceBoolInt(!B(p["speak"]) || B(restriction["muted"])), user)
+	if !B(p["share"]) {
+		tx.Run("DELETE FROM share_leases WHERE user_id=?", user)
 	}
 }
 func (s *Service) VoicePolicy(uid, rid, id string, body M) M {

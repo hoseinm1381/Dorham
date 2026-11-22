@@ -7,6 +7,7 @@ async function api(page: Page, route: string, body?: any, method = body ? 'POST'
   return page.evaluate(async ({ route, body, method }) => { const me = await (await fetch('/api/v1/auth/me')).json(); const result = await fetch(`/api/v1${route}`, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!result.ok) throw new Error(await result.text()); return result.json(); }, { route, body, method });
 }
 async function register(page: Page, username: string) {
+  await page.addInitScript(version => localStorage.setItem('dorham.whats-new-seen', version), project.version);
   await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('eight888');
   await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible();
@@ -28,7 +29,7 @@ test('restricted network supports guests, persistent conversion, safe links, att
     await expect(page.getByTestId('message')).toContainText('سلام mixed Persian and English'); await expect(other.locator('.file-composer')).toHaveCount(0);
     await other.reload(); await expect(other.getByRole('button', { name: 'Open Expansion browser lab', exact: true })).toBeVisible(); expect((await api(other, '/auth/me')).user.id).toBe(guestId);
     await other.getByRole('button', { name: 'Account settings', exact: true }).click();
-    await other.getByRole('tab', { name: 'Privacy', exact: true }).click();
+    await other.getByRole('tab', { name: 'Account & security', exact: true }).click();
     const guestName = `GuestUp${Date.now().toString().slice(-7)}`; await other.locator('.account-controls').getByLabel('Username', { exact: true }).fill(guestName); await other.locator('.account-controls').getByLabel('Password', { exact: true }).fill('eight888');
     await other.getByRole('button', { name: 'Register this account', exact: true }).click(); await expect.poll(async () => (await api(other, '/auth/me')).user.guest).toBe(false); expect((await api(other, '/auth/me')).user.id).toBe(guestId);
     await other.getByRole('button', { name: 'Close dialog', exact: true }).click(); await other.getByRole('button', { name: 'Open Expansion browser lab', exact: true }).click();
@@ -42,8 +43,8 @@ test('restricted network supports guests, persistent conversion, safe links, att
     const received = other.locator('.attachment-card').filter({ hasText: 'pilot-notes.txt' }); await expect(received).toBeVisible();
     const [download] = await Promise.all([other.waitForEvent('download'), received.getByRole('button', { name: 'Download pilot-notes.txt', exact: true }).click()]); expect(download.suggestedFilename()).toBe('pilot-notes.txt');
     const stream = await download.createReadStream(), parts: Buffer[] = []; for await (const part of stream!) parts.push(Buffer.from(part)); expect(Buffer.concat(parts)).toEqual(fileBytes);
-    await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByLabel('Language', { exact: true }).selectOption('fa-IR');
-    await expect(other.locator('html')).toHaveAttribute('dir', 'rtl'); await expect(other.getByRole('button', { name: 'ذخیرهٔ پروفایل', exact: true })).toBeVisible();
+    await other.getByRole('button', { name: 'Account settings', exact: true }).click(); await other.getByRole('tab', { name: 'Language', exact: true }).click(); await other.getByRole('combobox', { name: 'Language', exact: true }).selectOption('fa-IR');
+    await expect(other.locator('html')).toHaveAttribute('dir', 'rtl'); await other.getByRole('tab', { name: 'پروفایل', exact: true }).click(); await expect(other.getByRole('button', { name: 'ذخیرهٔ پروفایل', exact: true })).toBeVisible();
     await mkdir('artifacts/evidence', { recursive: true }); await other.screenshot({ path: 'artifacts/evidence/expansion-persian-settings.png' });
     await other.getByRole('button', { name: 'بستن پنجره', exact: true }).click(); await expect(other.getByRole('button', { name: 'ارسال پیام', exact: true })).toBeVisible();
     await other.screenshot({ path: 'artifacts/evidence/expansion-persian-chat.png' });
@@ -104,7 +105,7 @@ test('supports one-time recovery codes and audited temporary-password administra
   const suffix = Date.now().toString().slice(-7), owner = `Admin${suffix}`, target = `Target${suffix}`;
   try {
     await register(page, owner); await register(other, target);
-    await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Privacy', exact: true }).click(); await page.getByText('Account recovery', { exact: true }).click(); await page.getByLabel('Password to confirm recovery setup', { exact: true }).fill('eight888');
+    await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Account & security', exact: true }).click(); await page.getByText('Account recovery', { exact: true }).click(); await page.getByLabel('Password to confirm recovery setup', { exact: true }).fill('eight888');
     await page.getByRole('button', { name: 'Generate recovery codes', exact: true }).click(); const codes = (await page.locator('.recovery-codes pre').innerText()).trim().split('\n'); expect(codes).toHaveLength(8);
     await page.getByRole('button', { name: 'Hide codes', exact: true }).click(); await expect(page.locator('.recovery-codes')).toHaveCount(0);
     await page.getByRole('tab', { name: 'Advanced', exact: true }).click(); await page.getByText('Instance administration', { exact: true }).click(); await page.getByLabel('One-time administrator setup code', { exact: true }).fill('browser-fixture-bootstrap-not-for-deployment'); await page.getByRole('button', { name: 'Activate global administration', exact: true }).click();
@@ -136,18 +137,61 @@ test('social update keeps invitations and custom roles visible, and refreshes ch
     await expect(page.locator('.message-byline button')).toHaveText('Updated member');
     const image = await other.evaluate(async () => { const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512; const ctx = canvas.getContext('2d')!, pixels = ctx.createImageData(512, 512); crypto.getRandomValues(new Uint8Array(65536)); for (let offset = 0; offset < pixels.data.length; offset += 65536) crypto.getRandomValues(pixels.data.subarray(offset, Math.min(offset + 65536, pixels.data.length))); for (let i = 3; i < pixels.data.length; i += 4) pixels.data[i] = 255; ctx.putImageData(pixels, 0, 0); return canvas.toDataURL('image/png').split(',')[1]; });
     expect(Buffer.from(image, 'base64').length).toBeGreaterThan(256 * 1024);
-    await other.locator('.avatar-upload input[type=file]').setInputFiles({ name: 'large-profile.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') });
+    await other.locator('.avatar-options input[type=file]').setInputFiles({ name: 'large-profile.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') });
     await expect(page.getByRole('dialog').locator('.avatar img')).toBeVisible();
     await expect.poll(async () => page.getByRole('dialog').locator('.avatar img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth === 128)).toBe(true);
     const avatar = (await api(other, '/auth/me')).user.avatar; expect(avatar).toMatch(/^\/avatars\/.+\.webp$/);
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await other.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await other.reload(); await expect(other.locator('.account-info strong')).toHaveText('Updated member');
-    await page.locator('.space-heading').click(); await page.getByRole('button', { name: 'Create invite link', exact: true }).click();
+    await page.locator('.space-heading').click(); await page.getByRole('tab', { name: 'Invitations', exact: true }).click(); await page.getByRole('button', { name: 'Create invite link', exact: true }).click();
     await expect(page.locator('.saved-invite')).toHaveCount(2); const links = await page.getByRole('textbox', { name: 'Invite link', exact: true }).evaluateAll(inputs => inputs.map(i => (i as HTMLInputElement).value));
-    await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.locator('.space-heading').click();
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.locator('.space-heading').click(); await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
     await expect(page.locator('.saved-invite')).toHaveCount(2); expect(await page.getByRole('textbox', { name: 'Invite link', exact: true }).evaluateAll(inputs => inputs.map(i => (i as HTMLInputElement).value))).toEqual(links);
-    await page.getByRole('button', { name: 'Custom roles', exact: true }).click(); await page.getByLabel('Role name', { exact: true }).fill('Trusted speaker'); await page.getByLabel('Role color', { exact: true }).fill('#68b6ec'); await page.getByLabel('Create and revoke invitations', { exact: true }).selectOption('true'); await page.getByLabel('Send messages', { exact: true }).selectOption('false'); await page.getByRole('button', { name: 'Create role', exact: true }).click();
-    const assignments = page.locator('.role-assignments').filter({ hasText: 'Updated member' }); await assignments.getByRole('checkbox', { name: 'Trusted speaker' }).check();
+    await page.getByRole('tab', { name: 'Roles & tags', exact: true }).click();
+    const settings = page.getByRole('dialog');
+    await settings.getByText('Manage member tags', { exact: true }).click();
+    await settings.getByLabel('Tag name', { exact: true }).fill('دوست');
+    await settings.getByRole('button', { name: 'Create tag', exact: true }).click();
+    const picker = settings.getByLabel('Member', { exact: true });
+    await expect(picker).not.toHaveValue('');
+    const firstId = await picker.inputValue();
+    const tag = settings.getByRole('checkbox', { name: 'دوست', exact: true });
+    await tag.check();
+    const roster = () => api(page, `/servers/${server.id}/members`);
+    const hasTag = async (id: string) => (await roster()).find((row: any) => row.user.id === id).user.tags.some((item: any) => item.name === 'دوست');
+    await expect.poll(() => hasTag(firstId)).toBe(true);
+
+    let releaseRoster!: () => void;
+    const rosterGate = new Promise<void>(resolve => { releaseRoster = resolve; });
+    await page.route('**/api/v1/servers/*/members', async route => {
+      await rosterGate;
+      await route.continue();
+    });
+    try {
+      await page.reload();
+      await page.getByRole('button', { name: 'Open Social settings lab', exact: true }).click();
+      await page.locator('.space-heading').click();
+      await page.getByRole('tab', { name: 'Roles & tags', exact: true }).click();
+      await expect(picker).toBeDisabled();
+    } finally {
+      releaseRoster();
+    }
+    await expect(picker).not.toHaveValue('');
+    await expect(picker).toHaveValue(firstId);
+    await expect(tag).toBeChecked();
+    await tag.uncheck();
+    await expect.poll(() => hasTag(firstId)).toBe(false);
+    await expect(tag).not.toBeChecked();
+    await picker.selectOption({ label: 'Updated member' });
+    const peerId = await picker.inputValue();
+    await tag.check();
+    await expect.poll(() => hasTag(peerId)).toBe(true);
+    await expect(other.locator('.members-sidebar .member-row').filter({ hasText: 'Updated member' })).toContainText('دوست');
+
+    await settings.getByText('Manage custom roles', { exact: true }).click();
+    await page.getByLabel('Role name', { exact: true }).fill('Trusted speaker'); await page.getByLabel('Role color', { exact: true }).fill('#68b6ec'); await page.getByLabel('Create and revoke invitations', { exact: true }).selectOption('true'); await page.getByLabel('Send messages', { exact: true }).selectOption('false'); await page.getByRole('button', { name: 'Create role', exact: true }).click();
+    await picker.selectOption({ label: 'Updated member' });
+    await settings.getByRole('checkbox', { name: 'Trusted speaker', exact: true }).check();
     await expect.poll(async () => (await api(other, '/bootstrap')).servers[0].permissions.createInvites).toBe(true);
     await other.getByRole('button', { name: 'Open Social settings lab', exact: true }).click(); await expect(other.getByLabel('Message', { exact: true })).toBeDisabled();
     await expect(other.locator('.members-sidebar .role-chip').filter({ hasText: 'Trusted speaker' })).toBeVisible();

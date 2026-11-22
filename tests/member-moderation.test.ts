@@ -14,6 +14,47 @@ async function setup() {
  return { owner, admin, peer, mod, member, server, invite, voice: channels.find((c: any) => c.kind === 'voice'), text: channels.find((c: any) => c.kind === 'text') };
 }
 const moderate = (a: any, s: string, u: string, action: string, extra = {}) => h.api(a, `/servers/${s}/members/${u}/moderate`, { action, ...extra });
+it('lets only the space owner hide themselves or others from its member list without restricting voice or chat', async () => {
+ const { owner, admin, member, peer, server, text, voice } = await setup();
+ const roster = (viewer: typeof owner, id = server.id) => h.api(viewer, `/servers/${id}/members`);
+ const visibility = (actor: typeof owner, user: typeof owner, hidden: boolean) =>
+   h.api(actor, `/servers/${server.id}/members/${user.id}/visibility`, { hidden }, 'PATCH');
+ const viewer = await h.connect(peer);
+ const join = await h.connect(member);
+ await event(join, 'voice:join', { channelId: voice.id, eligible: false });
+ expect((await roster(peer)).json()).toEqual(expect.arrayContaining([expect.objectContaining({ user: expect.objectContaining({ id: member.id }) })]));
+ const before = (await h.api(peer, '/bootstrap?sync=1')).json();
+ expect((await visibility(admin, member, true)).statusCode).toBe(403);
+ await h.db.run('UPDATE users SET instance_admin=1 WHERE id=?', [admin.id]);
+ expect((await visibility(admin, owner, true)).statusCode).toBe(403);
+ const changed = new Promise(resolve => viewer.once('state:changed', resolve));
+ expect((await visibility(owner, member, true)).json()).toEqual({ hiddenFromMemberList: true });
+ await changed;
+ expect((await visibility(owner, owner, true)).statusCode).toBe(200);
+ const ownRoster = (await roster(owner)).json();
+ for (const user of [member, owner]) expect(ownRoster.find((row: any) => row.user.id === user.id)?.hiddenFromMemberList).toBe(true);
+ for (const user of [peer, admin, member]) {
+   const response = await roster(user);
+   expect(response.statusCode).toBe(200);
+   const visible = response.json();
+   expect(visible.map((row: any) => row.user.id)).not.toContain(member.id);
+   expect(visible.map((row: any) => row.user.id)).not.toContain(owner.id);
+   expect(visible.some((row: any) => 'hiddenFromMemberList' in row)).toBe(false);
+ }
+ const refreshed = (await h.api(peer, `/bootstrap?sync=1&known=${before.bootstrapVersion ?? ''}`)).json();
+ expect(refreshed.servers.find((space: any) => space.id === server.id).memberListRevision).toBe(2);
+ expect(refreshed.voicePresence.find((channel: any) => channel.channelId === voice.id).members.map((row: any) => row.user.id)).toContain(member.id);
+ const chat = await h.api(member, '/messages', { conversationId: text.conversationId, content: 'Still here' });
+ expect(chat.json().payload.author.id).toBe(member.id);
+ const ownerSocket = await h.connect(owner);
+ await event(ownerSocket, 'voice:join', { channelId: voice.id, eligible: false });
+ const second = (await h.api(peer, '/servers', { name: 'Another space' })).json();
+ const invite = (await h.api(peer, `/servers/${second.id}/invites`, {})).json();
+ await h.api(member, '/invites/join', { code: invite.code });
+ expect((await roster(peer, second.id)).json().map((row: any) => row.user.id)).toContain(member.id);
+ expect((await visibility(owner, member, false)).json()).toEqual({ hiddenFromMemberList: false });
+ expect((await roster(peer)).json().map((row: any) => row.user.id)).toContain(member.id);
+});
 it('protects peers and the owner from punishment while advertising peer voice moves', async () => {
  const x = await setup();
  for (const action of ['ban','kick','timeout']) {

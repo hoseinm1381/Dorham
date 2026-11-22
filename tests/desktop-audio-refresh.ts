@@ -32,7 +32,7 @@ try {
   await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page);
   await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.locator('.avatar-options > summary').click();
   await expect(page.locator('.avatar-grid button')).toHaveCount(16); await page.getByRole('button', { name: 'Astronaut', exact: true }).click(); await expect(page.getByText('Profile picture saved.', { exact: true })).toBeVisible();
-  await expect.poll(() => page.locator('.avatar-upload > .avatar img').evaluate((e: HTMLImageElement) => e.naturalWidth)).toBe(128);
+  await expect.poll(() => page.locator('.profile-heading > .avatar img').evaluate((e: HTMLImageElement) => e.naturalWidth)).toBe(128);
   await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await expect(page.getByRole('checkbox')).toHaveCount(0);
   await page.getByRole('combobox', { name: 'Noise removal', exact: true }).selectOption('strong');
   await page.locator('.audio-voice-test > summary').click(); await page.getByRole('button', { name: 'Record voice test', exact: true }).click();

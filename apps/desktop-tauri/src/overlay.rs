@@ -62,20 +62,23 @@ pub fn sanitize(value: Value, previous: Option<&Value>) -> Option<Value> {
                 "id": id, "name": text(&member["name"], 48), "avatar": image,
                 "muted": member["muted"] == true, "deafened": member["deafened"] == true,
                 "serverMuted": member["serverMuted"] == true, "speaking": member["speaking"] == true,
+                "watching": value["sharing"] == true && member["watching"] == true,
             })
         }).collect();
     Some(json!({
         "channel": text(&value["channel"], 80),
         "language": if value["language"] == "fa-IR" { "fa-IR" } else { "en-US" },
         "members": members,
+        "sharing": value["sharing"] == true,
     }))
 }
 
-fn render(window: &WebviewWindow, packet: Value, position: OverlayPosition) -> Result<(), Box<dyn std::error::Error>> {
+fn render(window: &WebviewWindow, mut packet: Value, position: OverlayPosition, opacity: u8) -> Result<(), Box<dyn std::error::Error>> {
+    packet["opacity"] = json!(opacity);
     if let Some(monitor) = window.primary_monitor()? {
         let area = monitor.work_area();
         let scale = monitor.scale_factor();
-        let height = 20 + packet["members"].as_array().map_or(0, Vec::len) * 38;
+        let height = 20 + packet["members"].as_array().map_or(0, Vec::len) * 38 + if packet["sharing"] == true { 24 } else { 0 };
         let width = (270.0 * scale).round() as u32;
         let height =
             ((height as f64 * scale).round() as u32).min(area.size.height.saturating_sub(32));
@@ -173,7 +176,7 @@ fn reconcile(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(window) = app.get_webview_window(WINDOW) {
         if host.overlay_ready.load(Ordering::Acquire) {
-            render(&window, packet, preferences.position)?;
+            render(&window, packet, preferences.position, preferences.opacity)?;
         }
         return Ok(());
     }

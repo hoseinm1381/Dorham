@@ -141,8 +141,25 @@ try {
   }
   await expect(page.locator('.connection-light.connected')).toBeVisible({ timeout: 20000 });
   expect(await page.evaluate(async () => Boolean(await window.desktop?.getSecret()))).toBe(true);
+  if (process.env.DORHAM_TEST_UPDATE_NOTICE === '1') {
+    await expect(page.getByRole('heading', { name: 'What’s new · ' + version, exact: true })).toHaveCount(1);
+    await page.getByRole('button', { name: 'View update history', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '1.4.4', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await page.getByRole('button', { name: 'Account settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Appearance', exact: true }).click();
+    for (const name of ['Ocean', 'Forest', 'Ember', 'Dusk']) {
+      await page.getByRole('radio', { name, exact: true }).check();
+      await expect(page.locator('html')).toHaveAttribute('data-palette', name.toLowerCase());
+    }
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  }
   await page.reload();
   await expect(page.locator('.connection-light.connected')).toBeVisible({ timeout: 20000 });
+  if (process.env.DORHAM_TEST_UPDATE_NOTICE === '1') {
+    await expect(page.getByRole('heading', { name: 'What’s new · ' + version, exact: true })).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute('data-palette', 'dusk');
+  }
   await expect(page.getByLabel('Username', { exact: true })).toHaveCount(0);
   if (packaged && !upgradeFromTauri) {
     await expect.poll(() => [...featureVersions], { timeout: 12000 }).toEqual([version]);

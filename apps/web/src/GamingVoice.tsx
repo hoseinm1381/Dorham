@@ -8,6 +8,7 @@ import { ParticipantList } from './MobileExperience';
 import type { PublicUser } from '@dorham/contracts';
 import { t, formatNumber } from './i18n';
 import './gaming.css';
+import { StreamAudience } from './StreamAudience';
 
 function ConnectingStream({ cancel }: { cancel: () => void }) {
   const [delayed, setDelayed] = useState(false);
@@ -94,6 +95,7 @@ type Props = {
   room: VoiceRoom; userId: string; name: string; transport: MediaTransport | null; navigation: string | null;
   screens: Record<string, RemoteScreen>; localScreen: RemoteScreen | null; previewOwn: boolean; toggleOwn: () => void;
   error: (e: unknown) => void; viewer: (active: boolean) => void;
+  watching: (ids: string[]) => void; audienceNames: string[];
   music?: React.ReactNode; musicRow?: React.ReactNode; chatOpen: boolean; toggleChat: () => void; participants?: () => void; memberActions?: (user: PublicUser, event: React.MouseEvent<HTMLElement>) => void;
 };
 export function GamingVoice(p: Props) {
@@ -101,6 +103,9 @@ export function GamingVoice(p: Props) {
   const selectedRef = useRef(selected); selectedRef.current = selected;
   const own = p.room.shares.find(s => s.userId === p.userId), previewSelected = p.previewOwn && !previewClosed, showOwn = previewSelected && Boolean(own && p.localScreen);
   const active = selected.length > 0 || showOwn;
+  const watchingKey = JSON.stringify(selected.filter(id => Boolean(p.screens[id]) && p.room.shares.some(share => share.id === id)));
+  useEffect(() => { p.watching(JSON.parse(watchingKey)); }, [p.watching, watchingKey]);
+  useEffect(() => () => p.watching([]), [p.watching]);
   async function stopWatching(id: string) { const share = p.room.shares.find(s => s.id === id); setSelected(old => old.filter(x => x !== id)); if (share) await p.transport?.subscribe(share, false); }
   async function closeViewer() { const ids = [...selectedRef.current]; setSelected([]); setPreviewClosed(true); for (const id of ids) { const share = p.room.shares.find(s => s.id === id); if (share) await p.transport?.subscribe(share, false); } }
   const closeRef = useRef(closeViewer); closeRef.current = closeViewer;
@@ -122,7 +127,7 @@ export function GamingVoice(p: Props) {
       {active && <><label className="check-row"><input type="checkbox" checked={multi} onChange={e => { const enabled = e.target.checked; setMulti(enabled); if (!enabled) for (const id of selected.slice(1)) void stopWatching(id).catch(p.error); }}/>{t('Multi-view')}</label><button className="viewer-chat-toggle" aria-expanded={p.chatOpen} onClick={p.toggleChat}><MessageCircle size={15}/>{t(p.chatOpen ? 'Hide chat' : 'Show chat')}</button><button aria-label={t('Close stream viewer')} onClick={() => { void closeViewer().catch(p.error); }}><X size={17}/></button></>}
     </span></header>
     {p.participants && <div className="mobile-voice-people"><button onClick={p.participants}>{t('Show participants')} · {formatNumber(p.room.members.filter(m => m.user.kind !== "music").length)}</button><ParticipantList musicRow={p.musicRow} members={p.room.members} actions={p.memberActions || (() => {})}/></div>}
-    <div className="share-list">{p.room.shares.map(share => <div key={share.id}><MonitorUp size={17}/><span><bdi>{person(share.userId)}</bdi><small className="live-badge">LIVE</small></span>{share.userId === p.userId ? <><span className="share-tier">{t(share.tier === 'fallback' ? '15fps · waiting for a 30fps slot' : '30fps available')}</span><label className="own-preview-toggle"><input type="checkbox" checked={previewSelected} onChange={() => { if (p.previewOwn && previewClosed) setPreviewClosed(false); else { setPreviewClosed(false); p.toggleOwn(); } }}/>{t('Preview my screen')}</label></> : <button className="watch-stream" data-watching={selected.includes(share.id)} aria-label={t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')} onClick={() => { void watch(share).catch(p.error); }}>{t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')}</button>}</div>)}</div>
+    <div className="share-list">{p.room.shares.map(share => <div key={share.id}><MonitorUp size={17}/><span><bdi>{person(share.userId)}</bdi><small className="live-badge">LIVE</small></span>{share.userId === p.userId ? <><StreamAudience names={p.audienceNames}/><span className="share-tier">{t(share.tier === 'fallback' ? '15fps · waiting for a 30fps slot' : '30fps available')}</span><label className="own-preview-toggle"><input type="checkbox" checked={previewSelected} onChange={() => { if (p.previewOwn && previewClosed) setPreviewClosed(false); else { setPreviewClosed(false); p.toggleOwn(); } }}/>{t('Preview my screen')}</label></> : <button className="watch-stream" data-watching={selected.includes(share.id)} aria-label={t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')} onClick={() => { void watch(share).catch(p.error); }}>{t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')}</button>}</div>)}</div>
     {own && p.localScreen?.sourceName && <p className="stream-no-audio" role="status"><bdi>{p.localScreen.sourceName}</bdi> · {t(p.localScreen.audioScope === 'application' ? 'Selected application sound' : p.localScreen.audioScope === 'system' ? p.localScreen.native ? 'Phone sound, excluding Dorham' : 'Computer sound, excluding Dorham' : 'Video only')}</p>}
     {active && <div className={`screens ${multi ? 'multi-streams' : 'single-stream'}`}>
       {showOwn && p.localScreen && <StreamView key="local" screen={p.localScreen} name={t('Your screen preview')} close={() => setPreviewClosed(true)}/>}

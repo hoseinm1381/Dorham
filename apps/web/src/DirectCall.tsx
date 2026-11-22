@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { LocalAudioTrack, Room } from 'livekit-client';
 import type { Socket } from 'socket.io-client';
 import { ack } from '../../../packages/media/src/signaling';
+import { reportMediaPressure } from '../../../packages/media/src/network-pressure';
 import { readAudioChoices } from './AudioDevices';
 import { readVoiceInput } from './VoiceInput';
 import { playCue } from './notifications';
@@ -18,6 +19,7 @@ export function useDirectCall(error: (value: unknown) => void) {
   onError.current = error;
 
   function clear() {
+    reportMediaPressure('call', false);
     current.current = null;
     setCall(null);
     setReady(false);
@@ -38,13 +40,14 @@ export function useDirectCall(error: (value: unknown) => void) {
   }
 
   async function join(socket: Socket, userId: string, next: Call) {
-    const { Room, RoomEvent, Track, createLocalAudioTrack } = await import('livekit-client');
+    const { Room, RoomEvent, ConnectionQuality, Track, createLocalAudioTrack } = await import('livekit-client');
     if (current.current?.id !== next.id) return;
     const credentials = await ack<{ url: string; token: string }>(socket, 'dm:call', { action: 'credentials', id: next.id });
     if (current.current?.id !== next.id) return;
     const choices = readAudioChoices(userId);
-    const connection = new Room({ audioOutput: { deviceId: choices.output || 'default' } });
+    const connection = new Room({ audioOutput: { deviceId: choices.output || 'default' }, publishDefaults: { audioPreset: { maxBitrate: 24000 }, dtx: true, forceStereo: false } });
     room.current = connection;
+    connection.on(RoomEvent.ConnectionQualityChanged, quality => { if (room.current === connection) reportMediaPressure('call', quality === ConnectionQuality.Poor || quality === ConnectionQuality.Lost); });
     connection.on(RoomEvent.TrackSubscribed, track => {
       if (room.current !== connection || track.kind !== Track.Kind.Audio) return;
       const audio = track.attach();

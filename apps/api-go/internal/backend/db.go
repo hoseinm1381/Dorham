@@ -332,7 +332,7 @@ func (d *DB) Backup(destination string) {
 	d.Run("VACUUM INTO ?", destination)
 }
 func (d *DB) migrate() {
-	for version := 2; version <= 17; version++ {
+	for version := 2; version <= 19; version++ {
 		v := version
 		d.Tx(func(tx *DB) any {
 			if tx.One("SELECT version FROM schema_migrations WHERE version=?", v) != nil {
@@ -346,7 +346,11 @@ func (d *DB) migrate() {
 					tx.Run(q)
 				}
 			}
-						if v == 17 {
+			if v == 18 {
+				tx.Run("ALTER TABLE attachments ADD COLUMN resume_until BIGINT NOT NULL DEFAULT 0")
+				tx.Run("CREATE TABLE refresh_recovery (hash TEXT PRIMARY KEY REFERENCES used_refresh(hash) ON DELETE CASCADE, proof TEXT NOT NULL, retry_until BIGINT NOT NULL)")
+			}
+			if v == 17 {
 				tx.Run("CREATE TABLE IF NOT EXISTS music_allowances (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, bonus_mb BIGINT NOT NULL)")
 				tx.Run("CREATE TABLE IF NOT EXISTS music_member_lists (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, public INTEGER NOT NULL, created_at BIGINT NOT NULL)")
 				tx.Run("CREATE INDEX IF NOT EXISTS music_member_lists_owner ON music_member_lists(owner_id)")

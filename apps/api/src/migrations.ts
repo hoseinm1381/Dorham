@@ -119,4 +119,10 @@ export async function migrateExpansion(db: Database) {
     await tx.run('CREATE INDEX notification_queue_message ON notification_queue(message_id)');
     await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(12,?)', [Date.now()]);
   });
+  await db.transaction(async tx => {
+    if (await tx.one('SELECT version FROM schema_migrations WHERE version=19')) return;
+    await tx.run('ALTER TABLE members ADD COLUMN hidden_from_member_list INTEGER NOT NULL DEFAULT 0');
+    await tx.run('ALTER TABLE servers ADD COLUMN member_list_revision BIGINT NOT NULL DEFAULT 0');
+    await tx.run('INSERT INTO schema_migrations(version,applied_at) VALUES(19,?)', [Date.now()]);
+  });
 }

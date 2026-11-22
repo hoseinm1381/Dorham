@@ -2,7 +2,7 @@ import type { Connection } from './db';
 import type { Service } from './service';
 import { canManage, type Role } from '@dorham/contracts';
 import { canMoveMember, timeoutDurations, type MemberModerationInfo } from '../../../packages/contracts/src/moderation';
-import { fail } from './security';
+import { AppError, fail } from './security';
 import { audit } from './accounts';
 
 async function powers(service: Service, tx: Connection, actorId: string, serverId: string, targetId: string) {
@@ -12,14 +12,25 @@ async function powers(service: Service, tx: Connection, actorId: string, serverI
  const account = await tx.one('SELECT instance_admin FROM users WHERE id=?', [targetId]);
  const protectedTarget = actorId === targetId || (!actor.globalAdmin && account?.instance_admin);
  const higher = !protectedTarget && canManage(actorRole, targetRole);
- return { target, targetRole, actions: { voice: Boolean(p.moderate && higher), move: Boolean(p.moderate && !protectedTarget && canMoveMember(actorRole, targetRole)), timeout: Boolean(p.moderate && higher), kick: Boolean(p.manageMembers && higher), ban: Boolean(p.manageMembers && higher) } };
+ return { target, targetRole, serverModeration: Boolean(p.moderate), actions: { voice: higher, move: !protectedTarget && canMoveMember(actorRole, targetRole), timeout: Boolean(p.moderate && higher), kick: Boolean(p.manageMembers && higher), ban: Boolean(p.manageMembers && higher) } };
 }
 export async function moderationInfo(service: Service, actorId: string, serverId: string, targetId: string): Promise<MemberModerationInfo> {
  return service.db.transaction(async tx => {
-  const { target, targetRole, actions } = await powers(service, tx, actorId, serverId, targetId);
+  const { target, targetRole, actions, serverModeration } = await powers(service, tx, actorId, serverId, targetId);
   const vm = await tx.one('SELECT v.* FROM voice_members v JOIN channels c ON c.id=v.channel_id WHERE v.user_id=? AND c.server_id=?', [targetId, serverId]);
-  const restriction = vm && await tx.one('SELECT sharing_allowed FROM voice_restrictions WHERE user_id=? AND channel_id=?', [targetId, vm.channel_id]);
-  return { userId: targetId, role: targetRole, timeoutUntil: Number(target.timeout_until || 0), actions, voice: vm ? { channelId: vm.channel_id, serverMuted: Boolean(vm.server_muted), serverDeafened: Boolean(vm.server_deafened), sharingAllowed: restriction?.sharing_allowed !== 0 } : null };
+  let voice: MemberModerationInfo['voice'] = null;
+  let canModerate = vm ? false : serverModeration;
+  if (vm) {
+   try {
+    const channel = await service.channel(tx, actorId, vm.channel_id);
+    canModerate = channel.permissions.moderate;
+    const restriction = await tx.one('SELECT sharing_allowed FROM voice_restrictions WHERE user_id=? AND channel_id=?', [targetId, vm.channel_id]);
+    voice = { channelId: vm.channel_id, serverMuted: Boolean(vm.server_muted), serverDeafened: Boolean(vm.server_deafened), sharingAllowed: restriction?.sharing_allowed !== 0 };
+   } catch (error) {
+    if (!(error instanceof AppError) || ![403, 404].includes(error.status)) throw error;
+   }
+  }
+  return { userId: targetId, role: targetRole, timeoutUntil: Number(target.timeout_until || 0), actions: { ...actions, voice: actions.voice && canModerate, move: actions.move && canModerate }, voice };
  });
 }
 export async function moderateMember(service: Service, actorId: string, rid: string, serverId: string, targetId: string, body: { action: 'kick' | 'ban' | 'unban' | 'timeout' | 'untimeout'; seconds?: number; reason?: string }) {

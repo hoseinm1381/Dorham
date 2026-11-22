@@ -4,7 +4,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import fa from '../../apps/web/src/locales/fa-IR.json' with { type: 'json' };
 import release from '../../package.json' with { type: 'json' };
 test.use({ trace: 'off', video: 'off' });
-async function register(page: Page, name: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('Gaming-fixture-2026'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.locator('.app')).toBeVisible(); }
+async function register(page: Page, name: string) {
+  await page.addInitScript(version => localStorage.setItem('dorham.whats-new-seen', version), release.version); await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('Gaming-fixture-2026'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.locator('.app')).toBeVisible(); }
 async function api(page: Page, route: string, body?: any, method = body ? 'POST' : 'GET') { return page.evaluate(async ({ route, body, method }) => { const me = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch('/api/v1' + route, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(`API ${r.status}: ${await r.text()}`); return r.json(); }, { route, body, method }); }
 
 test('saved permission denials survive reopening and drafts survive navigation and reload', async ({ page }) => {
@@ -15,10 +16,10 @@ test('saved permission denials survive reopening and drafts survive navigation a
   await page.waitForTimeout(300); await page.reload(); await page.getByRole('button', { name: 'Open Reliable gaming', exact: true }).click(); await expect(composer).toHaveValue('A draft in general');
   const channel = (await api(page, '/bootstrap')).channels.find((c: any) => c.name === 'general');
   await api(page, `/channels/${channel.id}`, { role: 'member', permissions: { write: false }, expectedRevision: 0 }, 'PATCH');
-  await page.locator('.space-heading').click(); await page.getByRole('button', { name: 'permissions', exact: true }).click();
+  await page.locator('.space-heading').click(); await page.getByRole('tab', { name: 'permissions', exact: true }).click();
   const write = page.locator('.permission-row').filter({ hasText: /^write/ }).locator('select'); await expect(write).toHaveValue('false');
   await page.getByRole('button', { name: 'Save channel overrides', exact: true }).click(); await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.locator('.space-heading').click(); await page.getByRole('button', { name: 'permissions', exact: true }).click(); await expect(write).toHaveValue('false');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.locator('.space-heading').click(); await page.getByRole('tab', { name: 'permissions', exact: true }).click(); await expect(write).toHaveValue('false');
   expect((await api(page, `/channels/${channel.id}/overrides?role=member`)).permissions.write).toBe(false);
 });
 
@@ -75,7 +76,7 @@ test('watch is explicit, decoded video fills the viewer, chat drawer and navigat
     await mkdir('artifacts/evidence', { recursive: true }); await second.screenshot({ path: 'artifacts/evidence/v050-stream-viewer.png' });
     await second.getByRole('button', { name: 'Home', exact: true }).click(); await expect(second.locator('.screen video')).toHaveCount(0); await expect(second.locator('.voice-panel')).toBeVisible();
     await second.getByRole('button', { name: 'Account settings', exact: true }).click(); await second.getByRole('tab', { name: 'Audio', exact: true }).click(); await second.locator('.audio-advanced > summary').click(); await expect(second.getByLabel('Speakers or headset', { exact: true })).toBeVisible(); await second.getByRole('button', { name: 'Close dialog', exact: true }).click();
-    await second.getByRole('button', { name: 'Account settings', exact: true }).click(); await expect(second.locator('.app-version')).toContainText(release.version); await second.getByRole('tab', { name: 'Profile', exact: true }).click(); await second.getByRole('combobox', { name: 'Language', exact: true }).selectOption('fa-IR'); await expect(second.locator('html')).toHaveAttribute('dir', 'rtl');
+    await second.getByRole('button', { name: 'Account settings', exact: true }).click(); await expect(second.locator('.app-version')).toContainText(release.version); await second.getByRole('tab', { name: 'Language', exact: true }).click(); await second.getByRole('combobox', { name: 'Language', exact: true }).selectOption('fa-IR'); await expect(second.locator('html')).toHaveAttribute('dir', 'rtl');
     for (let i=0;i<12;i++) { await second.keyboard.press('Tab'); expect(await second.evaluate(() => Boolean(document.activeElement?.closest('dialog')))).toBe(true); }
     await second.getByRole('button', { name: fa['Close dialog'], exact: true }).click(); await second.getByTitle('Stream gaming', { exact: true }).click(); await second.getByRole('button', { name: fa['Watch stream'], exact: true }).click(); await expect.poll(() => second.locator('.screen video').evaluate((v: HTMLVideoElement) => v.videoWidth)).toBeGreaterThan(0);
     await second.setViewportSize({ width: 390, height: 844 }); await expect.poll(() => second.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390); await second.screenshot({ path: 'artifacts/evidence/v050-persian-mobile-viewer.png' });

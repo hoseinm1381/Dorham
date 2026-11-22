@@ -14,7 +14,7 @@ func (s *Service) Bootstrap(uid string) M {
 			if B(admin) {
 				role = "owner"
 			}
-			server := M{"id": r["id"], "name": r["name"], "ownerId": r["owner_id"], "icon": r["icon"], "role": role, "allowGuests": B(r["allow_guests"]), "allowMemberInvites": B(r["allow_member_invites"]), "permissions": s.MemberPermissions(tx, role, uid, S(r["id"]))}
+			server := M{"id": r["id"], "name": r["name"], "ownerId": r["owner_id"], "icon": r["icon"], "role": role, "allowGuests": B(r["allow_guests"]), "allowMemberInvites": B(r["allow_member_invites"]), "memberListRevision": N(r["member_list_revision"]), "permissions": s.MemberPermissions(tx, role, uid, S(r["id"]))}
 			if r["community_expires"] != nil && (N(r["community_expires"]) == 0 || N(r["community_expires"]) > Now()) && Str(r, "community_banner") != "" && featureSetting(tx, "features")["communityPlus"] != false {
 				server["banner"] = r["community_banner"]
 			}
@@ -191,17 +191,9 @@ func (s *Service) ChangeChannel(uid, rid, id string, body M) M {
 				Check(N(old["revision"]) == N(revision), 409, "STALE_PERMISSIONS", "Permissions changed. Reload them before saving.")
 				tx.Run("INSERT INTO channel_overrides(channel_id,role,permissions,revision) VALUES(?,?,?,?) ON CONFLICT(channel_id,role) DO UPDATE SET permissions=excluded.permissions,revision=excluded.revision", id, role, JSON(body["permissions"]), N(revision)+1)
 			}
-			for _, vm := range tx.All("SELECT * FROM voice_members WHERE channel_id=?", id) {
-				target := S(vm["user_id"])
-				if serviceAttempt(func() { s.Channel(tx, target, id) }) != nil {
-					tx.Run("DELETE FROM voice_members WHERE user_id=?", target)
-					continue
-				}
-				if serviceAttempt(func() { s.Channel(tx, target, id, "speak") }) != nil {
-					tx.Run("UPDATE voice_members SET server_muted=1 WHERE user_id=?", target)
-				}
-				if serviceAttempt(func() { s.Channel(tx, target, id, "share") }) != nil {
-					tx.Run("DELETE FROM share_leases WHERE user_id=?", target)
+			if body["permissions"] != nil {
+				for _, vm := range tx.All("SELECT user_id FROM voice_members WHERE channel_id=?", id) {
+					s.revalidateVoiceMember(tx, S(vm["user_id"]), id)
 				}
 			}
 		}
@@ -280,20 +272,46 @@ func (s *Service) JoinInvite(uid, rid, code string) M {
 	return serviceResult(r)
 }
 func (s *Service) Members(uid, server string) []M {
-	s.Member(s.DB, uid, server)
-	out := []M{}
-	for _, u := range s.DB.All("SELECT u.*,m.role,COALESCE(t.expires_at,0) AS timeout_until FROM members m JOIN users u ON u.id=m.user_id LEFT JOIN server_timeouts t ON t.server_id=m.server_id AND t.user_id=m.user_id WHERE m.server_id=? ORDER BY m.joined_at", server) {
-		tags := []M{}
-		for _, t := range s.DB.All("SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?", u["id"], server) {
-			tags = append(tags, M{"id": t["id"], "serverId": t["server_id"], "name": t["name"], "color": t["color"]})
+	return s.DB.Tx(func(tx *DB) any {
+		s.Member(tx, uid, server)
+		out := []M{}
+		for _, u := range tx.All(`SELECT u.*,m.role,m.hidden_from_member_list,COALESCE(t.expires_at,0) AS timeout_until
+            FROM members m JOIN users u ON u.id=m.user_id JOIN servers s ON s.id=m.server_id
+            LEFT JOIN server_timeouts t ON t.server_id=m.server_id AND t.user_id=m.user_id
+            WHERE m.server_id=? AND (m.hidden_from_member_list=0 OR s.owner_id=?) ORDER BY m.joined_at`, server, uid) {
+			tags := []M{}
+			for _, t := range tx.All("SELECT t.* FROM tags t JOIN user_tags ut ON ut.tag_id=t.id WHERE ut.user_id=? AND t.server_id=?", u["id"], server) {
+				tags = append(tags, M{"id": t["id"], "serverId": t["server_id"], "name": t["name"], "color": t["color"]})
+			}
+			authority := "owner"
+			if !B(u["instance_admin"]) {
+				authority = s.Authority(tx, M{"role": u["role"], "user_id": u["id"], "server_id": server})
+			}
+			row := M{"user": Merge(PublicUser(u), M{"tags": tags}), "role": u["role"], "timeoutUntil": N(u["timeout_until"]), "authority": authority, "customRoles": s.AssignedRoles(tx, S(u["id"]), server)}
+			if B(u["hidden_from_member_list"]) {
+				row["hiddenFromMemberList"] = true
+			}
+			out = append(out, row)
 		}
-		authority := "owner"
-		if !B(u["instance_admin"]) {
-			authority = s.Authority(s.DB, M{"role": u["role"], "user_id": u["id"], "server_id": server})
+		return out
+	}).([]M)
+}
+func (s *Service) ChangeMemberVisibility(uid, rid, server, target string, hidden bool) M {
+	payload := M{"serverId": server, "targetId": target, "hidden": hidden}
+	result := s.Mutate(uid, rid, "member.visibility", payload, func(tx *DB) any {
+		s.Member(tx, uid, server)
+		Check(Str(tx.One("SELECT owner_id FROM servers WHERE id=?", server), "owner_id") == uid, 403, "FORBIDDEN", "Only the owner can change member list visibility.")
+		member := tx.One("SELECT hidden_from_member_list FROM members WHERE server_id=? AND user_id=?", server, target)
+		Check(member != nil, 404, "NOT_FOUND", "Member not found.")
+		if B(member["hidden_from_member_list"]) != hidden {
+			tx.Run("UPDATE members SET hidden_from_member_list=? WHERE server_id=? AND user_id=?", hidden, server, target)
+			tx.Run("UPDATE servers SET member_list_revision=member_list_revision+1 WHERE id=?", server)
+			Audit(tx, uid, "member.visibility", target, payload)
 		}
-		out = append(out, M{"user": Merge(PublicUser(u), M{"tags": tags}), "role": u["role"], "timeoutUntil": N(u["timeout_until"]), "authority": authority, "customRoles": s.AssignedRoles(s.DB, S(u["id"]), server)})
-	}
-	return out
+		return M{"hiddenFromMemberList": hidden}
+	})
+	s.Notify("state:changed", M{})
+	return serviceResult(result)
 }
 func (s *Service) CustomRoles(uid, server string) M {
 	s.Member(s.DB, uid, server)
@@ -362,18 +380,7 @@ func (s *Service) ChangeMember(actorID, rid, server, targetID string, body M) M 
 		} else {
 			tx.Run("UPDATE members SET role=? WHERE server_id=? AND user_id=?", body["role"], server, targetID)
 			if voice := tx.One("SELECT channel_id FROM voice_members WHERE user_id=? AND channel_id IN (SELECT id FROM channels WHERE server_id=?)", targetID, server); voice != nil {
-				if serviceAttempt(func() {
-					access := s.Channel(tx, targetID, S(voice["channel_id"]))
-					p := Obj(access["permissions"])
-					if !B(p["speak"]) {
-						tx.Run("UPDATE voice_members SET server_muted=1 WHERE user_id=?", targetID)
-					}
-					if !B(p["share"]) {
-						tx.Run("DELETE FROM share_leases WHERE user_id=?", targetID)
-					}
-				}) != nil {
-					tx.Run("DELETE FROM voice_members WHERE user_id=?", targetID)
-				}
+				s.revalidateVoiceMember(tx, targetID, S(voice["channel_id"]))
 			}
 		}
 		Audit(tx, actorID, "member.change", targetID, servicePayload(M{"serverId": server}, body))

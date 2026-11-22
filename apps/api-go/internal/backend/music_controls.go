@@ -323,6 +323,14 @@ func (m *Music) command(r *Request) any {
 			s.PreviousOrder = nil
 		case "repeat":
 			s.Repeat = VEnum(r.Body, "value", []string{"off", "track", "queue"})
+		case "quality":
+			Check(p.dj, 403, "MUSIC_DJ", "Only a DJ can change the room’s music quality.")
+			s.LowBandwidth = VBool(r.Body, "lowBandwidth")
+			if s.Current != nil && (s.Status == "playing" || s.Status == "buffering") {
+				s.Position = position
+				s.Status = "buffering"
+				restart = true
+			}
 		case "volume":
 			s.Volume = int(VInt(r.Body, "value", 0, int64(s.Policy.MaxVolume)))
 			if s.Current != nil && (s.Status == "playing" || s.Status == "buffering") {

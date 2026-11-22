@@ -10,7 +10,7 @@ function statusIcon(kind, off) {
  svg.setAttribute('aria-hidden', 'true');
  svg.dataset.icon = kind + (off ? '-off' : '-on');
  svg.classList.add(off ? 'off' : 'on');
- const paths = kind === 'mic'
+ const paths = kind === 'eye' ? ['M2 12s3.64-7 10-7 10 7 10 7-3.64 7-10 7-10-7-10-7Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z'] : kind === 'mic'
   ? off ? ['m2 2 20 20', 'M9 9v3a3 3 0 0 0 5.12 2.12', 'M15 9.34V5a3 3 0 0 0-5.94-.6', 'M5 10v2a7 7 0 0 0 12 4.9', 'M19 10v2a7 7 0 0 1-.27 1.93', 'M12 19v3', 'M8 22h8']
    : ['M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0Z', 'M5 10v2a7 7 0 0 0 14 0v-2', 'M12 19v3', 'M8 22h8']
   : off ? ['m2 2 20 20', 'M3 14v-3a9 9 0 0 1 1.55-5.05', 'M8.25 2.82A9 9 0 0 1 21 11v6', 'M3 14h3v7H5a2 2 0 0 1-2-2Z', 'M18 14h3v5a2 2 0 0 1-2 2h-1v-3']
@@ -27,6 +27,13 @@ window.voiceOverlay.onState(value => {
  document.documentElement.dir = value.language === 'fa-IR' ? 'rtl' : 'ltr';
  document.title = 'Dorham voice — ' + value.channel;
  const list = document.getElementById('members'), wanted = new Set(), fa = value.language === 'fa-IR';
+ document.body.style.opacity = String((value.opacity ?? 60) / 100);
+ const audience = document.getElementById('audience');
+ audience.hidden = !value.sharing;
+ if (value.sharing) {
+  const count = value.members.filter(member => member.watching).length;
+  audience.replaceChildren(statusIcon('eye', false), document.createTextNode((fa ? 'بینندگان پخش' : 'Stream viewers') + ' · ' + new Intl.NumberFormat(fa ? 'fa-IR' : 'en-US').format(count)));
+ }
  for (const [index, person] of value.members.entries()) {
   const key = person.id || String(index); wanted.add(key);
   let item = rows.get(key);
@@ -46,7 +53,11 @@ window.voiceOverlay.onState(value => {
   if (item.row.className !== className) item.row.className = className;
   const label = person.serverMuted ? (fa ? 'بی‌صدا توسط مدیر' : 'Server muted') : person.deafened ? (fa ? 'ناشنوا' : 'Deafened') : person.muted ? (fa ? 'بی‌صدا' : 'Muted') : person.speaking ? (fa ? 'در حال صحبت' : 'Speaking') : (fa ? 'در حال شنیدن' : 'Listening');
   if (item.status.title !== label) { item.status.setAttribute('aria-label', label); item.status.title = label; }
-  if (muted !== old.effectiveMuted || person.deafened !== old.deafened) item.status.replaceChildren(statusIcon('mic', muted), statusIcon('headphones', person.deafened));
+  if (muted !== old.effectiveMuted || person.deafened !== old.deafened || person.watching !== old.watching) {
+   const icons = [statusIcon('mic', muted), statusIcon('headphones', person.deafened)];
+   if (person.watching) icons.unshift(statusIcon('eye', false));
+   item.status.replaceChildren(...icons);
+  }
   if (list.children[index] !== item.row) list.insertBefore(item.row, list.children[index] || null);
   item.previous = { ...person, avatar, effectiveMuted: muted };
  }

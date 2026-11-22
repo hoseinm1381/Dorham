@@ -16,9 +16,14 @@ type peer struct {
 	mu                                                sync.Mutex
 	eventMu                                           sync.Mutex
 	voiceChannel, gameWatching, directoryKey, roomKey string
+	gameVersion                                       string
+	gameView                                          M
 	voiceEpoch                                        string
 	voiceRecoverable                                  bool
 	voiceNativeKeepalive                              bool
+	screenWatching                                    map[string]bool
+	screenWatchingEpoch                               string
+	screenWatchingUntil                               int64
 	windowStart                                       int64
 	eventCount                                        int
 	latency                                           M
@@ -475,6 +480,10 @@ func (h *Hub) handlers(p *peer) {
 		view := h.a.Games.View(p.uid, id, S(b["clientVersion"]))
 		p.mu.Lock()
 		p.gameWatching = id
+		p.gameView, p.gameVersion = nil, S(b["clientVersion"])
+		if B(b["deltas"]) {
+			p.gameView = Obj(view)
+		}
 		p.mu.Unlock()
 		return view
 	})
@@ -483,6 +492,7 @@ func (h *Hub) handlers(p *peer) {
 		p.mu.Lock()
 		if p.gameWatching == id {
 			p.gameWatching = ""
+			p.gameView = nil
 		}
 		p.mu.Unlock()
 		return M{}
@@ -576,6 +586,7 @@ func (h *Hub) handlers(p *peer) {
 		return s.Share(p.uid, p.id, rid, false, audio, height)
 	})
 	h.handle(p, "share:stop", func(b M) any { return s.Share(p.uid, p.id, RID(b), true, false) })
+	h.handle(p, "share:audience", func(b M) any { return h.shareAudience(p, b) })
 	h.handle(p, "share:update", func(b M) any {
 		Strict(b, "requestId", "leaseId", "expectedRevision", "frameRate", "includeAudio", "height")
 		rid := RID(b)

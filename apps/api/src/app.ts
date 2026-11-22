@@ -261,6 +261,11 @@ export async function createApp(c: Config = config(), options: { logger?: boolea
     api.post('/servers/:id/roles', async req => { const b = z.object({ roleId: z.string().uuid().optional(), name: z.string().trim().min(1).max(32).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), permissions: schemas.permissions.optional(), delete: z.boolean().optional(), userId: id.optional(), assigned: z.boolean().optional(), requestId }).strict().parse(req.body); return service.changeCustomRole(req.account.id, b.requestId, id.parse((req.params as any).id), b); });
     api.post('/invites/join', async req => { const b = z.object({ code: z.string().min(10).max(100), requestId }).parse(req.body); return service.joinInvite(req.account.id, b.requestId, b.code); });
     api.get('/servers/:id/members', async req => service.members(req.account.id, id.parse((req.params as any).id)));
+    api.patch('/servers/:serverId/members/:userId/visibility', async req => {
+      const { serverId, userId } = z.object({ serverId: id, userId: id }).parse(req.params);
+      const body = z.object({ hidden: z.boolean(), requestId }).parse(req.body);
+      return service.changeMemberVisibility(req.account.id, body.requestId, serverId, userId, body.hidden);
+    });
     api.patch('/servers/:serverId/members/:userId', async req => { const b = z.object({ role: schemas.role.optional(), remove: z.boolean().optional(), requestId }).refine(b => b.role || b.remove).parse(req.body), p = req.params as any; return service.changeMember(req.account.id, b.requestId, id.parse(p.serverId), id.parse(p.userId), b); });
     api.post('/servers/:id/leave', async req => { const b = z.object({ requestId }).parse(req.body); return service.leaveServer(req.account.id, b.requestId, id.parse((req.params as any).id)); });
     api.post('/dms/:id/close', async req => { const b = z.object({ requestId }).parse(req.body); return service.closeDirectMessage(req.account.id, b.requestId, id.parse((req.params as any).id)); });

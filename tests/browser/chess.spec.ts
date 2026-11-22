@@ -26,7 +26,21 @@ test('voice Games catalog, open seat, watching, reconnect, channel moves, PTT an
     for(const p of [b]){await p.getByRole('button',{name:`Join ${host}'s game`,exact:true}).click();await expect(p.getByRole('button',{name:'Play',exact:true})).toBeVisible();await expect(p.locator('[data-square="e2"]')).toBeDisabled();}
     await b.getByRole('button',{name:'Play',exact:true}).click();await expect(a.locator('.chess-status')).toHaveText('White to move');await expect(b.getByRole('button',{name:'Play',exact:true})).toHaveCount(0);
     let directories=0;b.on('request',r=>{if(r.url().includes('/games?channelId='))directories++;});
-    await a.locator('[data-square="e2"]').click();await a.locator('[data-square="e4"]').click();await expect(b.locator('[data-square="e4"] img')).toBeVisible();await b.locator('[data-square="e7"]').click();await b.locator('[data-square="e5"]').click();await expect(a.locator('[data-square="e5"] img')).toBeVisible();expect(directories).toBe(0);const moveDirectoryFetches=directories;
+    const board = a.getByRole('group', { name: 'Chess board', exact: true });
+    await expect(board.locator('[tabindex="0"]')).toHaveCount(1);
+    await a.locator('[data-square="e2"]').focus();
+    await a.keyboard.press('Enter');
+    await expect(a.locator('[data-square="e4"]')).toHaveAttribute('aria-label', /Legal move/);
+    await a.keyboard.press('ArrowUp');
+    await a.keyboard.press('ArrowUp');
+    await expect(a.locator('[data-square="e4"]')).toBeFocused();
+    await a.keyboard.press('Enter');
+    await expect(b.locator('[data-square="e4"] img')).toBeVisible();
+    await expect(b.locator('.chess-score .chess-seat').last()).toHaveAttribute('data-color', '1');
+    await b.locator('[data-square="e7"]').click();
+    await b.locator('[data-square="e5"]').click();
+    await expect(a.locator('[data-square="e5"] img')).toBeVisible();
+    expect(directories).toBe(0);const moveDirectoryFetches=directories;
     const mic=()=>a.evaluate(()=>(window as any).__gameMics.flatMap((s:MediaStream)=>s.getAudioTracks()).filter((t:MediaStreamTrack)=>t.readyState==='live').map((t:MediaStreamTrack)=>t.enabled));await a.locator('[data-square="g1"]').focus();await a.keyboard.down('F9');await expect.poll(mic).toEqual([true]);await a.keyboard.up('F9');await expect.poll(mic).toEqual([false]);
     const views=await Promise.all([api(a,`/chess/${id}`),api(b,`/chess/${id}`)]);expect(Math.abs(views[0].remaining[0]-views[1].remaining[0])).toBeLessThan(250);await a.screenshot({path:'artifacts/evidence/v072-chess-desktop.png'});
     await b.reload();await b.getByRole('button',{name:'Open Games lounge',exact:true}).click();await b.getByRole('button',{name:'Lounge',exact:true}).click();await b.getByRole('button',{name:`Join ${host}'s game`,exact:true}).click();await expect(b.locator('[data-square="e5"] img')).toBeVisible();await expect(a.locator('.chess-status')).toHaveText('White to move');
@@ -34,7 +48,13 @@ test('voice Games catalog, open seat, watching, reconnect, channel moves, PTT an
     await a.getByRole('button',{name:`Join ${host}'s game`,exact:true}).click();a.once('dialog',d=>d.accept());await a.getByRole('button',{name:'Resign',exact:true}).click();await expect(b.locator('.chess-status')).toHaveText('Black wins by resignation');
     await a.getByRole('button',{name:'Play again',exact:true}).click();await expect(a.getByLabel('Minutes',{exact:true})).toHaveValue('5');await expect(a.getByLabel('Increment (seconds)',{exact:true})).toHaveValue('2');await a.getByLabel('Game mode',{exact:true}).selectOption('elixer');await a.getByLabel('Play with',{exact:true}).selectOption('Easy');await expect(a.getByRole('button',{name:'Create game',exact:true})).toBeVisible();await a.getByRole('button',{name:'Create game',exact:true}).click();
     await b.getByRole('button',{name:'Back to chat',exact:true}).click();await b.getByRole('button',{name:`Join ${host}'s game`,exact:true}).click();await expect(b.locator('.chess-status')).toContainText('Spectating');await expect(b.getByRole('button',{name:'Play',exact:true})).toHaveCount(0);await expect(b.locator('[data-square="e2"]')).toBeDisabled();
-    await a.getByRole('button',{name:'Buy Knight (3)',exact:true}).click();await a.locator('[data-square="b1"]').click();await expect(b.locator('.chess-log summary')).toHaveText('Move history (2)');
+    await expect(a.getByRole('button', { name: 'Buy Queen (9)', exact: true })).toBeDisabled();
+    await expect(a.getByRole('button', { name: 'Buy Queen (9)', exact: true })).toHaveAttribute('title', 'Need 6 more coins');
+    await a.getByRole('button', { name: 'Buy Knight (3)', exact: true }).click();
+    await expect(a.locator('[data-square="b1"]')).toHaveAttribute('aria-label', /Deployment square/);
+    await expect(a.locator('[data-square="b3"]')).not.toHaveClass(/\blegal\b/);
+    await a.locator('[data-square="b1"]').click();
+    await expect(b.locator('.chess-log summary')).toHaveText('Move history (2)');
     const viewer=(await api(b,'/auth/me')).user;await api(b,'/profile',{displayName:viewer.displayName,bio:viewer.bio,status:'online',language:'fa-IR'},'PATCH');await b.reload();await b.setViewportSize({width:390,height:844});await b.getByRole('button',{name:'باز و بسته کردن فهرست',exact:true}).click();await b.getByTitle('Games lounge',{exact:true}).click();await b.getByRole('button',{name:'Lounge',exact:true}).click();await b.getByRole('button',{name:'باز و بسته کردن فهرست',exact:true}).click();await b.locator('.voice-game-entry').first().click();await expect(b.getByRole('dialog',{name:'شطرنج',exact:true})).toBeVisible();expect(await b.locator('.chess-shell').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);await expect(b.locator('.chess-score')).toBeInViewport();await b.screenshot({path:'artifacts/evidence/v072-chess-mobile-fa.png'});
     expect(errors).toEqual([]);await writeFile('artifacts/evidence/v072-chess-browser.json',JSON.stringify({lazyBeforeOpen:true,gamesNextToScreenShare:true,catalogAndSettings:true,noPersonPicker:true,voiceEntry:true,openSeat:true,spectatorReadOnly:true,reconnect:true,channelMovePauseResume:true,voiceHotkeys:true,clockDifferenceMs:Math.abs(views[0].remaining[0]-views[1].remaining[0]),noDirectoryFetchPerMove:moveDirectoryFetches===0,persianMobile:true,errors},null,2));
   }finally{await Promise.allSettled(contexts.map(x=>x.close()));}

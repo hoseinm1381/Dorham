@@ -210,6 +210,7 @@ async (page) => {
     if (schedule.code !== 200 || !(await api(host, route)).value.state.events?.length) throw new Error('Listening party could not be scheduled');
     if (!(await api(host, route)).value.canUpload) throw new Error('FFprobe upload fixture is unavailable');
     const community = route + '/community';
+    await hostMusic.getByRole('button', { name: 'More', exact: true }).click();
     await hostMusic.getByRole('button', { name: 'Community', exact: true }).click();
     await hostMusic.getByText('0 of 30 MB used').waitFor();
     await hostMusic.getByRole('button', { name: 'New playlist', exact: true }).click();

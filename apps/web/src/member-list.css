@@ -1,0 +1,14 @@
+.member-list-row {
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.member-hidden-tag {
+  align-self: flex-start;
+  padding: 2px 6px;
+  border: 1px solid #a597c968;
+  border-radius: 5px;
+  color: var(--text-2, #d4c9ee);
+  font-size: .72rem;
+  line-height: 1.3;
+}

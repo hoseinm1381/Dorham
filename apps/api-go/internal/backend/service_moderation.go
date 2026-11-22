@@ -9,7 +9,7 @@ func serviceAuthorizationError(err any) bool {
 	}
 	return false
 }
-func (s *Service) moderationPowers(tx *DB, actorID, server, targetID string) (M, string, M) {
+func (s *Service) moderationPowers(tx *DB, actorID, server, targetID string) (M, string, M, bool) {
 	actor := s.Member(tx, actorID, server)
 	target := s.Member(tx, targetID, server)
 	actorRole, targetRole := s.Authority(tx, actor), s.Authority(tx, target)
@@ -17,17 +17,30 @@ func (s *Service) moderationPowers(tx *DB, actorID, server, targetID string) (M,
 	account := tx.One("SELECT instance_admin FROM users WHERE id=?", targetID)
 	protected := actorID == targetID || (!B(actor["globalAdmin"]) && B(account["instance_admin"]))
 	higher := !protected && CanManage(actorRole, targetRole)
-	return target, targetRole, M{"voice": B(p["moderate"]) && higher, "move": B(p["moderate"]) && !protected && CanMoveMember(actorRole, targetRole), "timeout": B(p["moderate"]) && higher, "kick": B(p["manageMembers"]) && higher, "ban": B(p["manageMembers"]) && higher}
+	return target, targetRole, M{"voice": higher, "move": !protected && CanMoveMember(actorRole, targetRole), "timeout": B(p["moderate"]) && higher, "kick": B(p["manageMembers"]) && higher, "ban": B(p["manageMembers"]) && higher}, B(p["moderate"])
 }
 func (s *Service) ModerationInfo(actor, server, targetID string) M {
 	return serviceResult(s.DB.Tx(func(tx *DB) any {
-		target, role, actions := s.moderationPowers(tx, actor, server, targetID)
+		target, role, actions, canModerate := s.moderationPowers(tx, actor, server, targetID)
 		vm := tx.One("SELECT v.* FROM voice_members v JOIN channels c ON c.id=v.channel_id WHERE v.user_id=? AND c.server_id=?", targetID, server)
 		var voice any
 		if vm != nil {
-			restriction := tx.One("SELECT sharing_allowed FROM voice_restrictions WHERE user_id=? AND channel_id=?", targetID, vm["channel_id"])
-			voice = M{"channelId": vm["channel_id"], "serverMuted": B(vm["server_muted"]), "serverDeafened": B(vm["server_deafened"]), "sharingAllowed": restriction == nil || N(restriction["sharing_allowed"]) != 0}
+			channel := S(vm["channel_id"])
+			var access M
+			err := serviceAttempt(func() { access = s.Channel(tx, actor, channel) })
+			if err == nil {
+				canModerate = B(Obj(access["permissions"])["moderate"])
+				restriction := tx.One("SELECT sharing_allowed FROM voice_restrictions WHERE user_id=? AND channel_id=?", targetID, channel)
+				voice = M{"channelId": channel, "serverMuted": B(vm["server_muted"]), "serverDeafened": B(vm["server_deafened"]), "sharingAllowed": restriction == nil || N(restriction["sharing_allowed"]) != 0}
+			} else {
+				if !serviceAuthorizationError(err) {
+					panic(err)
+				}
+				canModerate = false
+			}
 		}
+		actions["voice"] = B(actions["voice"]) && canModerate
+		actions["move"] = B(actions["move"]) && canModerate
 		return M{"userId": targetID, "role": role, "timeoutUntil": N(target["timeout_until"]), "actions": actions, "voice": voice}
 	}))
 }
@@ -41,7 +54,7 @@ func (s *Service) ModerateMember(actor, rid, server, targetID string, body M) M 
 			Check(CanManage(s.Authority(tx, m), S(ban["target_role"])), 403, "HIERARCHY", "You cannot manage this role.")
 			tx.Run("DELETE FROM server_bans WHERE server_id=? AND user_id=?", server, targetID)
 		} else {
-			_, role, actions := s.moderationPowers(tx, actor, server, targetID)
+			_, role, actions, _ := s.moderationPowers(tx, actor, server, targetID)
 			power := action
 			if action == "untimeout" {
 				power = "timeout"

@@ -1,6 +1,7 @@
 import { it, expect } from 'vitest';
 import { applyAction, initialPosition, legalActions, inCheck, outcome, repetitionCount, type ChessPosition } from '../packages/contracts/src/chess';
 import { chooseAi } from '../apps/api/src/chess';
+import { chessBoardMotion, isChessCapture } from '../apps/web/src/ChessBoard';
 const sq = (s: string) => (8 - Number(s[1])) * 8 + 'abcdefgh'.indexOf(s[0]);
 const move = (s: ChessPosition, from: string, to: string, promotion?: 'q' | 'n') => applyAction(s, { from: sq(from), to: sq(to), ...(promotion ? { promotion } : {}) });
 function perft(s: ChessPosition, depth: number): number { return depth ? legalActions(s).reduce((n, a) => n + perft(applyAction(s, a), depth - 1), 0) : 1; }
@@ -35,4 +36,28 @@ it('preserves Elixer purchases, home ranks, coins, virgin pawn and bought-rook c
 });
 it('keeps all supported AI moves legal with bounded search', () => {
   for(const mode of ['standard','elixer'] as const) for(const level of ['Easy','Medium','Hard']) { const s=initialPosition(mode), start=performance.now(), a=chooseAi(s,level)!; expect(()=>applyAction(s,a)).not.toThrow(); expect(performance.now()-start).toBeLessThan(150); }
+});
+
+it('animates and classifies only confirmed adjacent chess moves', () => {
+  const frame = (position: ChessPosition) => ({ position, id: 'local-match', status: 'playing' as const, check: inCheck(position) });
+  let previous = initialPosition('standard');
+  for (const [from, to] of [['e2', 'e4'], ['a7', 'a6'], ['e4', 'e5'], ['d7', 'd5']]) previous = move(previous, from, to);
+  const enPassant = { from: sq('e5'), to: sq('d6') };
+  expect(isChessCapture(previous, enPassant)).toBe(true);
+  const next = applyAction(previous, enPassant);
+  expect(chessBoardMotion(frame(previous), frame(next))).toMatchObject({ cue: 'capture', arrivals: [{ ...enPassant, kind: 'capture' }] });
+  expect(chessBoardMotion(null, frame(next))).toBeUndefined();
+  expect(chessBoardMotion(frame(next), frame(next))).toBeUndefined();
+  expect(chessBoardMotion(frame(initialPosition('standard')), frame(next))).toBeUndefined();
+  expect(chessBoardMotion(frame(next), { ...frame(next), status: 'finished' })).toMatchObject({ cue: 'finish', arrivals: [] });
+
+  const elixer = initialPosition('elixer'), deploy = { buy: 'n' as const, to: sq('b1') };
+  expect(isChessCapture(elixer, deploy)).toBe(false);
+  expect(chessBoardMotion(frame(elixer), frame(applyAction(elixer, deploy))))
+    .toMatchObject({ cue: 'deploy', arrivals: [{ to: deploy.to, kind: 'deploy' }] });
+
+  previous = initialPosition('standard');
+  for (const [from, to] of [['e2', 'e4'], ['e7', 'e5'], ['g1', 'f3'], ['b8', 'c6'], ['f1', 'c4'], ['g8', 'f6']]) previous = move(previous, from, to);
+  expect(chessBoardMotion(frame(previous), frame(move(previous, 'e1', 'g1')))?.arrivals)
+    .toEqual([{ from: sq('e1'), to: sq('g1'), kind: 'move' }, { from: sq('h1'), to: sq('f1'), kind: 'move' }]);
 });

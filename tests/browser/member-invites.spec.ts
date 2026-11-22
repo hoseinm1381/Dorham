@@ -1,7 +1,9 @@
 import { completeRecovery } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
+import release from '../../package.json' with { type: 'json' };
 async function register(page: Page, name: string) {
+  await page.addInitScript(version => localStorage.setItem('dorham.whats-new-seen', version), release.version);
   await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('Member-invite-fixture');
   await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.locator('.app')).toBeVisible();

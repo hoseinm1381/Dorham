@@ -31,6 +31,10 @@ var baseSchema = []string{
 }
 
 var expansionSchema = map[int][]string{
+	19: {
+		"ALTER TABLE members ADD COLUMN hidden_from_member_list INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE servers ADD COLUMN member_list_revision BIGINT NOT NULL DEFAULT 0",
+	},
 	2: {
 		"ALTER TABLE users ADD COLUMN guest INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT ''",

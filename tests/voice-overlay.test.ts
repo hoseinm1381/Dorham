@@ -1,15 +1,16 @@
 import { it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 const { cleanPreferences, cleanState } = createRequire(import.meta.url)('../apps/desktop/voice-overlay.cjs');
-it('defaults the native overlay off and restricts its saved position', () => {
- expect(cleanPreferences(null)).toEqual({ enabled: false, position: 'top-left' });
- expect(cleanPreferences({ enabled: 'true', position: 'arbitrary' })).toEqual({ enabled: false, position: 'top-left' });
- expect(cleanPreferences({ enabled: true, position: 'bottom-right' })).toEqual({ enabled: true, position: 'bottom-right' });
+it('enables the overlay by default and persists opt-outs and bounded opacity', () => {
+ expect(cleanPreferences(null)).toEqual({ enabled: true, opacity: 60, position: 'top-left' });
+ expect(cleanPreferences({ enabled: false, position: 'arbitrary' })).toEqual({ enabled: true, opacity: 60, position: 'top-left' });
+ expect(cleanPreferences({ enabled: false, opacity: 2, position: 'bottom-right' })).toEqual({ enabled: false, opacity: 10, position: 'bottom-right' });
+ expect(cleanPreferences({ opacity: 200 }).opacity).toBe(100);
 });
 it('bounds renderer status data and drops nonboolean state and invalid members', () => {
  expect(cleanState(null)).toBeNull(); expect(cleanState({ channel: 'x', members: 'bad' })).toBeNull();
  const state = cleanState({ channel: 'x'.repeat(100), language: 'arbitrary', members: [{ name: '<script>x</script>', muted: 'true', speaking: true }, { name: 2 }] });
- expect(state.channel).toHaveLength(80); expect(state.language).toBe('en-US'); expect(state.members).toEqual([{ name: '<script>x</script>', muted: false, deafened: false, serverMuted: false, speaking: true }]);
+ expect(state.channel).toHaveLength(80); expect(state.language).toBe('en-US'); expect(state.members).toEqual([{ name: '<script>x</script>', muted: false, deafened: false, serverMuted: false, speaking: true, watching: false }]);
  expect(cleanState({ channel: 'x', members: Array.from({length:40}, () => ({name:'m'.repeat(100)})) }).members).toHaveLength(16);
 });
 it('allows bounded PNG thumbnails without passing paths, remote URLs or SVG into the overlay', () => {

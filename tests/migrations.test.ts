@@ -21,13 +21,16 @@ it('migrates and restores a schema-3 backup while preserving overrides, attachme
     for (const column of ['tier', 'started_at', 'requested_fps', 'include_audio', 'policy_revision']) await db.run(`ALTER TABLE share_leases DROP COLUMN ${column}`);
     await db.run('ALTER TABLE servers DROP COLUMN allow_member_invites'); await db.run('DELETE FROM schema_migrations WHERE version=5');
     await db.run('ALTER TABLE channel_overrides DROP COLUMN revision'); await db.run('DELETE FROM schema_migrations WHERE version=4');
+    await db.run('ALTER TABLE members DROP COLUMN hidden_from_member_list');
+    await db.run('ALTER TABLE servers DROP COLUMN member_list_revision');
+    await db.run('DELETE FROM schema_migrations WHERE version=19');
     const backup = path.join(dir, 'schema3.sqlite'); await db.backup(backup); await db.close(); db = await openDatabase(c);
     expect(await db.one('SELECT revision,permissions FROM channel_overrides WHERE channel_id=?', [channel.id])).toEqual({ revision: 1, permissions: JSON.stringify({ write: false, share: false }) });
     expect((await new Service(db, c).history(uid, channel.conversationId!)).messages![0].content).toBe('Kept across migration and restore');
     const restoredDir = path.join(dir, 'restored'); const { mkdir } = await import('node:fs/promises'); await mkdir(restoredDir);
     const raw = new Sqlite(backup, { readonly: true }); await raw.backup(path.join(restoredDir, 'dorham.sqlite')); raw.close();
     const restored = await openDatabase(config({ dataDir: restoredDir, databaseUrl: '' }));
-    try { expect((await restored.one('SELECT name FROM attachments WHERE id=?', [attachment]))!.name).toBe('kept.png'); expect((await restored.one('SELECT COUNT(*) AS n FROM messages'))!.n).toBe(1); expect(await restored.all('PRAGMA foreign_key_check')).toEqual([]); expect((await restored.one('PRAGMA integrity_check'))!.integrity_check).toBe('ok'); expect((await restored.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); }
+    try { expect((await restored.one('SELECT name FROM attachments WHERE id=?', [attachment]))!.name).toBe('kept.png'); expect((await restored.one('SELECT COUNT(*) AS n FROM messages'))!.n).toBe(1); expect(await restored.all('PRAGMA foreign_key_check')).toEqual([]); expect((await restored.one('PRAGMA integrity_check'))!.integrity_check).toBe('ok'); expect((await restored.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19]); }
     finally { await restored.close(); }
   } finally { await db.close(); await rm(dir, { recursive: true, force: true }); }
 });
@@ -51,9 +54,10 @@ it('upgrades the actual v1 schema without losing existing users, sessions, messa
     const service = new Service(db, config({ dataDir: dir, databaseUrl: '' }));
     const history = await service.history('legacy-user', 'legacy-conversation'); expect(history.messages![0].content).toBe('Persisted before the upgrade');
     expect((await service.bootstrap('legacy-user')).servers[0].ownerId).toBe('legacy-user');
+    expect(await db.one('SELECT hidden_from_member_list FROM members WHERE user_id=?', ['legacy-user'])).toEqual({ hidden_from_member_list: 0 });
     expect(await db.all('PRAGMA foreign_key_check')).toHaveLength(0);
     await db.close(); db = await openDatabase(config({ dataDir: dir, databaseUrl: '' }));
-    expect((await db.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => Number(r.version))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect((await db.all('SELECT version FROM schema_migrations ORDER BY version')).map(r => Number(r.version))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19]);
   } finally { await db.close(); await rm(dir, { recursive: true, force: true }); }
 });
 

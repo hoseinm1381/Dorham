@@ -44,8 +44,13 @@ try {
     $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     Invoke-BuildTool $csc @('/nologo', '/optimize+', '/platform:x64', "/out:$native\VoiceHotkey.exe", (Join-Path $root 'apps\desktop\native\VoiceHotkey.cs'))
     $compiler = @('/nologo', '/utf-8', '/std:c++20', '/EHsc', '/O2', '/MT')
-    Invoke-BuildTool 'cl.exe' ($compiler + @("/I$headers", "/Fo$generated\CaptureVideo.obj", "/Fe$native\CaptureVideo.exe",
-      (Join-Path $project 'native\CaptureVideo.cpp'), 'd3d11.lib', 'windowsapp.lib', 'user32.lib'))
+    $fxc = Join-Path $env:WindowsSdkDir "bin\$sdkVersion\x64\fxc.exe"
+    foreach ($shader in @(@('fullscreen', 'vs_4_0'), @('scaleFrame', 'ps_4_0'))) {
+      Invoke-BuildTool $fxc @('/nologo', '/T', $shader[1], '/E', $shader[0], '/Vn', $shader[0], '/Fh',
+        (Join-Path $generated ($shader[0] + '.h')), (Join-Path $project 'native\CaptureScale.hlsl'))
+    }
+    Invoke-BuildTool 'cl.exe' ($compiler + @("/I$headers", "/I$generated", "/Fo$generated\CaptureVideo.obj", "/Fe$native\CaptureVideo.exe",
+      (Join-Path $project 'native\CaptureVideo.cpp'), 'd3d11.lib', 'windowsapp.lib', 'user32.lib', 'gdi32.lib'))
     Invoke-BuildTool 'cl.exe' ($compiler + @('/DNOMINMAX', "/Fo$generated\ShareAudio.obj", "/Fe$native\ShareAudio.exe",
       (Join-Path $root 'apps\desktop\native\ShareAudio.cpp'), 'ole32.lib', 'mmdevapi.lib', 'uuid.lib', 'user32.lib'))
   }

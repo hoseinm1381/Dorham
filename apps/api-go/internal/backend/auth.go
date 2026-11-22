@@ -209,6 +209,7 @@ func (a *App) registerAuth() {
 		Check(result != nil, 401, "REFRESH_INVALID", "Session expired. Sign in again.")
 		return result
 	})
+	a.Route("POST", "/api/v1/auth/refresh-safe", false, a.recoverableRefresh)
 	a.Route("POST", "/api/v1/auth/guest", false, a.guest)
 	a.Route("POST", "/api/v1/auth/recover", false, a.recoverAccount)
 	a.Route("GET", "/api/v1/auth/me", true, func(r *Request) any { return M{"user": PublicUser(r.User), "csrf": r.Session["csrf"]} })

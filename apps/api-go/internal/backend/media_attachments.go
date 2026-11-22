@@ -102,7 +102,7 @@ func (m *Media) registerAttachments() {
 			old := tx.One("SELECT * FROM attachments WHERE user_id=? AND request_id=?", r.UID(), rid)
 			if old != nil {
 				Check(Str(old, "conversation_id") == cid && Str(old, "name") == name && Num(old, "size") == size, 409, "IDEMPOTENCY_CONFLICT", "Upload identifier already has different input.")
-				return M{"id": old["id"], "state": old["state"], "expiresAt": Num(old, "expires_at")}
+				return M{"id": old["id"], "state": old["state"], "expiresAt": Num(old, "expires_at"), "resumable": Num(old, "resume_until") > 0}
 			}
 			usage := tx.One("SELECT COALESCE(SUM(bytes),0) AS bytes FROM attachment_usage WHERE user_id=? AND created_at>?", r.UID(), Now()-86400000)
 			Check(Num(usage, "bytes")+size <= uploadAllowance(tx, r.UID()), 429, "UPLOAD_QUOTA", "Your rolling daily upload allowance has been reached.")
@@ -116,9 +116,13 @@ func (m *Media) registerAttachments() {
 			Check(allocated+size <= Num(storage, "budget") && Num(storage, "freeBytes")-pending-size >= Num(storage, "reserveBytes"), 507, "UPLOAD_STORAGE", "File storage has insufficient free space.")
 			id, now := ID(), Now()
 			expires := now + mediaRetention(size)
-			tx.Run("INSERT INTO attachments(id,user_id,conversation_id,request_id,name,size,state,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)", id, r.UID(), cid, rid, name, size, "reserved", now, expires)
+			resumeUntil := int64(0)
+			if B(b["resumable"]) {
+				resumeUntil = now + 6*3600000
+			}
+			tx.Run("INSERT INTO attachments(id,user_id,conversation_id,request_id,name,size,state,created_at,expires_at,resume_until) VALUES(?,?,?,?,?,?,?,?,?,?)", id, r.UID(), cid, rid, name, size, "reserved", now, expires, resumeUntil)
 			tx.Run("INSERT INTO attachment_usage(id,user_id,bytes,created_at) VALUES(?,?,?,?)", id, r.UID(), size, now)
-			return M{"id": id, "state": "reserved", "expiresAt": expires}
+			return M{"id": id, "state": "reserved", "expiresAt": expires, "resumable": resumeUntil > 0}
 		})
 	})
 	a.Route("POST", "/api/v1/attachments/{id}/content", true, func(r *Request) any {
@@ -166,6 +170,16 @@ func (m *Media) registerAttachments() {
 		a.DB.Run("UPDATE attachments SET state='ready',digest=? WHERE id=? AND state='reserved'", hex.EncodeToString(h.Sum(nil)), id)
 		complete = true
 		return M{"id": id, "state": "ready"}
+	})
+	a.Route("PATCH", "/api/v1/attachments/{id}/content", true, func(r *Request) any { return m.uploadChunk(r) })
+	a.Route("GET", "/api/v1/attachments/{id}/transfer", true, func(r *Request) any {
+		id := mediaID(r.Param("id"))
+		row := m.resumableUpload(r, id)
+		r.Header("Cache-Control", "no-store")
+		if Str(row, "state") == "ready" {
+			return M{"offset": Num(row, "size"), "state": "ready"}
+		}
+		return M{"offset": m.uploadOffset(id), "state": "reserved"}
 	})
 	a.Route("DELETE", "/api/v1/attachments/{id}", true, func(r *Request) any {
 		id := mediaID(r.Param("id"))
@@ -417,19 +431,28 @@ func (m *Media) serveAttachment(r *Request, preview bool) any {
 	}()
 	r.Header("X-Content-Type-Options", "nosniff")
 	r.Header("Content-Security-Policy", "sandbox; default-src 'none'")
+	if preview && r.Query("thumbnail") == "1" {
+		Check(info.Size() <= 16*mediaMiB && strings.HasPrefix(mime, "image/"), 415, "PREVIEW_UNSUPPORTED", "A small preview is unavailable.")
+		return attachmentThumbnail(r, f)
+	}
+	r.Header("Accept-Ranges", "bytes")
+	etag := `"` + Str(row, "digest") + `"`
+	r.Header("ETag", etag)
 	start, end, present := int64(0), info.Size()-1, false
-	if preview {
-		r.Header("Content-Type", mime)
-		r.Header("Content-Disposition", "inline")
-		r.Header("Cache-Control", "private, no-store")
-		r.Header("Referrer-Policy", "no-referrer")
-		r.Header("Accept-Ranges", "bytes")
-		start, end, present, e = mediaByteRange(r.R.Header.Get("Range"), info.Size())
+	rangeHeader := r.R.Header.Get("Range")
+	if expected := r.R.Header.Get("If-Range"); expected == "" || expected == etag {
+		start, end, present, e = mediaByteRange(rangeHeader, info.Size())
 		if e != nil {
 			r.Header("Content-Range", fmt.Sprintf("bytes */%d", info.Size()))
 			r.W.WriteHeader(416)
 			return nil
 		}
+	}
+	if preview {
+		r.Header("Content-Type", mime)
+		r.Header("Content-Disposition", "inline")
+		r.Header("Cache-Control", "private, no-store")
+		r.Header("Referrer-Policy", "no-referrer")
 	} else {
 		r.Header("Content-Type", "application/octet-stream")
 		r.Header("Cache-Control", "no-store")
@@ -463,7 +486,7 @@ func (m *Media) cleanupAttachments(required int64, forceScan ...bool) {
 	a := m.a
 	storage := m.storage()
 	reclaimed := int64(0)
-	for _, row := range a.DB.All("SELECT * FROM attachments WHERE state<>'removed' AND (state<>'reserved' OR created_at<?) ORDER BY CASE WHEN expires_at<? OR state<>'ready' THEN 0 ELSE 1 END,created_at LIMIT 100", Now()-15*60000, Now()) {
+	for _, row := range a.DB.All("SELECT * FROM attachments WHERE state<>'removed' AND (state<>'reserved' OR (resume_until=0 AND created_at<?) OR (resume_until>0 AND resume_until<?)) ORDER BY CASE WHEN expires_at<? OR state<>'ready' THEN 0 ELSE 1 END,created_at LIMIT 100", Now()-15*60000, Now(), Now()) {
 		id := Str(row, "id")
 		m.mu.Lock()
 		active := m.writers[id] || m.readers[id] > 0

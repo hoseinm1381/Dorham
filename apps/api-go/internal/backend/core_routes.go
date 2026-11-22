@@ -108,7 +108,20 @@ func coreMessageReply(body M) any {
 }
 func (a *App) registerCore() {
 	s := a.Service
-	a.Route("GET", "/api/v1/bootstrap", true, func(r *Request) any { return s.Bootstrap(r.UID()) })
+	a.Route("GET", "/api/v1/bootstrap", true, func(r *Request) any {
+		data := s.Bootstrap(r.UID())
+		if r.Query("sync") != "1" {
+			return data
+		}
+		voice := data["voicePresence"]
+		delete(data, "voicePresence")
+		version := Hash(JSON(data))
+		if Equal(r.Query("known"), version) {
+			return M{"unchanged": true, "bootstrapVersion": version, "voicePresence": voice}
+		}
+		data["bootstrapVersion"], data["voicePresence"] = version, voice
+		return data
+	})
 	a.Route("PATCH", "/api/v1/profile", true, func(r *Request) any {
 		b := corePick(r.Body, "displayName", "bio", "status", "language", "requestId")
 		rid := RID(b)
@@ -208,6 +221,10 @@ func (a *App) registerCore() {
 		return s.JoinInvite(r.UID(), RID(b), coreString(b, "code", 10, 100, false))
 	})
 	a.Route("GET", "/api/v1/servers/{id}/members", true, func(r *Request) any { return s.Members(r.UID(), r.Param("id")) })
+	a.Route("PATCH", "/api/v1/servers/{serverId}/members/{userId}/visibility", true, func(r *Request) any {
+		b := corePick(r.Body, "hidden", "requestId")
+		return s.ChangeMemberVisibility(r.UID(), RID(b), r.Param("serverId"), r.Param("userId"), VBool(b, "hidden"))
+	})
 	a.Route("PATCH", "/api/v1/servers/{serverId}/members/{userId}", true, func(r *Request) any {
 		b := corePick(r.Body, "role", "remove", "requestId")
 		rid := RID(b)
@@ -234,6 +251,9 @@ func (a *App) registerCore() {
 		return s.History(r.UID(), r.Param("id"), coreQueryInt(r, "before", 1), coreQueryInt(r, "after", 0))
 	})
 	a.Route("POST", "/api/v1/messages", true, func(r *Request) any {
+		if account := r.Query("sender"); account != "" {
+			Check(Equal(account, r.UID()), 403, "SESSION_CHANGED", "Your signed-in account changed. Reopen Dorham before sending.")
+		}
 		b := CoreMessageBody(r.Body)
 		return s.Send(r.UID(), S(b["requestId"]), S(b["conversationId"]), S(b["content"]), coreMessageReply(b), serviceStrings(b["attachmentIds"]), B(b["tts"]))
 	})

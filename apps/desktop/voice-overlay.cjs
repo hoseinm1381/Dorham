@@ -1,10 +1,10 @@
 const path = require('node:path');
 const cleanAvatar = value => typeof value === 'string' && value.length <= 32768 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : undefined;
 const positions = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-function cleanPreferences(value) { return { enabled: value?.enabled === true, position: positions.has(value?.position) ? value.position : 'top-left' }; }
+function cleanPreferences(value) { return { enabled: value?.opacity == null || value?.enabled !== false, opacity: Number.isFinite(value?.opacity) ? Math.max(10, Math.min(100, Math.round(value.opacity))) : 60, position: positions.has(value?.position) ? value.position : 'top-left' }; }
 function cleanState(value) {
   if (!value || typeof value.channel !== 'string' || !Array.isArray(value.members)) return null;
-  return { channel: value.channel.slice(0, 80), language: value.language === 'fa-IR' ? 'fa-IR' : 'en-US', members: value.members.slice(0, 16).filter(m => typeof m?.name === 'string').map(m => ({ ...(typeof m.id === 'string' ? { id: m.id.slice(0, 80) } : {}), name: m.name.slice(0, 48), ...(cleanAvatar(m.avatar) ? { avatar: m.avatar } : {}), muted: m.muted === true, deafened: m.deafened === true, serverMuted: m.serverMuted === true, speaking: m.speaking === true })) };
+  return { channel: value.channel.slice(0, 80), sharing: value.sharing === true, language: value.language === 'fa-IR' ? 'fa-IR' : 'en-US', members: value.members.slice(0, 16).filter(m => typeof m?.name === 'string').map(m => ({ ...(typeof m.id === 'string' ? { id: m.id.slice(0, 80) } : {}), name: m.name.slice(0, 48), ...(cleanAvatar(m.avatar) ? { avatar: m.avatar } : {}), muted: m.muted === true, deafened: m.deafened === true, serverMuted: m.serverMuted === true, speaking: m.speaking === true, watching: value.sharing === true && m.watching === true })) };
 }
 function createVoiceOverlay(readSettings, saveSettings) {
   const { BrowserWindow, screen, app } = require('electron');
@@ -15,13 +15,13 @@ function createVoiceOverlay(readSettings, saveSettings) {
   function place() {
     if (!win || win.isDestroyed()) return;
     const area = screen.getPrimaryDisplay().workArea;
-    const width = 270, height = Math.min(area.height - 32, 20 + (state?.members.length || 0) * 38);
+    const width = 270, height = Math.min(area.height - 32, 20 + (state?.members.length || 0) * 38 + (state?.sharing ? 24 : 0));
     const next = { x: prefs.position.endsWith('right') ? area.x + area.width - width - 16 : area.x + 16, y: prefs.position.startsWith('bottom') ? area.y + area.height - height - 16 : area.y + 16, width, height };
     if (!bounds || Object.keys(next).some(key => next[key] !== bounds[key])) { bounds = next; win.setBounds(next); }
   }
   function send(force = false) {
     const previous = force ? [] : lastSent?.members || [];
-    const packet = { ...state, members: state.members.map((member, index) => {
+    const packet = { ...state, opacity: prefs.opacity, members: state.members.map((member, index) => {
       const old = previous.find((item, i) => member.id ? item.id === member.id : i === index);
       return { ...member, avatar: old && old.avatar === member.avatar ? undefined : member.avatar || null };
     }) };
@@ -47,7 +47,7 @@ function createVoiceOverlay(readSettings, saveSettings) {
       const raw = value.members.filter(m => typeof m?.name === 'string')[index];
       if (!Object.hasOwn(raw, 'avatar')) { const old = state?.members.find((m, i) => member.id ? member.id === m.id : index === i); if (old?.avatar) member.avatar = old.avatar; }
     }
-    const equal = next && state && next.channel === state.channel && next.language === state.language && next.members.length === state.members.length && next.members.every((member, i) => ['id', 'name', 'avatar', 'muted', 'deafened', 'serverMuted', 'speaking'].every(key => member[key] === state.members[i][key]));
+    const equal = next && state && next.channel === state.channel && next.sharing === state.sharing && next.language === state.language && next.members.length === state.members.length && next.members.every((member, i) => ['id', 'name', 'avatar', 'muted', 'deafened', 'serverMuted', 'speaking', 'watching'].every(key => member[key] === state.members[i][key]));
     if (equal || (!next && !state)) return;
     state = next; sync();
   }, setActive(value) { if (active === (value === true)) return; active = value === true; if (!active) state = null; sync(); }, setLocked(value) { if (locked === (value === true)) return; locked = value === true; sync(); }, close };

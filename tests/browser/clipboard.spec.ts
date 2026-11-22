@@ -46,7 +46,7 @@ test('clipboard pictures prepare attachments in channels and DMs without sending
     for (let n = 0; n < 4; n++) { await pasteImage(page, png, `limit-${n}.png`); await expect(page.locator('.attachment-draft')).toHaveCount(n + 1); }
     await pasteImage(page, png, 'excess.png'); await expect(page.getByRole('alert')).toContainText('up to four files'); await expect(page.locator('.attachment-draft')).toHaveCount(4);
     for (let n = 4; n > 0; n--) { await page.getByRole('button', { name: 'Remove attachment', exact: true }).first().click(); await expect(page.locator('.attachment-draft')).toHaveCount(n - 1); }
-    await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByLabel('Language', { exact: true }).selectOption('fa-IR'); await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Account settings', exact: true }).click(); await page.getByRole('tab', { name: 'Language', exact: true }).click(); await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('fa-IR'); await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 390, height: 844 }); await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
     const compact = await page.locator('.upload-tools').boundingBox(); expect(compact!.height).toBeLessThanOrEqual(32); expect(compact!.x).toBeGreaterThanOrEqual(0); expect(compact!.x + compact!.width).toBeLessThanOrEqual(390);
     await page.getByLabel('محدودیت‌های آپلود', { exact: true }).click(); const panel = await page.locator('.upload-limits-panel').boundingBox(); expect(panel!.x).toBeGreaterThanOrEqual(0); expect(panel!.x + panel!.width).toBeLessThanOrEqual(390);

@@ -4,9 +4,9 @@ import { t } from './i18n';
 import { assetUrl } from './api';
 import './windows-overlay.css';
 import { speakingStore } from './LiveStatus';
-export type OverlayPreferences = { enabled: boolean; position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' };
-export type OverlayState = { channel: string; language: string; members: { id?: string; name: string; avatar?: string | null; muted: boolean; deafened: boolean; serverMuted: boolean; speaking: boolean }[] } | null;
-export function WindowsOverlayBridge({ room, name, language, musicMuted = false }: { room: VoiceRoom | null; name: string; language: string; musicMuted?: boolean }) {
+export type OverlayPreferences = { enabled: boolean; opacity?: number; position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' };
+export type OverlayState = { channel: string; language: string; sharing?: boolean; members: { id?: string; name: string; avatar?: string | null; muted: boolean; deafened: boolean; serverMuted: boolean; speaking: boolean; watching?: boolean }[] } | null;
+export function WindowsOverlayBridge({ room, name, language, musicMuted = false, streamViewers }: { room: VoiceRoom | null; name: string; language: string; musicMuted?: boolean; streamViewers?: string[] }) {
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
     let live = true;
@@ -19,7 +19,7 @@ export function WindowsOverlayBridge({ room, name, language, musicMuted = false 
     return () => { live = false; remove?.(); };
   }, []);
   const speaking = useSyncExternalStore(enabled && room ? speakingStore.subscribeAll : noSubscription, enabled && room ? speakingStore.snapshot : emptySnapshot);
-  useWindowsVoiceOverlay(room, name, speaking, language, enabled, musicMuted);
+  useWindowsVoiceOverlay(room, name, speaking, language, enabled, musicMuted, streamViewers);
   return null;
 }
 const emptySpeaking: Record<string, boolean> = {};
@@ -30,11 +30,11 @@ function thumbnailSource(avatar: string | null) {
   // Canvas reads need CORS. Keep them separate from display-only image cache entries.
   return `${assetUrl(avatar)}?overlay=1`;
 }
-export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, speaking: Record<string, boolean>, language: string, enabled: boolean, musicMuted = false) {
+export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, speaking: Record<string, boolean>, language: string, enabled: boolean, musicMuted = false, streamViewers?: string[]) {
   const thumbnails = useRef(new Map<string, string>()), previous = useRef(new Map<string, string>());
   const [revision, setRevision] = useState(0);
-  const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), latest = useRef({ room, name, language, speaking, musicMuted });
-  latest.current = { room, name, language, speaking, musicMuted };
+  const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), latest = useRef({ room, name, language, speaking, musicMuted, streamViewers });
+  latest.current = { room, name, language, speaking, musicMuted, streamViewers };
   const avatarSources = JSON.stringify([...new Set(enabled ? room?.members.map(m => thumbnailSource(m.user.avatar)).filter(Boolean) || [] : [])]);
   useEffect(() => {
     if (!window.desktop?.updateOverlay || !enabled) return;
@@ -67,24 +67,25 @@ export function useWindowsVoiceOverlay(room: VoiceRoom | null, name: string, spe
     // Coalesce bursts of speaking events without a persistent polling timer.
     pending.current = setTimeout(() => {
       pending.current = undefined;
-      const { room, name, language, speaking, musicMuted } = latest.current;
+      const { room, name, language, speaking, musicMuted, streamViewers } = latest.current;
       if (!room) return;
       const next = new Map<string, string>();
       const members = room.members.map(member => {
         const id = member.user.id, avatar = thumbnails.current.get(thumbnailSource(member.user.avatar)) || '';
         next.set(id, avatar);
                 const bot = member.user.kind === 'music';
-        return { id, name: bot ? t('Dorham Music') + ' · ' + t('BOT') : member.user.displayName, ...(previous.current.get(id) === avatar ? {} : { avatar: avatar || null }), muted: bot ? musicMuted : member.muted, deafened: member.deafened || member.serverDeafened === true, serverMuted: member.serverMuted, speaking: speaking[id] === true };
+        return { id, name: bot ? t('Dorham Music') + ' · ' + t('BOT') : member.user.displayName, ...(previous.current.get(id) === avatar ? {} : { avatar: avatar || null }), muted: bot ? musicMuted : member.muted, deafened: member.deafened || member.serverDeafened === true, serverMuted: member.serverMuted, speaking: speaking[id] === true, watching: streamViewers?.includes(id) === true };
       });
-      previous.current = next; window.desktop?.updateOverlay?.({ channel: name, language, members });
+      previous.current = next; window.desktop?.updateOverlay?.({ channel: name, language, members, sharing: Boolean(streamViewers) });
     }, 40);
-  }, [room, name, language, speaking, enabled, revision, musicMuted]);
+  }, [room, name, language, speaking, enabled, revision, musicMuted, streamViewers]);
   useEffect(() => () => { if (pending.current) clearTimeout(pending.current); window.desktop?.updateOverlay?.(null); }, []);
 }
 export function WindowsVoiceOverlaySettings({ error }: { error: (error: unknown) => void }) {
   const [prefs, setPrefs] = useState<OverlayPreferences>({ enabled: false, position: 'top-left' }), [ready, setReady] = useState(false), [busy, setBusy] = useState(false);
   useEffect(() => { let active = true; void window.desktop?.getOverlay?.().then(value => { if (active) { setPrefs(value); setReady(true); } }).catch(error); return () => { active = false; }; }, []);
+  const [opacity, setOpacity] = useState<number>();
   if (!window.desktop?.configureOverlay) return null;
-  async function save(next: OverlayPreferences) { setBusy(true); try { const value = await window.desktop!.configureOverlay!(next); setPrefs(value); } catch (e) { error(e); } finally { setBusy(false); } }
-  return <fieldset className="game-overlay-settings" disabled={!ready || busy}><legend>{t('Windows voice overlay')}</legend><label className="check-row"><input type="checkbox" checked={prefs.enabled} onChange={e => { void save({ ...prefs, enabled: e.target.checked }); }}/>{t('Show voice overlay in games')}</label><label>{t('Overlay position')}<select aria-label={t('Overlay position')} value={prefs.position} onChange={e => { void save({ ...prefs, position: e.target.value as OverlayPreferences['position'] }); }}>{['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(p => <option value={p} key={p}>{t(({ 'top-left': 'Top left', 'top-right': 'Top right', 'bottom-left': 'Bottom left', 'bottom-right': 'Bottom right' } as Record<string, string>)[p])}</option>)}</select></label><small>{t('Click-through voice status on your main display. Works with windowed or borderless games; exclusive fullscreen is not supported.')}</small></fieldset>;
+  async function save(next: OverlayPreferences) { setBusy(true); try { const value = await window.desktop!.configureOverlay!({ opacity: 60, ...next }); setPrefs(value); } catch (e) { error(e); } finally { setBusy(false); } }
+  return <fieldset className="game-overlay-settings" disabled={!ready || busy}><legend>{t('Windows voice overlay')}</legend><label className="check-row"><input type="checkbox" checked={prefs.enabled} onChange={e => { void save({ ...prefs, enabled: e.target.checked }); }}/>{t('Show voice overlay in games')}</label><label>{t('Overlay position')}<select aria-label={t('Overlay position')} value={prefs.position} onChange={e => { void save({ ...prefs, position: e.target.value as OverlayPreferences['position'] }); }}>{['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(p => <option value={p} key={p}>{t(({ 'top-left': 'Top left', 'top-right': 'Top right', 'bottom-left': 'Bottom left', 'bottom-right': 'Bottom right' } as Record<string, string>)[p])}</option>)}</select></label><label>{t('Overlay opacity')} <output>{opacity ?? prefs.opacity ?? 60}%</output><input type="range" min={10} max={100} value={opacity ?? prefs.opacity ?? 60} onChange={e => setOpacity(Number(e.target.value))} onPointerUp={e => { void save({ ...prefs, opacity: Number(e.currentTarget.value) }); }} onKeyUp={e => { if (['ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) void save({ ...prefs, opacity: Number(e.currentTarget.value) }); }}/></label><small>{t('Click-through voice status on your main display. Works with windowed or borderless games; exclusive fullscreen is not supported.')}</small></fieldset>;
 }

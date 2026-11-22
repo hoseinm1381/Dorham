@@ -713,7 +713,12 @@ func (g *Games) changed(id string, canvas M) {
 			continue
 		}
 		if canvas == nil {
-			g.a.Hub.EmitSocket(S(viewer["socketId"]), "game:changed", M{"id": id, "channelId": s["channelId"], "revision": s["revision"], "directoryChanged": directory})
+			sid := S(viewer["socketId"])
+			notice := M{"id": id, "channelId": s["channelId"], "revision": s["revision"], "directoryChanged": directory}
+			if S(viewer["gameWatching"]) == id {
+				g.a.Hub.gameDelta(sid, id, notice, func(version string) M { return g.view(uid, id, version) })
+			}
+			g.a.Hub.EmitSocket(sid, "game:changed", notice)
 		} else if S(viewer["gameWatching"]) == id && (S(s["kind"]) != "telephone" || S(Obj(Arr(s["seats"])[gi(canvas["seat"])])["id"]) == uid) {
 			g.a.Hub.EmitSocket(S(viewer["socketId"]), "game:canvas", canvas)
 		}

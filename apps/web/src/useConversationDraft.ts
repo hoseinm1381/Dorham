@@ -24,7 +24,7 @@ export function useConversationDraft(account: string | undefined, origin: string
   useEffect(() => {
     if (!account || !conversation) return;
     let active = true; const files = cache.get(key).files;
-    if (files.length) void Promise.all(files.map(async file => { try { return await request(`/attachments/${file.id}/status`); } catch { return null; } })).then(values => {
+    if (files.length) void Promise.all(files.map(async file => { try { return await request(`/attachments/${file.id}/status`); } catch (cause: any) { return [403, 404, 410].includes(cause?.status) ? null : file; } })).then(values => {
       if (!active) return; const valid = values.filter(Boolean) as Draft['files']; const current = cache.get(key);
       cache.set(key, { ...current, files: current.files.filter(f => !files.some(old => old.id === f.id) || valid.some(v => v.id === f.id)) }); cache.flush();
     });

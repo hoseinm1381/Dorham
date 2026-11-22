@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { completeRecovery } from './recovery-helper';
+import release from '../../package.json' with { type: 'json' };
 test.use({ trace: 'off' });
 test('right-click moderation, peer-admin drag moves, timeout and ban work through real clients', async ({ browser, request }) => {
  const suffix=Date.now().toString().slice(-8), password='moderation-browser-fixture';
@@ -12,7 +13,7 @@ test('right-click moderation, peer-admin drag moves, timeout and ban work throug
  for(const u of [admin,peer]){await api(u,'/invites/join',{code:invite.code});await api(owner,`/servers/${server.id}/members/${u.user.id}`,{role:'administrator'},'PATCH');}
  await api(owner,`/servers/${server.id}/channels`,{name:'Game 2',kind:'voice'});
  const a=await browser.newContext(),b=await browser.newContext(),page=await a.newPage(),other=await b.newPage();
- async function login(p:Page,name:string){await p.goto('/');await p.getByLabel('Username',{exact:true}).fill(name+suffix);await p.getByLabel('Password',{exact:true}).fill(password);await p.getByRole('button',{name:'Let’s get you in',exact:true}).click();await completeRecovery(p);await p.getByRole('button',{name:'Open Moderation lab',exact:true}).click();}
+ async function login(p:Page,name:string){await p.addInitScript(version=>localStorage.setItem('dorham.whats-new-seen',version),release.version);await p.goto('/');await p.getByLabel('Username',{exact:true}).fill(name+suffix);await p.getByLabel('Password',{exact:true}).fill(password);await p.getByRole('button',{name:'Let’s get you in',exact:true}).click();await completeRecovery(p);await p.getByRole('button',{name:'Open Moderation lab',exact:true}).click();}
  try{
   page.setDefaultTimeout(15000);other.setDefaultTimeout(15000);
   await login(page,'Admin');await login(other,'Peer');await other.getByRole('button',{name:'Lounge',exact:true}).click();await expect(other.locator('.gaming-voice')).toBeVisible();
@@ -23,6 +24,14 @@ test('right-click moderation, peer-admin drag moves, timeout and ban work throug
   await expect(page.locator('.voice-mini-members button').filter({has:page.getByText('Peer',{exact:true})})).toBeVisible();
   // Demote the target through the owner API, then exercise the actual menu actions.
   await api(owner,`/servers/${server.id}/members/${peer.user.id}`,{role:'member'},'PATCH');
+  for (const [action, next] of [['Server mute','Allow microphone'], ['Allow microphone','Server mute'], ['Server deafen','Allow listening'], ['Allow listening','Server deafen'], ['Disallow screen sharing','Allow screen sharing'], ['Allow screen sharing','Disallow screen sharing']]) {
+   await peerRow().click({button:'right'});
+   await menu.getByRole('menuitem',{name:action,exact:true}).click();
+   await expect(menu).toBeHidden();
+   await peerRow().click({button:'right'});
+   await expect(menu.getByRole('menuitem',{name:next,exact:true})).toBeVisible();
+   await page.keyboard.press('Escape');
+  }
   await peerRow().click({button:'right'});await expect(menu.getByRole('menuitem',{name:'Time out member',exact:true})).toBeVisible();await page.screenshot({path:'artifacts/evidence/v107-member-menu.png'});await menu.getByRole('menuitem',{name:'Time out member',exact:true}).click();
   const confirm=page.getByRole('dialog',{name:'Confirm moderation action',exact:true});await confirm.getByLabel('Timeout duration',{exact:true}).selectOption('60');await confirm.screenshot({path:'artifacts/evidence/v107-timeout-confirmation.png'});await confirm.getByRole('button',{name:'Apply timeout',exact:true}).click();
   await expect(other.locator('.gaming-voice')).toHaveCount(0);await expect(other.getByLabel('Message',{exact:true})).toBeDisabled();await expect(other.getByRole('status').filter({hasText:'You are timed out until'})).toBeVisible();
@@ -33,9 +42,9 @@ test('right-click moderation, peer-admin drag moves, timeout and ban work throug
   await page.getByLabel('Message',{exact:true}).fill('Copy this سلام');await page.getByRole('button',{name:'Send message',exact:true}).click();const message=page.getByTestId('message').filter({hasText:'Copy this سلام'});await message.hover();await message.getByRole('button',{name:'Copy message text',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).__copied)).toBe('Copy this سلام');
   await peerRow().click({button:'right'});await menu.getByRole('menuitem',{name:'Ban from server',exact:true}).click();await confirm.getByLabel('Reason (optional)',{exact:true}).fill('Browser test');await confirm.getByRole('button',{name:'Confirm ban',exact:true}).click();await expect(other.getByRole('button',{name:'Open Moderation lab',exact:true})).toHaveCount(0);
   const blocked=await request.post('/api/v1/invites/join',{headers:{Authorization:'Bearer '+peer.accessToken},data:{code:invite.code,requestId:randomUUID()}});expect(blocked.status()).toBe(403);
-  await page.locator('.space-heading').click();await page.locator('.manage-server .tabs').getByRole('button',{name:'members',exact:true}).click();await page.getByText('Server bans',{exact:true}).click();await expect(page.locator('.server-ban-list')).toContainText('Browser test');await page.getByRole('button',{name:'Unban',exact:true}).click();await expect(page.getByText('No banned members.',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Close dialog',exact:true}).click();await api(peer,'/invites/join',{code:invite.code});
+  await page.locator('.space-heading').click();await page.getByRole('tab',{name:'Server bans',exact:true}).click();await expect(page.locator('.server-ban-list')).toContainText('Browser test');await page.getByRole('button',{name:'Unban',exact:true}).click();await expect(page.getByText('No banned members.',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Close dialog',exact:true}).click();await api(peer,'/invites/join',{code:invite.code});
   await page.screenshot({path:'artifacts/evidence/v107-moderation-browser.png'});
-  await page.getByRole('button',{name:'Account settings',exact:true}).click();await page.getByLabel('Language',{exact:true}).selectOption('fa-IR');await expect(page.locator('html')).toHaveAttribute('dir','rtl');await page.getByRole('button',{name:'بستن پنجره',exact:true}).click();
+  await page.getByRole('button',{name:'Account settings',exact:true}).click();await page.getByRole('tab', { name: 'Language', exact: true }).click(); await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('fa-IR');await expect(page.locator('html')).toHaveAttribute('dir','rtl');await page.getByRole('button',{name:'بستن پنجره',exact:true}).click();
   await expect(peerRow()).toBeVisible();const viewport=page.viewportSize()!;await peerRow().dispatchEvent('contextmenu',{clientX:viewport.width-2,clientY:viewport.height-2});const rtlMenu=page.getByRole('menu',{name:'گزینه‌های عضو',exact:true});await expect(rtlMenu.getByRole('menuitem',{name:'مسدود کردن در سرور',exact:true})).toBeVisible();await expect.poll(async()=>{const box=await rtlMenu.boundingBox();return !!box&&box.x>=8&&box.y>=8&&box.x+box.width<=viewport.width-7&&box.y+box.height<=viewport.height-7;}).toBe(true);await page.screenshot({path:'artifacts/evidence/v107-member-menu-rtl.png'});await page.keyboard.press('Escape');await expect(rtlMenu).toHaveCount(0);
   await writeFile('artifacts/evidence/v107-moderation-browser.json',JSON.stringify({realClients:2,peerAdminMenuOnlyMoves:true,actualHtmlDragDrop:true,targetClientChangedVoice:true,timeoutDisconnectedAndBlockedComposer:true,removeTimeoutRestoredComposer:true,serverBanRemovedAccessAndBlockedInvite:true,unbanUiRestoredJoin:true,desktopCopyExactText:true,persianRtlAndViewportClamping:true,escapeDismissedMenu:true,backendServerId:server.id,fixtureOnly:true},null,2));
  }finally{await a.close();await b.close();}

@@ -50,7 +50,8 @@ static bool writeAll(HANDLE pipe, const void* buffer, DWORD length) {
 }
 
 int wmain(int count, wchar_t** arguments) {
-  // include-window <HWND> <parent PID>, or exclude-process <own PID> <parent PID>.
+  // output-system captures the default render endpoint on older Windows.
+  // It is a separate, explicitly consented scope; never an automatic fallback.
   if (count != 4 && count != 5) return 2;
   wchar_t* end = nullptr;
   const unsigned long long identifier = wcstoull(arguments[2], &end, 10);
@@ -58,7 +59,8 @@ int wmain(int count, wchar_t** arguments) {
   const DWORD parentId = wcstoul(arguments[3], &end, 10);
   if (!parentId || !end || *end) return 2;
   const bool window = wcscmp(arguments[1], L"include-window") == 0;
-  if (!window && wcscmp(arguments[1], L"exclude-process") != 0) return 2;
+  const bool output = wcscmp(arguments[1], L"output-system") == 0;
+  if (!window && !output && wcscmp(arguments[1], L"exclude-process") != 0) return 2;
   DWORD target = static_cast<DWORD>(identifier);
   HWND handle = reinterpret_cast<HWND>(static_cast<uintptr_t>(identifier));
   if (window && (!IsWindow(handle) || !GetWindowThreadProcessId(handle, &target))) return 3;
@@ -74,18 +76,30 @@ int wmain(int count, wchar_t** arguments) {
   ActivationParameters parameters { 1, { target, window ? 0u : 1u } };
   PROPVARIANT variant {}; variant.vt = VT_BLOB; variant.blob.cbSize = sizeof(parameters); variant.blob.pBlobData = reinterpret_cast<BYTE*>(&parameters);
   IActivateAudioInterfaceAsyncOperation* operation = nullptr;
-  HRESULT hr = ActivateAudioInterfaceAsync(L"VAD\\Process_Loopback", __uuidof(IAudioClient), &variant, completion, &operation);
+  HRESULT hr;
+  IAudioClient* client = nullptr;
+  if (output) {
+    IMMDeviceEnumerator* enumerator = nullptr;
+    IMMDevice* endpoint = nullptr;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
+    if (SUCCEEDED(hr)) hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &endpoint);
+    if (SUCCEEDED(hr)) hr = endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&client));
+    if (endpoint) endpoint->Release();
+    if (enumerator) enumerator->Release();
+  } else {
+    hr = ActivateAudioInterfaceAsync(L"VAD\\Process_Loopback", __uuidof(IAudioClient), &variant, completion, &operation);
+    if (SUCCEEDED(hr) && WaitForSingleObject(completion->done, 8000) == WAIT_OBJECT_0) hr = completion->result;
+    else if (SUCCEEDED(hr)) hr = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    client = completion->client;
+  }
   const char* stage = "activation";
-  if (SUCCEEDED(hr) && WaitForSingleObject(completion->done, 8000) == WAIT_OBJECT_0) hr = completion->result;
-  else if (SUCCEEDED(hr)) hr = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
-  IAudioClient* client = completion->client;
   HANDLE ready = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   IAudioCaptureClient* capture = nullptr;
   if (SUCCEEDED(hr)) {
     WAVEFORMATEX format {}; format.wFormatTag = WAVE_FORMAT_IEEE_FLOAT; format.nChannels = 2; format.nSamplesPerSec = 48000;
     format.wBitsPerSample = 32; format.nBlockAlign = 8; format.nAvgBytesPerSec = 384000;
     stage = "initialize";
-    hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, 0, 0, &format, nullptr);
+    hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, 0, 0, &format, nullptr);
     if (SUCCEEDED(hr)) hr = client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void**>(&capture));
     if (SUCCEEDED(hr)) hr = client->SetEventHandle(ready);
     if (SUCCEEDED(hr)) hr = client->Start();
@@ -120,6 +134,7 @@ int wmain(int count, wchar_t** arguments) {
   // stdin's detached thread ends with this process; do not return through a
   // destroyed stack while it still has a reference to the stop flag.
   if (capture) capture->Release(); if (operation) operation->Release();
+  if (output && client) client->Release();
   completion->Release(); CloseHandle(ready); CloseHandle(parent);
   ExitProcess(FAILED(hr) ? 5 : 0);
 }

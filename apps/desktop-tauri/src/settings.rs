@@ -108,11 +108,36 @@ pub enum OverlayPosition {
     BottomRight,
 }
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
-#[serde(default)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(from = "StoredOverlayPreferences")]
 pub struct OverlayPreferences {
     pub enabled: bool,
     pub position: OverlayPosition,
+    pub opacity: u8,
+}
+
+impl Default for OverlayPreferences {
+    fn default() -> Self {
+        Self { enabled: true, position: OverlayPosition::default(), opacity: 60 }
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct StoredOverlayPreferences {
+    enabled: Option<bool>,
+    position: OverlayPosition,
+    opacity: Option<u8>,
+}
+
+impl From<StoredOverlayPreferences> for OverlayPreferences {
+    fn from(value: StoredOverlayPreferences) -> Self {
+        Self {
+            enabled: value.opacity.is_none() || value.enabled.unwrap_or(true),
+            position: value.position,
+            opacity: value.opacity.unwrap_or(60).clamp(10, 100),
+        }
+    }
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -283,6 +308,21 @@ pub fn validate_legacy(path: &Path) -> Result<LegacyPayload, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlay_defaults_and_legacy_preferences() {
+        let fresh: Settings = serde_json::from_str("{}").unwrap();
+        assert!(fresh.voice_overlay.enabled);
+        assert_eq!(fresh.voice_overlay.opacity, 60);
+        let legacy: OverlayPreferences = serde_json::from_str(r#"{"enabled":false,"position":"bottom-right"}"#).unwrap();
+        assert!(legacy.enabled);
+        assert_eq!(legacy.opacity, 60);
+        let changed: OverlayPreferences = serde_json::from_str(r#"{"enabled":false,"opacity":10}"#).unwrap();
+        assert!(!changed.enabled);
+        assert_eq!(changed.opacity, 10);
+        let invalid: OverlayPreferences = serde_json::from_str(r#"{"opacity":105}"#).unwrap();
+        assert_eq!(invalid.opacity, 100);
+    }
 
     #[test]
     fn server_configuration_enforces_secure_or_loopback_origins() {

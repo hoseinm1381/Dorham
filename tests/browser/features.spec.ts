@@ -139,7 +139,7 @@ test('Profile Plus avatars appear locked beside built-in pictures and can switch
     await sheep.click();
     await expect(sheep).toHaveAttribute('aria-pressed', 'true');
     await expect.poll(avatarPath).toContain('/catalog/' + avatar.id);
-    await expect.poll(() => user.locator('.settings-form .avatar-upload > .avatar img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+    await expect.poll(() => user.locator('.settings-form .profile-heading > .avatar img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     const overlay = desktop ? (await desktop.windows()).find(window => window.url().endsWith('/overlay.html')) : undefined;
     if (desktop) {
       expect(overlay).toBeDefined();

@@ -36,7 +36,7 @@ test('24 built-in avatars include a saved duck, Persian labels, and custom uploa
   const saved = (await api(page, '/auth/me')).user.avatar; expect(saved).toMatch(/^\/avatars\//);
   const response = await page.request.get(saved); expect(response.status()).toBe(200);
   expect(await sharp(await response.body()).metadata()).toMatchObject({ width: 128, height: 128, format: 'webp' });
-  await page.getByLabel('Language', { exact: true }).selectOption('fa-IR');
+  await page.getByRole('tab', { name: 'Language', exact: true }).click(); await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('fa-IR');
   await expect(picker.getByRole('button', { name: 'اردک', exact: true })).toBeVisible();
   await expect(picker.getByRole('button', { name: 'عروس دریایی', exact: true })).toBeVisible();
   await page.screenshot({ path: 'artifacts/evidence/v107-avatar-picker-persian.png', fullPage: true });
