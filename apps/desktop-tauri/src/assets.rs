@@ -103,6 +103,7 @@ pub fn serve(core: &ICoreWebView2, app: AppHandle, allow_media: bool) -> Result<
                             if let Ok(capacity) = share_video(&environment, sender, id, bytes) {
                                 let headers = HSTRING::from(format!("Cache-Control: no-store\r\nX-Dorham-Video-Buffer: {capacity}"));
                                 let response = environment.CreateWebResourceResponse(None, 200, w!("OK"), &headers)?;
+                                if let Ok(bytes) = frame { crate::capture::recycle_video_frame(&app, id, bytes); }
                                 return args.SetResponse(&response);
                             }
                             clear_shared_video(Some(id));
@@ -118,6 +119,7 @@ pub fn serve(core: &ICoreWebView2, app: AppHandle, allow_media: bool) -> Result<
                 };
                 let headers = HSTRING::from(format!("Content-Type: {content_type}\r\nCache-Control: no-store\r\nCross-Origin-Resource-Policy: same-origin\r\nX-Content-Type-Options: nosniff"));
                 let stream = (!bytes.is_empty()).then(|| SHCreateMemStream(Some(&bytes))).flatten();
+                if let Some(id) = video_id.filter(|_| code == 200) { crate::capture::recycle_video_frame(&app, id, bytes); }
                 let response = environment.CreateWebResourceResponse(stream.as_ref(), code, &HSTRING::from(reason), &headers)?;
                 return args.SetResponse(&response);
             }

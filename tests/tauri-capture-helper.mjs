@@ -1,6 +1,6 @@
 /* global AbortController */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,7 +12,7 @@ const [fixtureFile, captureFile] = process.argv.slice(2);
 if (!fixtureFile || !captureFile) throw new Error('Pass the fixture and capture helper executables');
 const children = [];
 function start(file, args) {
-  const child = spawn(path.resolve(file), args, { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
+  const child = spawn(path.resolve(file), args, { windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
   children.push(child);
   return child;
 }
@@ -30,25 +30,56 @@ try {
   const selected = start(fixtureFile, ['selected']);
   const unrelated = start(fixtureFile, ['unrelated']);
   const [handle] = await Promise.all([windowHandle(selected), windowHandle(unrelated)]);
+  const minimized = process.argv.includes('--minimized');
+  const windowAction = action => JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-File',
+    path.resolve('tests/fixtures/tauri-picker-source.ps1'), String(selected.pid), handle, action], {windowsHide:true}));
+  if (minimized) assert.equal(windowAction('minimize').minimized, true);
   const capture = start(captureFile, ['window', handle, String(selected.pid), String(process.pid), '400', '220', '15']);
   let pending = Buffer.alloc(0);
   const sourceColors = new Set();
+  let resized = false, qualitySent = false, minimizedFrame = false;
   const observed = new Promise((resolve, reject) => {
     capture.once('error', reject);
     capture.stdout.on('data', chunk => {
       pending = Buffer.concat([pending, chunk]);
       while (pending.length >= 8) {
-        const width = pending.readUInt32LE();
+        const tagged = pending.readUInt32LE(), nv12 = Boolean(tagged >>> 31);
+        const width = tagged & 0x7fffffff;
         const height = pending.readUInt32LE(4);
-        const length = width * height * 4;
+        const length = width * height * (nv12 ? 1.5 : 4);
         if (!(width > 0 && width <= 400 && height > 0 && height <= 220)) return reject(new Error('Invalid frame dimensions'));
         if (pending.length < 8 + length) return;
+        if (minimized && !minimizedFrame) {
+          assert.equal(windowAction('inspect').minimized, true);
+          const picture = pending.subarray(8, 8 + (nv12 ? width * height : length));
+          assert.ok(picture.some((byte, i) => (nv12 || i % 4 !== 3) && byte > 32), 'Expected content or minimized-window status');
+          minimizedFrame = true;
+          assert.equal(windowAction('maximize').minimized, false);
+        }
         const offset = 8 + 4 * (Math.floor(height / 2) * width + Math.floor(width / 2));
-        const [blue, green, red] = pending.subarray(offset, offset + 3);
-        if (green === 24 && ((red === 189 && blue === 147) || (red === 116 && blue === 210))) sourceColors.add(red);
+        let [blue, green, red] = pending.subarray(offset, offset + 3);
+        if (nv12) {
+          const x = width >> 1, y = height >> 1;
+          const luma = (pending[8 + y * width + x] - 16) * 255 / 219;
+          const uv = 8 + width * height + (y >> 1) * width + (x & ~1);
+          const u = pending[uv] - 128, v = pending[uv + 1] - 128;
+          red = luma + 1.793 * v; blue = luma + 2.112 * u; green = luma - .213 * u - .533 * v;
+        }
+        for (const [r,b] of [[189,147],[116,210]]) {
+          if (Math.abs(red-r)<5 && Math.abs(blue-b)<5 && Math.abs(green-24)<5) {
+            sourceColors.add(r);
+            if (qualitySent && width <= 192 && height <= 108) resized = true;
+          }
+        }
         if (green > 230 && red < 30 && blue < 30) return reject(new Error('Captured unrelated window color'));
         pending = pending.subarray(8 + length);
-        if (sourceColors.size === 2) resolve();
+        if (sourceColors.size === 2 && !qualitySent) {
+          qualitySent = true;
+          const settings = Buffer.alloc(12);
+          [192,108,10].forEach((value,i) => settings.writeUInt32LE(value,4*i));
+          capture.stdin.write(settings);
+        }
+        if (resized) resolve();
       }
     });
   });
@@ -70,7 +101,7 @@ try {
   stale.stdout.on('data', chunk => { staleBytes += chunk.length; });
   assert.equal((await once(stale, 'close', { signal: AbortSignal.timeout(4000) }))[0], 3);
   assert.equal(staleBytes, 0, 'A stale HWND must produce no frames');
-  console.log(JSON.stringify({ distinctSourceFrames: sourceColors.size, unrelatedColorDetected: false, closedSourceStopped: true, staleSourceRejected: true }));
+  console.log(JSON.stringify({ minimizedFrame, resized, distinctSourceFrames: sourceColors.size, unrelatedColorDetected: false, closedSourceStopped: true, staleSourceRejected: true }));
 } finally {
   for (const child of children) if (child.exitCode === null) child.kill();
 }

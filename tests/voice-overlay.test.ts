@@ -2,9 +2,9 @@ import { it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 const { cleanPreferences, cleanState } = createRequire(import.meta.url)('../apps/desktop/voice-overlay.cjs');
 it('enables the overlay by default and persists opt-outs and bounded opacity', () => {
- expect(cleanPreferences(null)).toEqual({ enabled: true, opacity: 60, position: 'top-left' });
- expect(cleanPreferences({ enabled: false, position: 'arbitrary' })).toEqual({ enabled: true, opacity: 60, position: 'top-left' });
- expect(cleanPreferences({ enabled: false, opacity: 2, position: 'bottom-right' })).toEqual({ enabled: false, opacity: 10, position: 'bottom-right' });
+ expect(cleanPreferences(null)).toEqual({ enabled: true, opacity: 60, position: 'top-left', speakersOnly: false });
+ expect(cleanPreferences({ enabled: false, position: 'arbitrary' })).toEqual({ enabled: true, opacity: 60, position: 'top-left', speakersOnly: false });
+ expect(cleanPreferences({ enabled: false, opacity: 2, position: 'bottom-right', speakersOnly: true })).toEqual({ enabled: false, opacity: 10, position: 'bottom-right', speakersOnly: true });
  expect(cleanPreferences({ opacity: 200 }).opacity).toBe(100);
 });
 it('bounds renderer status data and drops nonboolean state and invalid members', () => {

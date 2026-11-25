@@ -3,6 +3,11 @@ import { t } from './i18n';
 
 const platforms = ['Web', 'Android', 'Windows'] as const;
 type Platform = typeof platforms[number];
+const reliableConnections = 'Stay signed in when your connection drops and pick up where you left off.';
+const strongerMicrophone = 'Strong noise removal filters more game and background sound. It uses more CPU, and you can switch to Standard in Audio settings.';
+const quickerTalk = 'Push to talk responds as soon as you press the key and gives you half a second to finish after you let go.';
+const louderCues = 'Notification sounds are louder. Change the volume in Notifications.';
+const downloadLocation = 'Choose where to save chat attachments in Storage & Downloads.';
 const connectionChanges = ['Recent chats open from this device on a weak connection.', 'Messages you send offline go through when you reconnect.', 'Pause and resume large file transfers.', 'Manage saved messages and media in Storage & Downloads.', 'The simpler music player puts links, search, and the queue within easy reach.'];
 const memberVisibility = { version: '1.4.4', notes: ['Space owners can hide people from the member list while keeping their access to voice and chat.'] };
 const memberMenu = { version: '1.4.5', notes: ['Space owners can find Hide and Show in the member menu. Right-click a name or press and hold on a touchscreen.'] };
@@ -19,6 +24,7 @@ const clearerSettings = { version: '1.5.1', notes: [
 ] };
 const changes: Record<Platform, { version: string; notes: string[] }[]> = {
   Web: [
+    { version: '1.5.4', notes: [reliableConnections, strongerMicrophone, quickerTalk, louderCues, 'Choose where to save chat attachments in supported browsers.'] },
     clearerSettings,
     organizedSettings,
     adaptiveStream,
@@ -32,6 +38,8 @@ const changes: Record<Platform, { version: string; notes: string[] }[]> = {
     { version: '1.4.0', notes: ['Listen to music together in voice and set your own listening volume.'] },
   ],
   Android: [
+    { version: '1.5.5', notes: ['Tap + in chat to share photos and videos from Gallery or browse your files. You can pick up to four attachments at once.'] },
+    { version: '1.5.4', notes: [louderCues, downloadLocation] },
     clearerSettings,
     organizedSettings,
     adaptiveStream,
@@ -45,6 +53,8 @@ const changes: Record<Platform, { version: string; notes: string[] }[]> = {
     { version: '1.4.0', notes: ['Listen to Dorham Music with friends in a voice channel.'] },
   ],
   Windows: [
+    { version: '1.5.4', notes: [reliableConnections, strongerMicrophone, quickerTalk, louderCues, downloadLocation, 'Keep the game overlay compact by showing only people who are speaking.'] },
+    { version: '1.5.3', notes: ["Windows screen sharing uses less memory bandwidth and follows quality changes during a share. You can select a minimized window if its application keeps drawing."] },
     { version: '1.5.2', notes: ['Windows screen sharing uses borderless capture and delivers frames while Dorham is in the background.'] },
     clearerSettings,
     organizedSettings,

@@ -15,6 +15,7 @@ async function register(page: Page, name: string) {
   await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   await page.getByLabel('Display name', { exact: true }).fill(name); await page.getByLabel('Username', { exact: true }).fill(name); await page.getByLabel('Password', { exact: true }).fill('synthetic-fixture-123');
   await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page);
+  await page.getByRole('dialog', { name: /What’s new/ }).getByRole('button', { name: 'Continue', exact: true }).click();
 }
 async function settings(page: Page) { await page.getByRole('button', { name: 'Account settings', exact: true }).click(); }
 async function capture(page: Page, name: string) { await mkdir('artifacts/evidence', { recursive: true }); await page.screenshot({ path: `artifacts/evidence/v077-${name}.png`, fullPage: true }); }
@@ -23,16 +24,19 @@ test('simple audio defaults, advanced boost, saved noise modes and mobile Persia
   await expect(page.locator('.audio-advanced')).not.toHaveAttribute('open');
   await expect(page.getByRole('checkbox')).toHaveCount(0);
   const volume = page.getByRole('slider', { name: 'Microphone volume', exact: true }), noise = page.getByRole('combobox', { name: 'Noise removal', exact: true });
-  await expect(volume).toHaveValue('100'); await expect(noise).toHaveValue('standard'); expect(await page.locator('.audio-advanced > summary').evaluate(e => e.getBoundingClientRect().bottom <= e.closest('.modal')!.getBoundingClientRect().bottom)).toBe(true); await capture(page, 'audio-simple');
+  await expect(volume).toHaveValue('100'); await expect(noise).toHaveValue('strong'); expect(await page.locator('.audio-advanced > summary').evaluate(e => e.getBoundingClientRect().bottom <= e.closest('.modal')!.getBoundingClientRect().bottom)).toBe(true); await capture(page, 'audio-simple');
   await noise.selectOption('strong'); await expect(noise).toHaveValue('strong'); await page.locator('.audio-advanced > summary').click();
-  await page.getByLabel('Allow microphone boost up to +45 dB', { exact: true }).check(); await volume.fill('45'); await expect(page.locator('.microphone-gain output')).toHaveText('+45.0 dB');
+  const advanced = page.getByRole('slider', { name: 'Advanced microphone gain', exact: true });
+  await page.getByLabel('Allow microphone boost up to +45 dB', { exact: true }).check(); await advanced.fill('45'); await expect(page.locator('.microphone-boost output')).toHaveText('+45.0 dB');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await page.reload(); await settings(page); await page.getByRole('tab', { name: 'Audio', exact: true }).click();
-  await expect(volume).toHaveValue('45'); await expect(noise).toHaveValue('strong'); await noise.selectOption('off'); await expect(noise).toHaveValue('off');
-  await page.locator('.audio-advanced > summary').click(); await page.getByLabel('Allow microphone boost up to +45 dB', { exact: true }).uncheck(); await expect(volume).toHaveValue('250');
+  await expect(volume).toHaveValue('200'); await expect(noise).toHaveValue('strong'); await noise.selectOption('off'); await expect(noise).toHaveValue('off');
+  await page.locator('.audio-advanced > summary').click(); await expect(advanced).toHaveValue('45'); await page.getByLabel('Allow microphone boost up to +45 dB', { exact: true }).uncheck(); await expect(advanced).toHaveValue('250');
   await page.getByRole('button', { name: 'Reset microphone gain', exact: true }).click(); await expect(volume).toHaveValue('100');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click(); await settings(page); await page.getByRole('tab', { name: 'Audio', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 }); expect(await page.locator('.modal').evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true); await capture(page, 'audio-mobile');
+  await page.getByRole('button', { name: 'Back to settings', exact: true }).click();
   await page.getByRole('tab', { name: 'Language', exact: true }).click(); await page.locator('.language-picker select').selectOption('fa-IR');
+  await page.locator('.settings-back').click();
   await page.getByRole('tab', { name: 'صدا', exact: true }).click(); await expect(page.getByLabel('حذف نویز', { exact: true })).toBeVisible();
   expect(await page.locator('.modal').evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true); await capture(page, 'audio-persian');
 });
@@ -91,7 +95,13 @@ test('real RNNoise reduces synthetic background noise at high boost, retains spe
   expect(result.strong.state).toMatchObject({ active: 'strong', status: 'ready' }); expect(result.noiseRatio).toBeLessThan(.4); expect(result.speechRatio).toBeGreaterThan(.65); expect(result.strong.released).toBe(true);
 });
 test('missing model visibly falls back and does not leave the microphone graph silent', async ({ page }) => {
-  await page.route('**/audio/rnnoise.wasm', route => route.fulfill({ status: 404, body: 'missing model' })); await dsp(page);
+  await page.addInitScript(() => {
+    const fetchOriginal = window.fetch;
+    window.fetch = (input, init) => String(input).endsWith('/audio/rnnoise.wasm')
+      ? Promise.resolve(new Response('missing model', { status: 404 }))
+      : fetchOriginal(input, init);
+  });
+  await dsp(page);
   const result = await page.evaluate(async () => {
     const ctx = new AudioContext({ sampleRate: 48000 }), source = ctx.createOscillator(), capture = ctx.createMediaStreamDestination(); source.connect(capture); source.start(); await ctx.resume();
     const gain = new (window as any).DenoiserTest.MicrophoneGain(); await gain.setNoiseRemoval('strong'); await gain.init({ track: capture.stream.getAudioTracks()[0], audioContext: ctx });
@@ -103,11 +113,14 @@ test('missing model visibly falls back and does not leave the microphone graph s
 test('bundled default pictures and denoiser assets remain available offline without caching private APIs', async ({ page, context }) => {
   await page.goto('/'); await page.evaluate(() => navigator.serviceWorker.ready);
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+  const paths = ['/profile-pictures/fox.webp', '/audio/rnnoise.wasm', '/audio/rnnoise-worklet.js', '/audio/speech-gate.js'];
+  await page.evaluate(paths => Promise.all(paths.map(async path => (await fetch(path)).arrayBuffer())), paths);
+  await expect.poll(() => page.evaluate(paths => Promise.all(paths.map(path => caches.match(path).then(Boolean))), paths)).toEqual(paths.map(() => true));
   await context.setOffline(true);
   try {
-    const assets = await page.evaluate(async () => Promise.all(['/profile-pictures/fox.webp', '/audio/rnnoise.wasm', '/audio/rnnoise-worklet.js'].map(async path => {
+    const assets = await page.evaluate(async paths => Promise.all(paths.map(async path => {
       const response = await fetch(path); return { path, status: response.status, bytes: (await response.arrayBuffer()).byteLength };
-    })));
+    })), paths);
     for (const asset of assets) { expect(asset.status).toBe(200); expect(asset.bytes).toBeGreaterThan(100); }
     expect(await page.evaluate(async () => { try { await fetch('/api/v1/auth/me'); return 'cached'; } catch { return 'offline'; } })).toBe('offline');
   } finally { await context.setOffline(false); }

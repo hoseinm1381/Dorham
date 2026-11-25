@@ -1,4 +1,4 @@
-import { captureScreen, captureDetails, stopScreenCapture, sharedSoundSupported } from './screen-capture';
+import { captureScreen, captureDetails, stopScreenCapture, updateCaptureQuality, sharedSoundSupported } from './screen-capture';
 import { microphoneUnavailable, listenOnlyNotice } from './microphone-access';
 import type { NoiseRemoval } from './strong-denoiser';
 import type { Signal, VoiceRoom, Share } from '@dorham/contracts';
@@ -402,6 +402,7 @@ export class MeshTransport implements MediaTransport {
     try {
     const settings = screenSettings(quality, this.options.screenPolicy, this.lease!, bandwidth??this.screenBandwidth);
     const track = this.screen?.getVideoTracks()[0];
+    await updateCaptureQuality(this.screen ?? null, settings);
     if (track) await track.applyConstraints({ width: { ideal: settings.width, max: settings.width }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } });
     for (const p of this.peers.values()) if (p.screenSender?.track) { const params = p.screenSender.getParameters(); if (!params.encodings?.length) params.encodings = [{}]; for (const e of params.encodings) { e.maxBitrate = settings.bitrate; e.maxFramerate = settings.fps; } await p.screenSender.setParameters(params); }
     this.screenTarget = { bitrate: settings.bitrate, fps: settings.fps }; this.screenBandwidth=bandwidth??this.screenBandwidth;

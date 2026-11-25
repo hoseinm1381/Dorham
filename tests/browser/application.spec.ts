@@ -2,7 +2,7 @@ import { completeRecovery, chooseScreen } from './recovery-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { mkdir } from 'node:fs/promises';
-async function register(page: Page, username: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('correct-horse-123'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible(); }
+async function register(page: Page, username: string) { await page.goto('/'); await page.getByRole('button', { name: 'Create an account', exact: true }).click(); await page.getByLabel('Display name', { exact: true }).fill(username); await page.getByLabel('Username', { exact: true }).fill(username); await page.getByLabel('Password', { exact: true }).fill('correct-horse-123'); await page.getByRole('button', { name: 'Create account', exact: true }).click(); await completeRecovery(page); await page.getByRole('dialog', { name: /What’s new/ }).getByRole('button', { name: 'Continue', exact: true }).click(); await expect(page.getByRole('heading', { name: `Hey, ${username}.` })).toBeVisible(); }
 async function api(page: Page, route: string, body?: any, method = body ? 'POST' : 'GET') { return page.evaluate(async ({ route, body, method }) => { const auth = await (await fetch('/api/v1/auth/me')).json(); const r = await fetch(`/api/v1${route}`, { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': auth.csrf }, body: body ? JSON.stringify({ requestId: crypto.randomUUID(), ...body }) : undefined }); if (!r.ok) throw new Error(await r.text()); return r.json(); }, { route, body, method }); }
 async function instrument(page: Page, relayOnly = false) {
   await page.addInitScript((relayOnly: boolean) => {
@@ -36,10 +36,10 @@ test('cookie renewal retries an overlapping member request without logging the u
   release(); await expect.poll(() => requests).toBeGreaterThanOrEqual(2); await expect.poll(() => freshStatus).toBe(200); expect(staleStatus).toBe(401);
   await expect(page.locator('.app')).toBeVisible(); await expect(page.locator('.member-row')).toContainText('Renew');
   await page.unroute(`**/api/v1/servers/${server.id}/members`);
-  await page.route('**/api/v1/servers/*/members', route => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Session revoked.' } }) }));
+  await page.route('**/api/v1/servers/*/members', route => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'Connection interrupted.' } }) }));
   await page.getByRole('button', { name: 'Home', exact: true }).click();
   await page.getByRole('button', { name: 'Open Renewal race lab', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Welcome back.', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Account settings', exact: true })).toBeVisible();
 });
 
 test('talk bindings preserve toggle across tab switches, recover PTT after mic clicks, and release held keys', async ({ browser }) => {
@@ -50,7 +50,9 @@ test('talk bindings preserve toggle across tab switches, recover PTT after mic c
     await page.getByRole('tab', { name: 'Audio', exact: true }).click(); await page.locator('.audio-advanced > summary').click(); await page.getByLabel('Voice input mode',{exact:true}).selectOption('push'); await page.getByRole('button',{name:'Record talk hotkey',exact:true}).click(); await page.keyboard.press('F9'); await page.getByRole('button',{name:'Close dialog',exact:true}).click();
     await page.getByRole('button',{name:'Lounge',exact:true}).click(); await expect(page.locator('.voice-stage')).toBeVisible();
     const mic = () => page.evaluate(() => (window as any).__microphones.flatMap((s:MediaStream)=>s.getAudioTracks()).filter((t:MediaStreamTrack)=>t.readyState==='live').map((t:MediaStreamTrack)=>t.enabled));
-    await expect.poll(mic).toEqual([false]); await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.up('F9'); await expect.poll(mic).toEqual([false]);
+    await expect.poll(mic).toEqual([false]); await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]); await page.keyboard.up('F9');
+    expect(await mic()).toEqual([true]);
+    await expect.poll(mic).toEqual([false]);
     await page.getByRole('button',{name:'Push to talk ready',exact:true}).click(); await expect.poll(mic).toEqual([false]);
     await page.keyboard.down('F9'); await expect.poll(mic).toEqual([true]);
     await page.getByRole('button',{name:'Mute microphone',exact:true}).click(); await expect.poll(mic).toEqual([false]); await page.keyboard.up('F9');
@@ -245,7 +247,7 @@ test('microphone processing defaults on, changes live, persists and never unmute
     await expect(page.locator('.voice-mini-members button')).toHaveCount(1); await open();
     fixtureRoom = (await api(page, '/bootstrap')).channels.find((c: any) => c.kind === 'voice').id;
     const initial = await settings(); expect(initial[0]).toMatchObject({ noiseSuppression: true, echoCancellation: true });
-    await expect(page.getByRole('combobox', { name: 'Noise removal', exact: true })).toHaveValue('standard'); await page.getByRole('combobox', { name: 'Noise removal', exact: true }).selectOption('off'); await page.getByRole('checkbox', { name: 'Echo cancellation', exact: true }).uncheck();
+    await expect(page.getByRole('combobox', { name: 'Noise removal', exact: true })).toHaveValue('strong'); await page.getByRole('combobox', { name: 'Noise removal', exact: true }).selectOption('off'); await page.getByRole('checkbox', { name: 'Echo cancellation', exact: true }).uncheck();
     await expect(page.getByText('Saved. Leave and rejoin voice to apply these changes.', { exact: true })).toHaveCount(0);
     await expect.poll(async () => (await settings())[0]).toMatchObject({ noiseSuppression: false, echoCancellation: false });
     await page.getByRole('checkbox', { name: 'Automatic microphone level', exact: true }).uncheck();

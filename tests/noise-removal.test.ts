@@ -7,7 +7,7 @@ it('migrates an explicitly disabled browser suppressor and validates saved modes
   const values = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
   vi.stubGlobal('window', { dispatchEvent: vi.fn() });
-  expect(readNoiseRemoval()).toBe('standard'); values.set('dorham.audioProcessing.v1', '{"noiseSuppression":false}'); expect(readNoiseRemoval()).toBe('off');
+  expect(readNoiseRemoval()).toBe('strong'); values.set('dorham.audioProcessing.v1', '{"noiseSuppression":false}'); expect(readNoiseRemoval()).toBe('off');
   values.set('dorham.boostNoise.v1', '{"enabled":false,"threshold":-40}'); expect(readBoostNoise()).toEqual({ enabled: false, threshold: -70 });
   saveNoiseRemoval('strong'); expect(readNoiseRemoval()).toBe('strong');
   values.set('dorham.noiseRemoval.v1', 'invalid'); expect(readNoiseRemoval()).toBe('off');

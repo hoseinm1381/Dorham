@@ -42,7 +42,7 @@ export class DeferredTransport implements MediaTransport {
   async leave() { this.generation++; await this.inner?.leave(); }
   async destroy() { this.destroyed = true; this.generation++; await this.inner?.destroy(); this.inner = null; }
   async reconnect() { await this.inner?.reconnect(); }
-  async setMuted(value: boolean) { this.muted = value; if (value) void this.inner?.setMuted(true).catch(() => {}); await this.syncAudioState(); }
+  async setMuted(value: boolean) { this.muted = value; if (!this.destroyed) await this.inner?.setMuted(this.audioTests > 0 || this.muted); }
   async setDeafened(value: boolean) { this.deafened = value; if (value) void this.inner?.setDeafened(true).catch(() => {}); await this.syncAudioState(); }
   setVolume(user: string, value: number) { this.inner?.setVolume(user, value); }
   setStreamVolume(lease: string, value: number) { this.inner?.setStreamVolume?.(lease, value); }

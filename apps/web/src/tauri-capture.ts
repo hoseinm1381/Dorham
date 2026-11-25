@@ -97,13 +97,16 @@ export async function captureNativeVideo(settings: ScreenCaptureSettings, audio:
     const data = capacity ? sharedBuffer! : await response.arrayBuffer();
     if (closed || !data.byteLength) return false;
     const header = new DataView(data);
-    const width = header.getUint32(0, true), height = header.getUint32(4, true);
-    const length = 8 + width * height * 4;
-    if (!width || !height || width > settings.width || height > settings.height || length > data.byteLength || (!capacity && length !== data.byteLength)) {
+    const tagged = header.getUint32(0, true), nv12 = (tagged >>> 31) === 1;
+    const width = tagged & 0x7fffffff, height = header.getUint32(4, true);
+    const length = 8 + width * height * (nv12 ? 1.5 : 4);
+    if (!width || !height || width > 3840 || height > 2160 || (nv12 && (width % 4 !== 0 || height % 2 !== 0)) || length > data.byteLength || (!capacity && length !== data.byteLength)) {
       throw new Error('Windows returned an invalid capture frame.');
     }
     const videoFrame = new VideoFrame(new Uint8Array(data, 8, length - 8), {
-      format: 'BGRX', codedWidth: width, codedHeight: height,
+      format: nv12 ? 'NV12' : 'BGRX',
+      ...(nv12 ? { colorSpace: { matrix: 'bt709' as const, primaries: 'bt709' as const, transfer: 'bt709' as const, fullRange: false } } : {}),
+      codedWidth: width, codedHeight: height,
       timestamp: Math.round(performance.now() * 1000),
     });
     try { await writer.write(videoFrame); } finally { videoFrame.close(); }
@@ -144,7 +147,7 @@ export async function captureNativeVideo(settings: ScreenCaptureSettings, audio:
       generator.dispatchEvent(new Event('ended'));
     }
   });
-  return { stream, selection, stop };
+  return { stream, selection, stop, setQuality: settings => invoke<void>('capture_quality', { id: selection.id, settings }) };
 }
 
 type AudioSelection = { id: string; sourceName: string; audioScope: 'application' | 'system' };

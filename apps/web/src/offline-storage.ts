@@ -2,7 +2,7 @@ import type { Message } from '@dorham/contracts';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
 type MediaKind = 'image' | 'video' | 'file';
-type Kind = 'history' | 'media' | 'session' | 'upload' | 'outbox';
+type Kind = 'history' | 'media' | 'session' | 'upload' | 'outbox' | 'preference';
 type Entry<T = unknown> = { key: string; scope: string; kind: Kind; id: string; data: T; bytes: number; touched: number; conversation?: string; mediaKind?: MediaKind };
 export type OfflineHistory = { messages: Message[]; sequence: number; hasMore: boolean };
 const maxHistories = 40, maxMessages = 100;
@@ -84,6 +84,17 @@ function enqueue(work: () => Promise<void>) {
   const next = writes.then(work);
   writes = next.catch(() => {});
   return next;
+}
+const downloadFolderKey = key('device', 'preference', 'download-folder');
+export async function readDownloadFolder<T>() {
+  const row = await result<Entry<T> | undefined>((await openStorage()).transaction('content').objectStore('content').get(downloadFolderKey));
+  return row?.data;
+}
+export function storeDownloadFolder<T>(data?: T) {
+  return enqueue(() => write(store => {
+    if (data) store.put({ key: downloadFolderKey, scope: 'device', kind: 'preference', id: 'download-folder', data, bytes: 0, touched: Date.now() });
+    else store.delete(downloadFolderKey);
+  }));
 }
 async function entries(scope: string, kind: Kind): Promise<Entry[]> {
   return result((await openStorage()).transaction('content').objectStore('content').index('scopeKind').getAll([scope, kind]));

@@ -1,7 +1,7 @@
 const path = require('node:path');
 const cleanAvatar = value => typeof value === 'string' && value.length <= 32768 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : undefined;
 const positions = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-function cleanPreferences(value) { return { enabled: value?.opacity == null || value?.enabled !== false, opacity: Number.isFinite(value?.opacity) ? Math.max(10, Math.min(100, Math.round(value.opacity))) : 60, position: positions.has(value?.position) ? value.position : 'top-left' }; }
+function cleanPreferences(value) { return { enabled: value?.opacity == null || value?.enabled !== false, opacity: Number.isFinite(value?.opacity) ? Math.max(10, Math.min(100, Math.round(value.opacity))) : 60, position: positions.has(value?.position) ? value.position : 'top-left', speakersOnly: value?.speakersOnly === true }; }
 function cleanState(value) {
   if (!value || typeof value.channel !== 'string' || !Array.isArray(value.members)) return null;
   return { channel: value.channel.slice(0, 80), sharing: value.sharing === true, language: value.language === 'fa-IR' ? 'fa-IR' : 'en-US', members: value.members.slice(0, 16).filter(m => typeof m?.name === 'string').map(m => ({ ...(typeof m.id === 'string' ? { id: m.id.slice(0, 80) } : {}), name: m.name.slice(0, 48), ...(cleanAvatar(m.avatar) ? { avatar: m.avatar } : {}), muted: m.muted === true, deafened: m.deafened === true, serverMuted: m.serverMuted === true, speaking: m.speaking === true, watching: value.sharing === true && m.watching === true })) };
@@ -11,34 +11,43 @@ function createVoiceOverlay(readSettings, saveSettings) {
   let win, state = null, active = false, locked = false, bounds, lastSent;
   let prefs = cleanPreferences(readSettings().voiceOverlay);
   const preferences = () => ({ ...prefs });
+  function display() {
+    if (!state || !prefs.speakersOnly) return state;
+    return { ...state, viewerCount: state.members.filter(member => member.watching).length,
+      members: state.members.filter(member => member.id !== 'dorham-music' && member.speaking && !member.muted && !member.deafened && !member.serverMuted) };
+  }
   function close() { if (win && !win.isDestroyed()) win.destroy(); win = undefined; bounds = undefined; lastSent = undefined; }
   function place() {
     if (!win || win.isDestroyed()) return;
     const area = screen.getPrimaryDisplay().workArea;
-    const width = 270, height = Math.min(area.height - 32, 20 + (state?.members.length || 0) * 38 + (state?.sharing ? 24 : 0));
+    const shown = display();
+    const width = 270, height = Math.min(area.height - 32, 20 + (shown?.members.length || 0) * 38 + (shown?.sharing ? 24 : 0));
     const next = { x: prefs.position.endsWith('right') ? area.x + area.width - width - 16 : area.x + 16, y: prefs.position.startsWith('bottom') ? area.y + area.height - height - 16 : area.y + 16, width, height };
     if (!bounds || Object.keys(next).some(key => next[key] !== bounds[key])) { bounds = next; win.setBounds(next); }
   }
   function send(force = false) {
     const previous = force ? [] : lastSent?.members || [];
-    const packet = { ...state, opacity: prefs.opacity, members: state.members.map((member, index) => {
+    const shown = display();
+    const packet = { ...shown, opacity: prefs.opacity, members: shown.members.map((member, index) => {
       const old = previous.find((item, i) => member.id ? item.id === member.id : i === index);
       return { ...member, avatar: old && old.avatar === member.avatar ? undefined : member.avatar || null };
     }) };
-    win.webContents.send('overlay:state', packet); lastSent = state;
+    win.webContents.send('overlay:state', packet); lastSent = shown;
   }
   function sync() {
     if (!prefs.enabled || !active || locked || !state || !state.members.length) { close(); return; }
+    if (!state.sharing && !display().members.length) { win?.hide(); return; }
     if (!win || win.isDestroyed()) {
       win = new BrowserWindow({ width: 270, height: 100, show: false, transparent: true, frame: false, focusable: false, skipTaskbar: true, resizable: false, movable: false, maximizable: false, minimizable: false, hasShadow: false, alwaysOnTop: true, webPreferences: { preload: path.join(__dirname, 'overlay-preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } });
       const owned = win; owned.setIgnoreMouseEvents(true, { forward: true }); owned.setAlwaysOnTop(true, 'screen-saver');
       owned.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       owned.webContents.on('will-navigate', event => event.preventDefault());
-      owned.webContents.on('did-finish-load', () => { if (win !== owned || owned.isDestroyed()) return; send(true); owned.showInactive(); });
+      owned.webContents.on('did-finish-load', () => { if (win !== owned || owned.isDestroyed()) return; sync(); });
       owned.on('closed', () => { if (win === owned) win = undefined; });
       void owned.loadFile(path.join(__dirname, 'overlay.html')).catch(() => { if (win === owned) close(); });
     }
-    place(); send();
+    if (win.webContents.isLoading()) return;
+    place(); send(!win.isVisible()); if (!win.isVisible()) win.showInactive();
   }
   void app.whenReady().then(() => screen.on('display-metrics-changed', place));
   return { preferences, configure(value) { prefs = cleanPreferences(value); saveSettings({ ...readSettings(), voiceOverlay: prefs }); sync(); return preferences(); }, update(value) {

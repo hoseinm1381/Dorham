@@ -9,7 +9,20 @@ declare const __APP_VERSION__: string;
 export function AppVersion() { const { info } = useRelease(); return <p className="app-version">Dorham · {tr('Version')} <strong>{info?.current || __APP_VERSION__}</strong></p>; }
 export function NotificationSettings() {
   const [preferences, setPreferences] = useState(soundPreferences);
-  return <section className="notification-settings"><AndroidNotificationSettings/><h3>{tr('Notification sounds')}</h3>{(['messages', 'voice'] as const).map(key => <label className="check-row" key={key}><input type="checkbox" checked={preferences[key]} onChange={e => { const next = { ...preferences, [key]: e.target.checked }; setPreferences(next); saveSoundPreferences(next); }}/>{tr(key === 'messages' ? 'Direct message and mention sounds' : 'Voice join, leave, mute and unmute sounds')}</label>)}<button type="button" className="secondary" onClick={() => { unlockSounds(); playCue('message'); }}>{tr('Preview notification sound')}</button><small>{tr('Do not disturb silences incoming notifications. Your microphone feedback still plays. Sound starts after interacting with the app.')}</small></section>;
+  function save(next: typeof preferences) { setPreferences(next); saveSoundPreferences(next); }
+  return <section className="notification-settings">
+    <AndroidNotificationSettings/>
+    <h3>{tr('Notification sounds')}</h3>
+    {(['messages', 'voice'] as const).map(key => <label className="check-row" key={key}>
+      <input type="checkbox" checked={preferences[key]} onChange={e => save({ ...preferences, [key]: e.target.checked })}/>
+      {tr(key === 'messages' ? 'Direct message and mention sounds' : 'Voice join, leave, mute and unmute sounds')}
+    </label>)}
+    <label>{tr('Notification volume')} <output>{preferences.volume}%</output>
+      <input type="range" aria-label={tr('Notification volume')} min={0} max={100} value={preferences.volume} onChange={e => save({ ...preferences, volume: Number(e.target.value) })}/>
+    </label>
+    <button type="button" className="secondary" onClick={() => { unlockSounds(); playCue('message', false, true); }}>{tr('Preview notification sound')}</button>
+    <small>{tr('Do not disturb silences incoming notifications. Your microphone feedback still plays. Sound starts after interacting with the app.')}</small>
+  </section>;
 }
 type Invite = { code: string; url: string; expiresAt: number; remaining: number };
 export function MemberInviteSetting({ server, refresh, error }: { server: Server; refresh: () => Promise<void>; error: (e: unknown) => void }) {

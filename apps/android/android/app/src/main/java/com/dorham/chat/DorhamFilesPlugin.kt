@@ -1,12 +1,18 @@
 package com.dorham.chat
 
+import android.app.Activity
 import android.content.ContentValues
+import android.content.Intent
+import android.net.Uri
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
+import androidx.activity.result.ActivityResult
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.JSObject
+import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.io.File
 import java.net.HttpURLConnection
@@ -20,6 +26,43 @@ class DorhamFilesPlugin : Plugin() {
     private var busy = false
     @Volatile private var cancelled = false
     @Volatile private var activeConnection: HttpURLConnection? = null
+    private val preferences get() = context.getSharedPreferences("dorham-downloads", 0)
+    private fun folderUri() = preferences.getString("folder", null)?.let(Uri::parse)
+    private fun result(folder: String?) = JSObject().put("folder", folder ?: org.json.JSONObject.NULL)
+    private fun releasePermission(uri: Uri) {
+        runCatching { context.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+    }
+    @PluginMethod fun getDownloadFolder(call: PluginCall) = call.resolve(result(preferences.getString("label", null)))
+    @PluginMethod fun chooseDownloadFolder(call: PluginCall) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        startActivityForResult(call, intent, "downloadFolderPicked")
+    }
+    @ActivityCallback private fun downloadFolderPicked(call: PluginCall, outcome: ActivityResult) {
+        val data = outcome.data
+        val chosen = data?.data
+        if (outcome.resultCode != Activity.RESULT_OK || chosen == null) { call.resolve(result(null)); return }
+        try {
+            val mask = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            require(data.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0)
+            context.contentResolver.takePersistableUriPermission(chosen, data.flags and mask)
+            val previous = folderUri()
+            val document = DocumentsContract.buildDocumentUriUsingTree(chosen, DocumentsContract.getTreeDocumentId(chosen))
+            val label = runCatching {
+                context.contentResolver.query(document, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null }
+            }.getOrNull() ?: DocumentsContract.getTreeDocumentId(chosen)
+            preferences.edit().putString("folder", chosen.toString()).putString("label", label).apply()
+            if (previous != null && previous != chosen) releasePermission(previous)
+            call.resolve(result(label))
+        } catch (_: Exception) { call.reject("Could not access the selected download folder.") }
+    }
+    @PluginMethod fun resetDownloadFolder(call: PluginCall) {
+        val previous = folderUri()
+        preferences.edit().clear().apply()
+        if (previous != null) releasePermission(previous)
+        call.resolve()
+    }
     @PluginMethod fun cancel(call: PluginCall) { cancelled = true; activeConnection?.disconnect(); call.resolve() }
     private fun progress(value: Int, active: Boolean = true) { notifyListeners("download", JSObject().put("progress", value).put("active", active)) }
     private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
@@ -90,16 +133,33 @@ class DorhamFilesPlugin : Plugin() {
                     validator.delete()
                 }
                 ready.setLastModified(System.currentTimeMillis())
-                val values = ContentValues().apply { put(MediaStore.Downloads.DISPLAY_NAME, name); put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream"); put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Dorham"); put(MediaStore.Downloads.IS_PENDING, 1) }
                 val resolver = context.contentResolver
-                destination = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
-                resolver.openOutputStream(destination)?.use { output -> ready.inputStream().use { input -> input.copyTo(output) } } ?: throw IllegalStateException("Could not create download")
-                resolver.update(destination, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                val selected = folderUri()
+                val target = if (selected != null) {
+                    val parent = DocumentsContract.buildDocumentUriUsingTree(selected, DocumentsContract.getTreeDocumentId(selected))
+                    DocumentsContract.createDocument(resolver, parent, "application/octet-stream", name)
+                } else {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, name)
+                        put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                        put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Dorham")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                } ?: throw IllegalStateException("Could not create download")
+                destination = target
+                resolver.openOutputStream(target)?.use { output -> ready.inputStream().use { input -> input.copyTo(output) } }
+                    ?: throw IllegalStateException("Could not write download")
+                if (selected == null) resolver.update(target, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
                 trim(directory, maximum)
                 call.resolve(JSObject().put("saved", true))
-            } catch (_: Exception) {
-                destination?.let { context.contentResolver.delete(it, null, null) }
-                call.reject("Download paused. Select Download to resume.")
+            } catch (error: Exception) {
+                destination?.let { uri -> runCatching {
+                    if (DocumentsContract.isDocumentUri(context, uri)) DocumentsContract.deleteDocument(context.contentResolver, uri)
+                    else context.contentResolver.delete(uri, null, null)
+                } }
+                call.reject(if (error is SecurityException) "Allow access to the saved download folder or change it in Storage & Downloads."
+                    else "Download paused. Select Download to resume.")
             } finally { progress(100, false); activeConnection = null; connection?.disconnect(); synchronized(this) { busy = false } }
         }
     }

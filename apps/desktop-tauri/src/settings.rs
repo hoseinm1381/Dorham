@@ -109,25 +109,27 @@ pub enum OverlayPosition {
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(from = "StoredOverlayPreferences")]
+#[serde(rename_all = "camelCase", from = "StoredOverlayPreferences")]
 pub struct OverlayPreferences {
     pub enabled: bool,
     pub position: OverlayPosition,
     pub opacity: u8,
+    pub speakers_only: bool,
 }
 
 impl Default for OverlayPreferences {
     fn default() -> Self {
-        Self { enabled: true, position: OverlayPosition::default(), opacity: 60 }
+        Self { enabled: true, position: OverlayPosition::default(), opacity: 60, speakers_only: false }
     }
 }
 
 #[derive(Default, Deserialize)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 struct StoredOverlayPreferences {
     enabled: Option<bool>,
     position: OverlayPosition,
     opacity: Option<u8>,
+    speakers_only: bool,
 }
 
 impl From<StoredOverlayPreferences> for OverlayPreferences {
@@ -136,6 +138,7 @@ impl From<StoredOverlayPreferences> for OverlayPreferences {
             enabled: value.opacity.is_none() || value.enabled.unwrap_or(true),
             position: value.position,
             opacity: value.opacity.unwrap_or(60).clamp(10, 100),
+            speakers_only: value.speakers_only,
         }
     }
 }
@@ -146,6 +149,7 @@ pub struct Settings {
     pub server: String,
     secret: Option<String>,
     pub voice_overlay: OverlayPreferences,
+    pub download_folder: Option<String>,
     migrated: bool,
 }
 

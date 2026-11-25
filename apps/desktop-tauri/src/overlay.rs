@@ -159,7 +159,7 @@ fn reconcile(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 .as_array()
                 .is_some_and(|list| !list.is_empty())
     });
-    let Some(packet) = packet else {
+    let Some(mut packet) = packet else {
         if let Some(overlay) = app.get_webview_window(WINDOW) {
             host.overlay_ready.store(false, Ordering::Release);
             overlay.hide()?;
@@ -167,6 +167,20 @@ fn reconcile(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     };
+    if preferences.speakers_only {
+        if let Some(members) = packet["members"].as_array_mut() {
+            let viewers = members.iter().filter(|member| member["watching"] == true).count();
+            members.retain(|member| member["id"] != "dorham-music" && member["speaking"] == true
+                && member["muted"] != true && member["deafened"] != true && member["serverMuted"] != true);
+            packet["viewerCount"] = json!(viewers);
+        }
+        if packet["sharing"] != true && packet["members"].as_array().is_some_and(Vec::is_empty) {
+            if let Some(window) = app.get_webview_window(WINDOW) {
+                set_visible(&window, false)?;
+            }
+            return Ok(());
+        }
+    }
     let picker_open = host.capture.lock().map_err(|_| "Capture state unavailable")?.picker_open();
     if picker_open {
         if let Some(window) = app.get_webview_window(WINDOW) {

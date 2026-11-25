@@ -1,5 +1,5 @@
 import { microphoneUnavailable, listenOnlyNotice } from './microphone-access';
-import { captureScreen, captureDetails, sharedSoundSupported, stopScreenCapture } from './screen-capture';
+import { captureScreen, captureDetails, sharedSoundSupported, stopScreenCapture, updateCaptureQuality } from './screen-capture';
 import type { NoiseRemoval } from './strong-denoiser';
 import { clampScreenBandwidth, screenSettings, shareHeight, type ScreenQuality } from './screen-quality';
 import { Room, RoomEvent, ConnectionQuality, DisconnectReason, ParticipantEvent, Track, VideoQuality, supportsVP9, type LocalAudioTrack, type RemoteTrack, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
@@ -182,8 +182,9 @@ export class LiveKitTransport implements MediaTransport {
   }
   private applyMicrophone(): Promise<void> {
     const track = this.media.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
-    this.inputGain.setEnabled(this.microphoneEnabled());
-    if (track && !this.microphoneEnabled()) track.mediaStreamTrack.enabled = false;
+    const enabledNow = this.microphoneEnabled();
+    this.inputGain.setEnabled(enabledNow);
+    if (track && (!enabledNow || track.getProcessor?.()?.processedTrack)) track.mediaStreamTrack.enabled = enabledNow;
     if (!this.microphoneTask) this.microphoneTask = Promise.resolve().then(async () => {
       while (this.appliedMicrophone !== this.microphoneEnabled() || this.gainProcessorMissing()) {
         const self = this.room?.members.find(m => m.user.id === this.options.userId);
@@ -326,6 +327,7 @@ export class LiveKitTransport implements MediaTransport {
     try {
     const settings = screenSettings(quality, this.options.screenPolicy, this.lease!, bandwidth??this.screenBandwidth), track = this.media.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack;
     if (!track) return;
+    await updateCaptureQuality(this.screenCapture, settings);
     await track.mediaStreamTrack.applyConstraints({ width: { ideal: settings.width, max: settings.width }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } });
     if (track.sender) {
       const params = track.sender.getParameters(), encodings = params.encodings || [];

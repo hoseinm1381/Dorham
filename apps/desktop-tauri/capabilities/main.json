@@ -5,7 +5,7 @@
   "local": false,
   "remote": { "urls": ["https://localhost/index.html"] },
   "permissions": [
-    "allow-desktop-command", "allow-capture-video", "allow-capture-stop",
+    "allow-desktop-command", "allow-capture-video", "allow-capture-quality", "allow-capture-stop",
     "allow-capture-audio-start", "allow-capture-audio-stop",
     "allow-update-check", "allow-update-prepare", "allow-update-install",
     "core:event:allow-listen", "core:event:allow-unlisten"

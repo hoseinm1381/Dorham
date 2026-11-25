@@ -74,3 +74,47 @@ it('honors cancellation during proof recovery without resending content', async 
   await expect(api.request('/messages', { content: 'cancelled' }, 'POST', true, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
   expect(fetch).toHaveBeenCalledTimes(3);
 });
+
+it('keeps the account for feature-level 401s and invalid gateway responses', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(identity())
+    .mockResolvedValueOnce(reply({ error: { code: 'UNAUTHENTICATED' } }, 401))
+    .mockResolvedValueOnce(new Response('<html>gateway</html>', { status: 401 }))
+    .mockResolvedValueOnce(identity());
+  const api = await client(fetch);
+  await expect(api.request('/voice/test')).rejects.toMatchObject({ status: 401 });
+  await expect(api.request('/auth/me')).rejects.toMatchObject({ status: 401 });
+  await expect(api.request('/auth/me')).resolves.toMatchObject({ user: { id: 'same-user' } });
+  expect(window.dispatchEvent).not.toHaveBeenCalled();
+});
+
+it('clears a browser session when the identity endpoint definitively rejects it', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(identity())
+    .mockResolvedValueOnce(reply({ error: { code: 'UNAUTHENTICATED' } }, 401));
+  const api = await client(fetch);
+  await expect(api.request('/auth/me')).rejects.toMatchObject({ status: 401 });
+  expect(window.dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'dorham-session-revoked' }));
+});
+
+it('retains a Windows refresh rotation when the gateway fails and reuses it after reconnecting', async () => {
+  let stored: string | null = 'refresh-token';
+  const desktop = { getSecret: async () => stored, setSecret: vi.fn(async (value: string | null) => { stored = value; }) };
+  vi.stubGlobal('window', { desktop, dispatchEvent: vi.fn(), location: { origin: 'https://dorham.example' } });
+  const rejected = () => reply({ error: { code: 'UNAUTHENTICATED' } }, 401);
+  const fetch = vi.fn().mockResolvedValueOnce(rejected()).mockResolvedValueOnce(new Response('Gateway authentication failed', { status: 403 }))
+    .mockResolvedValueOnce(rejected()).mockResolvedValueOnce(reply({ refreshToken: 'next-token', accessToken: 'access', csrf: 'proof' }))
+    .mockResolvedValueOnce(identity());
+  vi.stubGlobal('fetch', fetch);
+  const api = await import('../apps/web/src/api');
+  // setServer accepts the release origin and clears any credential from the previous server.
+  desktop.setSecret.mockClear();
+  Object.assign(desktop, { setServer: vi.fn(async () => {}) });
+  await api.setServer('https://dorham.example');
+  stored = 'refresh-token';
+  desktop.setSecret.mockClear();
+  await expect(api.request('/auth/me')).rejects.toThrow('temporarily unavailable');
+  expect(stored).toContain('refresh-token');
+  await expect(api.request('/auth/me')).resolves.toMatchObject({ user: { id: 'same-user' } });
+  expect(fetch.mock.calls[1][1].body).toBe(fetch.mock.calls[3][1].body);
+  expect(stored).toBe('next-token');
+  expect(window.dispatchEvent).not.toHaveBeenCalled();
+});

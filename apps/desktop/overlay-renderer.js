@@ -31,7 +31,7 @@ window.voiceOverlay.onState(value => {
  const audience = document.getElementById('audience');
  audience.hidden = !value.sharing;
  if (value.sharing) {
-  const count = value.members.filter(member => member.watching).length;
+  const count = value.viewerCount ?? value.members.filter(member => member.watching).length;
   audience.replaceChildren(statusIcon('eye', false), document.createTextNode((fa ? 'بینندگان پخش' : 'Stream viewers') + ' · ' + new Intl.NumberFormat(fa ? 'fa-IR' : 'en-US').format(count)));
  }
  for (const [index, person] of value.members.entries()) {

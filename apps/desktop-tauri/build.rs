@@ -3,6 +3,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "desktop_command",
             "capture_video",
+            "capture_quality",
             "capture_stop",
             "capture_picker_model",
             "capture_picker_previews",

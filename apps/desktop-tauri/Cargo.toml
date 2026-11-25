@@ -1,6 +1,6 @@
 [package]
 name = "dorham-desktop"
-version = "1.5.2"
+version = "1.5.4"
 edition = "2024"
 publish = false
 
@@ -24,7 +24,7 @@ webview2-com = "0.39"
 windows-version = "0.1"
 windows = { version = "0.62", features = [
   "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security_Cryptography",
-  "Win32_System_RemoteDesktop", "Win32_UI_Shell",
+  "Win32_System_Com", "Win32_System_RemoteDesktop", "Win32_UI_Shell",
 ] }
 windows-core = "0.62"
 

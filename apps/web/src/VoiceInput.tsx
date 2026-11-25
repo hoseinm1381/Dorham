@@ -13,7 +13,8 @@ export function readVoiceInput(): VoiceInputPreferences {
 function blocked(binding: VoiceInputPreferences['binding']) { const el = document.activeElement as HTMLElement | null; return Boolean(el?.closest('[data-hotkey-capture]') || ((el?.isContentEditable || el?.closest('input,textarea,select,[role=textbox]')) && !allowedWhileTyping(binding))); }
 
 export function useVoiceInput(transport: RefObject<Pick<MediaTransport, 'setMuted'> | null>, active: boolean, error: (e: Error) => void, notice: (message: string) => void = () => {}) {
-  const state = useRef(new VoiceInputState()), prefs = useRef(readVoiceInput()), activeRef = useRef(active), onError = useRef(error), task = useRef<Promise<void> | null>(null), dirty = useRef(false), fault = useRef(false);
+  const state = useRef(new VoiceInputState()), prefs = useRef(readVoiceInput()), activeRef = useRef(active), onError = useRef(error), fault = useRef(false);
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), operation = useRef(0);
   const [muted, setMuted] = useState(() => prefs.current.mode !== 'open'), [locked, setLocked] = useState(false), [preferences, setPreferences] = useState(prefs.current);
   const initialized = useRef(false); if (!initialized.current) { state.current.configure(prefs.current.mode); initialized.current = true; }
   const lastMuted = useRef(state.current.muted);
@@ -26,40 +27,58 @@ export function useVoiceInput(transport: RefObject<Pick<MediaTransport, 'setMute
     lastMuted.current = next;
   };
   const apply = () => {
-    setLocked(state.current.locked); dirty.current = true;
-    // Invoke mute immediately so release never waits behind a signaling roundtrip.
-    if (state.current.muted) void transport.current?.setMuted(true).catch(e => onError.current(e));
+    clearTimeout(releaseTimer.current);
+    releaseTimer.current = undefined;
+    const ticket = ++operation.current;
+    setLocked(state.current.locked);
     updateMuted();
-    if (!task.current) task.current = Promise.resolve().then(async () => {
-      do { dirty.current = false; await transport.current?.setMuted(state.current.muted); } while (dirty.current);
-    }).catch(e => { state.current.release(); if (prefs.current.mode === 'open') state.current.locked = true; void transport.current?.setMuted(true).catch(() => {}); updateMuted(); onError.current(e); }).finally(() => { task.current = null; });
+    void transport.current?.setMuted(state.current.muted).catch(e => {
+      if (ticket !== operation.current) return;
+      state.current.release();
+      if (prefs.current.mode === 'open') state.current.locked = true;
+      void transport.current?.setMuted(true).catch(() => {});
+      setLocked(state.current.locked);
+      updateMuted();
+      onError.current(e);
+    });
   };
   const applyRef = useRef(apply); applyRef.current = apply;
   useEffect(() => {
+    const releaseKey = () => {
+      if (!state.current.held) return;
+      if (prefs.current.mode !== 'push' || state.current.muted) { state.current.up(); applyRef.current(); return; }
+      if (releaseTimer.current !== undefined) return;
+      releaseTimer.current = setTimeout(() => { state.current.up(); applyRef.current(); }, 500);
+    };
     const changed = () => { prefs.current = readVoiceInput(); state.current.configure(prefs.current.mode); fault.current = false; setPreferences(prefs.current); applyRef.current(); void window.desktop?.configureVoiceHotkey(prefs.current).catch(e => onError.current(e)); };
     const native = window.desktop?.onVoiceHotkey(event => {
       if (event.type === 'ready') { fault.current = false; return; }
       if (event.type === 'error') { fault.current = true; state.current.release(); applyRef.current(); onError.current(new Error(event.message)); return; }
       if (event.type === 'release') state.current.release();
-      else if (event.type === 'up') state.current.up();
+      else if (event.type === 'up') { releaseKey(); return; }
       else if (activeRef.current && !fault.current && ((event.background ?? !document.hasFocus()) || !blocked(prefs.current.binding))) state.current.down();
+      else return;
       applyRef.current();
     });
     const down = (e: KeyboardEvent) => {
       if (!activeRef.current || prefs.current.mode === 'open' || (window.desktop && prefs.current.background) || e.repeat || blocked(prefs.current.binding) || !matchesBinding(prefs.current.binding, e)) return;
       e.preventDefault(); state.current.down(); applyRef.current();
     };
-    const up = (e: KeyboardEvent) => { if (window.desktop && prefs.current.background) return; if (e.code === prefs.current.binding.code || ['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) { state.current.up(); applyRef.current(); } };
+    const up = (e: KeyboardEvent) => {
+      if (window.desktop && prefs.current.background) return;
+      const binding = prefs.current.binding;
+      if (e.code === binding.code || (e.key === 'Control' && binding.ctrl) || (e.key === 'Alt' && binding.alt) || (e.key === 'Shift' && binding.shift)) releaseKey();
+    };
     const release = () => { if (!window.desktop || !prefs.current.background) { state.current.blur(); applyRef.current(); } };
     const visible = () => { if (document.hidden) release(); };
     const nativeMuted = (event: Event) => { const value = (event as CustomEvent<boolean>).detail; if (state.current.muted !== value) state.current.manual(); applyRef.current(); };
     window.addEventListener('dorham-native-mute', nativeMuted);
     window.addEventListener('dorham-voice-input-changed', changed); window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', release); document.addEventListener('visibilitychange', visible);
     void window.desktop?.configureVoiceHotkey(prefs.current).catch(e => onError.current(e));
-    return () => { window.removeEventListener('dorham-native-mute', nativeMuted); native?.(); window.removeEventListener('dorham-voice-input-changed', changed); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', visible); };
+    return () => { ++operation.current; clearTimeout(releaseTimer.current); window.removeEventListener('dorham-native-mute', nativeMuted); native?.(); window.removeEventListener('dorham-voice-input-changed', changed); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', visible); };
   }, []);
   useEffect(() => { if (!active) { state.current.release(); applyRef.current(); } }, [active]);
-  return { muted, locked, preferences, prepare: async () => { state.current.release(); updateMuted(false); await transport.current?.setMuted(state.current.muted); }, toggle: () => { state.current.manual(); applyRef.current(); if (prefs.current.mode === 'push' && state.current.muted) onNotice.current(t('Hold {key} to talk. Pressing the talk key also clears manual mute.', { key: bindingLabel(prefs.current.binding) })); } };
+  return { muted, locked, preferences, prepare: async () => { clearTimeout(releaseTimer.current); ++operation.current; state.current.release(); updateMuted(false); await transport.current?.setMuted(state.current.muted); }, toggle: () => { state.current.manual(); applyRef.current(); if (prefs.current.mode === 'push' && state.current.muted) onNotice.current(t('Hold {key} to talk. Pressing the talk key also clears manual mute.', { key: bindingLabel(prefs.current.binding) })); } };
 }
 
 export function VoiceInputSettings() {

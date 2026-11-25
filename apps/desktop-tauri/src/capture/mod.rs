@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sources::{Kind, Source};
 use std::collections::HashMap;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -78,6 +78,7 @@ struct Video {
     id: u64,
     helper: Child,
     latest: LatestFrame,
+    spare: LatestFrame,
     stopped: Arc<AtomicBool>,
     selection: Selection,
     granted: Instant,
@@ -273,6 +274,7 @@ pub fn capture_picker_model(window: WebviewWindow) -> Result<Value, String> {
     picker.sources = sources::enumerate();
     Ok(json!({
         "sources": picker.sources,
+        "minimizedCapture": true,
         "language": if host.persian.load(Ordering::Acquire) { "fa-IR" } else { "en-US" },
         "audioRequested": picker.audio,
         "audioSupported": audio_supported,
@@ -407,9 +409,6 @@ pub fn capture_picker_select(window: WebviewWindow, choice: Choice) -> Result<()
             .into_iter()
             .find(|source| source.same_source(previous))
             .ok_or("Capture source closed. Refresh and choose again.")?;
-        if fresh.minimized {
-            return Err("Restore the window before sharing".into());
-        }
         if choice.audio_scope == AudioScope::Application && fresh.kind != Kind::Window {
             return Err("Choose a window for application audio".into());
         }
@@ -526,12 +525,14 @@ pub async fn capture_video(
     let stdout = helper.stdout.take().expect("piped capture output");
     let latest = Arc::new(Mutex::new(None));
     let stopped = Arc::new(AtomicBool::new(false));
+    let spare = Arc::new(Mutex::new(None));
+    let recycle = spare.clone();
     let output = latest.clone();
     let failed = stopped.clone();
     let app = window.app_handle().clone();
     thread::spawn(move || {
         let notify = || { let _ = app.emit_to(crate::MAIN, "capture-frame-ready", generation); };
-        let _ = read_frames(stdout, output, settings, &notify);
+        let _ = read_frames(stdout, output, recycle, &notify);
         failed.store(true, Ordering::Release);
         notify();
     });
@@ -544,6 +545,7 @@ pub async fn capture_video(
         id: generation,
         helper,
         latest,
+        spare,
         stopped,
         selection: selected,
         granted: Instant::now(),
@@ -573,35 +575,59 @@ fn start_video_helper(
             settings.fps.to_string(),
         ])
         .creation_flags(NO_CONSOLE)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
 }
 
-fn read_frames(mut source: impl Read, latest: LatestFrame, settings: Settings, notify: impl Fn()) -> io::Result<()> {
+#[tauri::command]
+pub fn capture_quality(window: WebviewWindow, id: u64, settings: Settings) -> Result<(), String> {
+    main_window(&window)?;
+    if !(1..=3840).contains(&settings.width) || !(1..=2160).contains(&settings.height) || !(1..=60).contains(&settings.fps) {
+        return Err("Invalid capture quality".into());
+    }
+    let host = window.state::<Host>();
+    let mut capture = host.capture.lock().map_err(|_| "Capture unavailable")?;
+    let input = capture.video.as_mut().filter(|v| allowed(&host) && v.id == id)
+        .and_then(|v| v.helper.stdin.as_mut()).ok_or("Screen share ended")?;
+    let mut packet = [0; 12];
+    for (chunk, value) in packet.chunks_exact_mut(4).zip([settings.width, settings.height, settings.fps]) {
+        chunk.copy_from_slice(&value.to_le_bytes());
+    }
+    input.write_all(&packet).map_err(|_| "Screen capture stopped".into())
+}
+
+fn read_frames(mut source: impl Read, latest: LatestFrame, spare: LatestFrame, notify: impl Fn()) -> io::Result<()> {
+    let limits = Settings { width: 3840, height: 2160, fps: 60 };
+    let mut overwritten = None;
     loop {
-        let (buffer, _, _) = read_frame(&mut source, &settings)?;
-        let first_pending = latest.lock().map_err(|_| io::Error::other("capture stopped"))?
-            .replace(buffer).is_none();
-        if first_pending {
+        let reusable = overwritten.take().or_else(|| spare.lock().ok()?.take()).unwrap_or_default();
+        let (buffer, _, _) = read_frame(&mut source, &limits, true, reusable)?;
+        overwritten = latest.lock().map_err(|_| io::Error::other("capture stopped"))?.replace(buffer);
+        if overwritten.is_none() {
             notify();
         }
     }
 }
 
-fn read_frame(source: &mut impl Read, settings: &Settings) -> io::Result<(Vec<u8>, u32, u32)> {
+fn read_frame(source: &mut impl Read, settings: &Settings, allow_nv12: bool, mut buffer: Vec<u8>) -> io::Result<(Vec<u8>, u32, u32)> {
     let mut header = [0; 8];
     source.read_exact(&mut header)?;
-    let width = u32::from_le_bytes(header[..4].try_into().expect("frame width"));
+    let tagged = u32::from_le_bytes(header[..4].try_into().expect("frame width"));
+    let nv12 = tagged & 0x80000000 != 0;
+    let width = tagged & 0x7fffffff;
     let height = u32::from_le_bytes(header[4..].try_into().expect("frame height"));
-    if !(1..=settings.width).contains(&width) || !(1..=settings.height).contains(&height) {
+    if !(1..=settings.width).contains(&width) || !(1..=settings.height).contains(&height)
+        || (nv12 && (!allow_nv12 || width % 4 != 0 || height % 2 != 0)) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Invalid Windows capture frame",
         ));
     }
-    let mut buffer = vec![0; 8 + (width * height * 4) as usize];
+    let area = (width * height) as usize;
+    let length = if nv12 { area + area / 2 } else { area * 4 };
+    buffer.resize(8 + length, 0);
     buffer[..8].copy_from_slice(&header);
     source.read_exact(&mut buffer[8..])?;
     Ok((buffer, width, height))
@@ -628,6 +654,15 @@ pub fn video_frame(app: &AppHandle, id: u64) -> Result<Vec<u8>, String> {
         .take()
         .unwrap_or_default();
     Ok(buffer)
+}
+
+pub fn recycle_video_frame(app: &AppHandle, id: u64, bytes: Vec<u8>) {
+    let host = app.state::<Host>();
+    if let Ok(capture) = host.capture.lock()
+        && let Some(video) = capture.video.as_ref().filter(|v| v.id == id)
+        && let Ok(mut spare) = video.spare.lock() {
+        *spare = Some(bytes);
+    }
 }
 
 #[tauri::command]

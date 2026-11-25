@@ -100,7 +100,7 @@ fn read_previews(mut pipe: impl Read, latest: Arc<Mutex<Vec<Slot>>>) -> io::Resu
     let mut header = [0; 4];
     loop {
         pipe.read_exact(&mut header)?;
-        let frame = read_frame(&mut pipe, &SIZE)?;
+        let frame = read_frame(&mut pipe, &SIZE, false, Vec::new())?;
         let Ok(mut slots) = latest.lock() else { return Ok(()) };
         let Some(slot) = slots.get_mut(u32::from_le_bytes(header) as usize) else { return Ok(()) };
         if slot.frame.as_ref() != Some(&frame) {

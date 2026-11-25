@@ -8,6 +8,7 @@ const text = value => model?.language === 'fa-IR' ? translations[value] || value
 translations['Loading preview…'] = 'در حال بارگیری پیش‌نمایش…';
 translations['Preview unavailable'] = 'پیش‌نمایش در دسترس نیست';
 translations['Window minimized'] = 'پنجره کوچک شده است';
+translations['Minimized. Restore the window if its picture pauses.'] = 'اگر تصویر متوقف شد، پنجره را باز کنید.';
 translations['Restore window'] = 'بازگرداندن پنجره';
 translations['Open the window from the taskbar, then select Refresh.'] = 'پنجره را از نوار وظیفه باز کنید، سپس فهرست را تازه‌سازی کنید.';
 translations['All sound on the default output'] = 'همهٔ صدای خروجی پیش‌فرض';
@@ -33,7 +34,7 @@ function showPreview(preview, thumbnail, pending = false) {
 }
 
 function paintPreview(preview, source) {
-  if (source.minimized) preview.textContent = text('Window minimized');
+  if (source.minimized) preview.textContent = text(model.minimizedCapture ? 'Minimized. Restore the window if its picture pauses.' : 'Window minimized');
   else showPreview(preview, source.thumbnail || previews.get(source.id), Boolean(preview.dataset.preview) && !previews.has(source.id));
 }
 
@@ -87,7 +88,7 @@ function audioScope() {
 function updateShareButton() {
   const source = model.sources.find(item => item.id === selected);
   const button = byId('share');
-  button.textContent = text(source?.minimized ? 'Restore window' : 'Share');
+  button.textContent = text(source?.minimized && !model.minimizedCapture ? 'Restore window' : 'Share');
   button.disabled = !source || busy;
 }
 function render() {
@@ -145,7 +146,7 @@ async function choose(id) {
 async function actOnSelection() {
   if (busy || !selected) return;
   const source = model.sources.find(item => item.id === selected);
-  if (!source?.minimized) { await choose(selected); return; }
+  if (!source?.minimized || model.minimizedCapture) { await choose(selected); return; }
   busy = true;
   updateShareButton();
   try {

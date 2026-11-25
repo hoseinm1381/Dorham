@@ -104,6 +104,7 @@ export function App() {
   const [serverId, setServerId] = useState<string | null>(null), [conversationId, setConversationId] = useState<string | null>(null), [messages, setMessages] = useState<Message[]>([]), [hasMore, setHasMore] = useState(false), [historyBusy, setHistoryBusy] = useState(false);
   const [historyJump, setHistoryJump] = useState(0);
   const [authReady, setAuthReady] = useState(false), [cachedView, setCachedView] = useState(false);
+  const [restoringSession, setRestoringSession] = useState(false);
   const openedHistory = useRef(''), sessionGeneration = useRef(0);
   const synchronizing = useRef(new Set<string>());
   const [invitedVoice, setInvitedVoice] = useState<Channel | null>(null);
@@ -141,7 +142,7 @@ export function App() {
     const revoked = () => {
       const origin = serverUrl() || location.origin, account = snapshotRef.current?.me.id || rememberedAccount(origin);
       if (account) { draftStore().clear(account, origin); void signOutStorage(origin, account).catch(() => {}); }
-      sessionGeneration.current++; setAuthReady(false); setCachedView(false); void forgetSession(); void media.current?.leave(); socket.current?.disconnect(); setSnapshot(null); setMessages([]); setServerId(null); setConversationId(null); setModal(null); setRoom(null); setScreens({});
+      sessionGeneration.current++; setAuthReady(false); setCachedView(false); setRestoringSession(false); void forgetSession(); void media.current?.leave(); socket.current?.disconnect(); setSnapshot(null); setMessages([]); setServerId(null); setConversationId(null); setModal(null); setRoom(null); setScreens({});
     };
     const accountChanged = (event: StorageEvent) => { const account = snapshotRef.current?.me.id; if (account && storageAccountChanged(event, serverUrl() || location.origin, account)) revoked(); };
     window.addEventListener('dorham-session-revoked', revoked);
@@ -186,7 +187,7 @@ export function App() {
     const { me, servers, channels, dms, users, unread, mediaTransport, blockedUsers, deletedUserIds, directCalls, screenPolicy, bootstrapVersion } = data;
     void saveLocalSession(scope, { me, servers, channels, dms, users, unread, mediaTransport, blockedUsers, deletedUserIds, directCalls, screenPolicy, bootstrapVersion }).catch(() => {});
     void retainLocalConversations(scope, allowed).catch(() => {});
-    setAuthReady(true); setSnapshot(data);
+    setAuthReady(true); setRestoringSession(false); setSnapshot(data);
   }
   async function refresh() {
     if (refreshPromise.current) { refreshPending.current = true; return refreshPromise.current; }
@@ -200,7 +201,7 @@ export function App() {
        if ('unchanged' in response) {
          const retained = response;
          setSnapshot(previous => previous?.bootstrapVersion === retained.bootstrapVersion ? { ...previous, voicePresence: retained.voicePresence } : previous);
-         setAuthReady(true);
+         setAuthReady(true); setRestoringSession(false);
          void request('/presence').then(presence => { if (generation === sessionGeneration.current) { setOnline(new Set(presence.online)); acceptLatencies(presence.latencies); } }).catch(() => {});
          continue;
        }
@@ -279,7 +280,8 @@ export function App() {
     void initialize().then(async () => {
       const origin = serverUrl() || location.origin, account = rememberedAccount(origin), generation = sessionGeneration.current;
       if (account) {
-        const cached = await readLocal<Snapshot>(JSON.stringify([origin, account]), 'session', 'bootstrap');
+        if (active) setRestoringSession(true);
+        const cached = await readLocal<Snapshot>(JSON.stringify([origin, account]), 'session', 'bootstrap').catch(() => undefined);
         if (active && generation === sessionGeneration.current && cached?.me.id === account && !cached.me.mustChangePassword && rememberedAccount(origin) === account) {
           activateStorage(origin, account); setSnapshot(cached); setCachedView(true); setLoading(false);
           if (cached.me.language) setLanguage(cached.me.language);
@@ -296,10 +298,10 @@ export function App() {
   }, []);
   const outbox = useOutbox(storageScope(), authReady && !snapshot?.me.mustChangePassword, applyEvent);
   useEffect(() => {
-    if (authReady || !snapshot?.me.id) return;
+    if (authReady || (!restoringSession && !snapshot?.me.id)) return;
     const timer = setInterval(() => { if (navigator.onLine !== false && document.visibilityState === 'visible') void request('/auth/me').then(refresh).catch(() => {}); }, 8000);
     return () => clearInterval(timer);
-  }, [authReady, snapshot?.me.id]);
+  }, [authReady, restoringSession, snapshot?.me.id]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), toast === missingBrowserShareAudio ? 2500 : 7000); return () => clearTimeout(t); }, [toast]);
   const userId = snapshot?.me.id;
   const [musicChannel, setMusicChannel] = useState<string>();
@@ -345,7 +347,17 @@ export function App() {
     s.on('connection:probe', (body: unknown, reply: unknown) => { if (typeof reply === 'function' && connectionProbeSchema.safeParse(body).success) reply({ version: 1 }); });
     s.on('connection:latencies', acceptLatencies);
     s.on('connect', () => { setConnected(true); void refresh().catch(error); if (current.current && openedHistory.current === current.current) void synchronize(current.current); });
-    s.on('disconnect', reason => { setConnected(false); latencyStore.replace({}); if (reason === 'io server disconnect') void request('/auth/me').catch(error); }); s.on('connect_error', e => { setConnected(false); error(e); });
+    let retryConnection: ReturnType<typeof setTimeout> | undefined, disposed = false;
+    const retrySocket = () => {
+      if (disposed || s.active || s.connected || retryConnection || navigator.onLine === false) return;
+      retryConnection = setTimeout(() => {
+        retryConnection = undefined;
+        void request('/auth/me').then(() => { if (!disposed && !s.active && !s.connected) s.connect(); }).catch(retrySocket);
+      }, 4000);
+    };
+    window.addEventListener('online', retrySocket);
+    s.on('disconnect', () => { setConnected(false); latencyStore.replace({}); retrySocket(); });
+    s.on('connect_error', e => { setConnected(false); error(e); retrySocket(); });
     s.on('voice:directory', (voicePresence: VoicePresence[]) => { for (const cue of voiceCues.current.directory(voicePresence.map(entry => ({ ...entry, members: entry.members.filter(m => m.user.id !== MUSIC_ID) })), userId)) playCue(cue, snapshotRef.current?.me.status === 'busy'); setSnapshot(old => old ? { ...old, voicePresence } : old); });
     s.on('capacity', data => error(data.message)); s.on('state:changed', () => { void refreshMemberState().catch(error); });
     s.on('presence', p => setOnline(old => { const next = new Set(old); if (p.online) next.add(p.userId); else next.delete(p.userId); return next; }));
@@ -366,7 +378,7 @@ export function App() {
     const meter = setInterval(() => { setTyping(old => Object.values(old).some(expiry => expiry <= Date.now()) ? Object.fromEntries(Object.entries(old).filter(([, expiry]) => expiry > Date.now())) : old); }, 5000);
     const pulse = () => { void maintainSession().catch(error); };
     const authTimer = setInterval(pulse, 60000); window.addEventListener('dorham-native-pulse', pulse);
-    return () => { clearInterval(authTimer); window.removeEventListener('dorham-native-pulse', pulse); clearInterval(meter); detachDirectCall(); void transport.destroy(); s.removeAllListeners(); s.disconnect(); socket.current = null; media.current = null; };
+    return () => { disposed = true; clearTimeout(retryConnection); window.removeEventListener('online', retrySocket); clearInterval(authTimer); window.removeEventListener('dorham-native-pulse', pulse); clearInterval(meter); detachDirectCall(); void transport.destroy(); s.removeAllListeners(); s.disconnect(); socket.current = null; media.current = null; };
   }, [authReady, userId, snapshot?.me.mustChangePassword]);
   useEffect(() => {
     let disposed = false;
@@ -501,6 +513,7 @@ export function App() {
   const recentDMs = orderedDirectChats(snapshot?.dms || []);
   const unread = (cv: string | null) => Boolean(cv && snapshot?.unread[cv] && snapshot.unread[cv].sequence > snapshot.unread[cv].readSequence);
   const toastView = toast && <div role={toast === missingBrowserShareAudio ? "status" : "alert"} className="toast"><Activity size={18}/><span>{tr(toast)}</span><IconButton title={tr("Dismiss notification")} onClick={() => setToast('')}><X/></IconButton></div>;
+  if (!snapshot && restoringSession) return <div className="loading"><img src="./icon.svg" alt=""/><span role="status">{tr('Reconnecting to your account…')}</span></div>;
   if (!snapshot) return <><Auth onLogin={refresh} onError={error} compact={compactWeb}/>{toastView}</>;
   if (snapshot.me.mustChangePassword) return <><TemporaryPassword refresh={refresh} error={error}/>{toastView}</>;
 

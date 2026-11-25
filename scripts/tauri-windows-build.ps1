@@ -45,7 +45,7 @@ try {
     Invoke-BuildTool $csc @('/nologo', '/optimize+', '/platform:x64', "/out:$native\VoiceHotkey.exe", (Join-Path $root 'apps\desktop\native\VoiceHotkey.cs'))
     $compiler = @('/nologo', '/utf-8', '/std:c++20', '/EHsc', '/O2', '/MT')
     $fxc = Join-Path $env:WindowsSdkDir "bin\$sdkVersion\x64\fxc.exe"
-    foreach ($shader in @(@('fullscreen', 'vs_4_0'), @('scaleFrame', 'ps_4_0'))) {
+    foreach ($shader in @(@('fullscreen', 'vs_4_0'), @('scaleFrame', 'ps_4_0'), @('packNV12', 'ps_4_0'))) {
       Invoke-BuildTool $fxc @('/nologo', '/T', $shader[1], '/E', $shader[0], '/Vn', $shader[0], '/Fh',
         (Join-Path $generated ($shader[0] + '.h')), (Join-Path $project 'native\CaptureScale.hlsl'))
     }

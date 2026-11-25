@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DorhamUpdatesPlugin.class);
         registerPlugin(DorhamClipboardPlugin.class);
         super.onCreate(state);
+        getBridge().getWebView().setWebChromeClient(new DorhamWebChromeClient(getBridge()));
         captureLink(getIntent());
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {

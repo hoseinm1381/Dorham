@@ -2,6 +2,7 @@
 
 mod assets;
 mod capture;
+mod downloads;
 mod hotkeys;
 mod overlay;
 mod session;
@@ -96,6 +97,9 @@ enum DesktopRequest {
     SetServer(String),
     GetSecret,
     SetSecret(Option<String>),
+    GetDownloadFolder,
+    ChooseDownloadFolder,
+    ResetDownloadFolder,
     GetOverlay,
     ConfigureOverlay(settings::OverlayPreferences),
     UpdateOverlay(Value),
@@ -130,6 +134,17 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
     require_main(&window)?;
     let host = window.state::<Host>();
     match request {
+        DesktopRequest::ChooseDownloadFolder => {
+            let owner = window.hwnd().map_err(|_| "The download folder picker could not open.")?;
+            let folder = downloads::choose_folder(owner).map_err(|_| "The download folder picker could not open.")?;
+            if let Some(path) = &folder {
+                host.settings.lock().map_err(|_| "Dorham settings are unavailable")?.change(|settings| {
+                    settings.download_folder = Some(path.clone());
+                    Ok(())
+                })?;
+            }
+            Ok(json!(folder))
+        }
         DesktopRequest::GetAppInfo => Ok(json!({
             "version": window.app_handle().package_info().version.to_string(),
             "platform": "windows",
@@ -197,6 +212,11 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
                     Ok(Value::Null)
                 }
                 DesktopRequest::GetSecret => Ok(json!(store.value.get_secret()?)),
+                DesktopRequest::GetDownloadFolder => Ok(json!(store.value.download_folder)),
+                DesktopRequest::ResetDownloadFolder => {
+                    store.change(|settings| { settings.download_folder = None; Ok(()) })?;
+                    Ok(Value::Null)
+                }
                 DesktopRequest::SetSecret(value) => {
                     store.change(|settings| settings.set_secret(value.as_deref()))?;
                     Ok(Value::Null)
@@ -339,6 +359,7 @@ fn setup(app: &mut tauri::App, benchmark_profile: Option<&Path>) -> Result<(), B
             .use_https_scheme(true)
             .visible(false)
             .on_navigation(|url| url.as_str() == "about:blank" || trusted_main_url(url))
+            .on_download(downloads::route)
             .on_new_window(|url, _| {
                 webview::open_link(&url);
                 NewWindowResponse::Deny
@@ -478,6 +499,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_command,
             capture::capture_video,
+            capture::capture_quality,
             capture::capture_stop,
             capture::capture_picker_model,
             capture::capture_picker_previews,

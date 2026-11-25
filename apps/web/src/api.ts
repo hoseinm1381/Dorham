@@ -5,7 +5,8 @@ import { installNativeVisibility } from './native-visibility';
 import { setDesktopCaptureCapabilities } from '../../../packages/media/src/screen-capture';
 import { pauseBulkRequest, waitForBulkTransfer } from '../../../packages/media/src/network-pressure';
 import { localMediaBytes, readLocal, removeLocal, saveMedia, savePartialMedia, saveUpload, storageScope, storageSettings } from './offline-storage';
-declare global { interface Window { desktop?: { onOverlayPreferences?(listener: (preferences: import('./WindowsVoiceOverlay').OverlayPreferences) => void): () => void; onVisibility?(listener: (visible: boolean) => void): () => void; getOverlay?(): Promise<import('./WindowsVoiceOverlay').OverlayPreferences>; configureOverlay?(value: import('./WindowsVoiceOverlay').OverlayPreferences): Promise<import('./WindowsVoiceOverlay').OverlayPreferences>; updateOverlay?(value: import('./WindowsVoiceOverlay').OverlayState): void; getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; setLanguage?(value: string): Promise<void>; version?: string; getAppInfo?(): Promise<{version: string; platform: string}>; checkUpdate?(): Promise<{current: string; latest: string; available: boolean}>; installUpdate?(): Promise<{started: boolean}>; getUpdateState?(): Promise<import('./ReleaseProvider').WindowsUpdateState>; onUpdateState?(listener: (state: import('./ReleaseProvider').WindowsUpdateState) => void): () => void; prepareUpdate?(): Promise<void>; getCaptureCapabilities?(): Promise<{ sharedAudio: boolean }>; captureNativeVideo?(settings: import('../../../packages/media/src/screen-capture').ScreenCaptureSettings, audio: boolean): Promise<import('../../../packages/media/src/screen-capture').NativeVideo>; getCaptureSelection?(): Promise<{ sourceName: string; audioScope: 'none' | 'application' | 'system' } | null>; startCaptureAudio?(): Promise<{ id: string; sourceName: string; audioScope: 'application' | 'system' }>; stopCaptureAudio?(id: string): void; acknowledgeCaptureAudio?(id: string): void; onCaptureAudio?(listener: (packet: { id: string; pcm?: Uint8Array; error?: string }) => void): () => void; systemAudioSafe?: boolean; configureVoiceHotkey(value: import('../../../packages/contracts/src/voice-hotkeys').VoiceInputPreferences): Promise<{ supported: boolean }>; onVoiceHotkey(listener: (event: { type: 'down' | 'up' | 'release' | 'error' | 'ready'; message?: string; background?: boolean }) => void): () => void } } }
+import { prepareBrowserDownload, writeBrowserDownload } from './download-folder';
+declare global { interface Window { desktop?: { getDownloadFolder?(): Promise<string | null>; chooseDownloadFolder?(): Promise<string | null>; resetDownloadFolder?(): Promise<void>; onOverlayPreferences?(listener: (preferences: import('./WindowsVoiceOverlay').OverlayPreferences) => void): () => void; onVisibility?(listener: (visible: boolean) => void): () => void; getOverlay?(): Promise<import('./WindowsVoiceOverlay').OverlayPreferences>; configureOverlay?(value: import('./WindowsVoiceOverlay').OverlayPreferences): Promise<import('./WindowsVoiceOverlay').OverlayPreferences>; updateOverlay?(value: import('./WindowsVoiceOverlay').OverlayState): void; getServer(): Promise<string>; setServer(url: string): Promise<void>; getSecret(): Promise<string | null>; setSecret(secret: string | null): Promise<void>; setInCall(active: boolean): void; setLanguage?(value: string): Promise<void>; version?: string; getAppInfo?(): Promise<{version: string; platform: string}>; checkUpdate?(): Promise<{current: string; latest: string; available: boolean}>; installUpdate?(): Promise<{started: boolean}>; getUpdateState?(): Promise<import('./ReleaseProvider').WindowsUpdateState>; onUpdateState?(listener: (state: import('./ReleaseProvider').WindowsUpdateState) => void): () => void; prepareUpdate?(): Promise<void>; getCaptureCapabilities?(): Promise<{ sharedAudio: boolean }>; captureNativeVideo?(settings: import('../../../packages/media/src/screen-capture').ScreenCaptureSettings, audio: boolean): Promise<import('../../../packages/media/src/screen-capture').NativeVideo>; getCaptureSelection?(): Promise<{ sourceName: string; audioScope: 'none' | 'application' | 'system' } | null>; startCaptureAudio?(): Promise<{ id: string; sourceName: string; audioScope: 'application' | 'system' }>; stopCaptureAudio?(id: string): void; acknowledgeCaptureAudio?(id: string): void; onCaptureAudio?(listener: (packet: { id: string; pcm?: Uint8Array; error?: string }) => void): () => void; systemAudioSafe?: boolean; configureVoiceHotkey(value: import('../../../packages/contracts/src/voice-hotkeys').VoiceInputPreferences): Promise<{ supported: boolean }>; onVoiceHotkey(listener: (event: { type: 'down' | 'up' | 'release' | 'error' | 'ready'; message?: string; background?: boolean }) => void): () => void } } }
 const store = registerPlugin<any>('DorhamSecrets');
 const files = registerPlugin<any>('DorhamFiles');
 export const native = Capacitor.isNativePlatform() || (typeof window !== 'undefined' && Boolean(window.desktop));
@@ -43,7 +44,16 @@ async function refreshSession(): Promise<boolean> {
     if (generation !== nativeSessionGeneration || origin !== base) return false;
     if (response.status === 404 || response.status === 405) response = await send('refresh', { refreshToken, requestId: rotation.id });
     if (generation !== nativeSessionGeneration || origin !== base) return false;
-    if (!response.ok) { if (response.status === 401 || response.status === 403) { await setSecret(null); return false; } throw new Error('The server is temporarily unavailable. Try again.'); }
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      if (response.status === 401 && data?.error?.code === 'REFRESH_INVALID') {
+        if (generation !== nativeSessionGeneration || origin !== base) return false;
+        await forgetSession();
+        window.dispatchEvent(new Event('dorham-session-revoked'));
+        return false;
+      }
+      throw new Error('The server is temporarily unavailable. Try again.');
+    }
     const data = await response.json(); if (generation !== nativeSessionGeneration || origin !== base) return false;
     await setSecret(data.refreshToken); access = data.accessToken; accessExpires = Date.now() + 15 * 60000; csrf = data.csrf; return true;
   })();
@@ -72,6 +82,7 @@ export async function request<T = any>(route: string, body?: unknown, method = b
   if (native && !base) throw new Error('Enter your server address to connect.');
   if (!native && route !== '/auth/renew' && webRenewal) await webRenewal;
   const credentialGeneration = webCredentialGeneration;
+  const sentAccess = access;
   const headers: Record<string, string> = { ...(access ? { Authorization: `Bearer ${access}` } : {}), ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...(native ? { 'X-Dorham-Native': '1' } : {}) };
   const raw = body instanceof Blob;
   const payload = !raw && body && typeof body === 'object' && !(body instanceof FormData) ? { requestId: crypto.randomUUID(), ...body } : body;
@@ -87,14 +98,20 @@ export async function request<T = any>(route: string, body?: unknown, method = b
   if (!native && response.status === 401 && retry && route !== '/auth/renew' && (webRenewal || credentialGeneration !== webCredentialGeneration)) {
     await webRenewal; return request<T>(route, payload, method, false, options);
   }
-  if (response.status === 401 && retry && !route.startsWith('/auth/login') && !route.startsWith('/auth/register') && await refreshSession()) return request<T>(route, payload, method, false, options);
   const data = await response.json().catch(e => { if (timeout.aborted) throw Object.assign(new Error('Connection timed out. Your message was not automatically resent.'), { code: 'TIMEOUT' }); if (options.signal?.aborted) throw e; return { error: { message: 'The server returned an invalid response.' } }; });
+  const identityRejected = response.status === 401 && data.error?.code === 'UNAUTHENTICATED';
+  if (native && identityRejected && retry && !/^\/auth\/(login|register|guest|recover|logout)(\/|$)/.test(route) &&
+      ((access && access !== sentAccess) || await refreshSession())) {
+    options.signal?.throwIfAborted();
+    return request<T>(route, payload, method, false, options);
+  }
   if (!native && response.status === 403 && data.error?.code === 'CSRF' && retry && webSessionUserId) {
     await synchronizeWebProof(webSessionUserId);
     if (options.signal?.aborted) throw options.signal.reason;
     return request<T>(route, payload, method, false, options);
   }
-  if (response.status === 401 && !['/auth/login', '/auth/register', '/auth/guest', '/auth/recover'].some(path => route.startsWith(path))) window.dispatchEvent(new Event('dorham-session-revoked'));
+  if (!native && identityRejected && route === '/auth/me' && credentialGeneration === webCredentialGeneration)
+    window.dispatchEvent(new Event('dorham-session-revoked'));
   if (!response.ok) { const error = new Error(data.error?.message || 'Request failed.'); Object.assign(error, { status: response.status, code: data.error?.code }); throw error; }
   if (data.csrf) { csrf = data.csrf; if (!native && data.user?.id) webSessionUserId = data.user.id; }
   if (data.accessToken) { access = data.accessToken; accessExpires = Date.now() + 15 * 60000; await setSecret(data.refreshToken); }
@@ -106,9 +123,9 @@ export function connectSocket(): Socket {
   return io(base || window.location.origin, {
     withCredentials: true,
     auth: callback => {
-      if (native && access && Capacitor.getPlatform() === 'android') {
+      if (native) {
         void maintainSession().then(() => callback({ token: access || undefined, csrf }), () => callback({}));
-      } else if (native || !webSessionUserId) callback({ token: access || undefined, csrf });
+      } else if (!webSessionUserId) callback({ csrf });
       else void synchronizeWebProof(webSessionUserId).then(() => callback({ csrf })).catch(() => callback({ csrf: '' }));
     },
     reconnectionDelay: 500, reconnectionDelayMax: 5000, transports: ['websocket', 'polling'], tryAllTransports: true,
@@ -165,6 +182,7 @@ export async function uploadAttachment(file: File, conversationId: string, signa
 }
 export async function downloadAttachment(id: string, name: string, conversation?: string, onProgress?: (fraction: number) => void, signal?: AbortSignal) {
   const scope = storageScope(), mediaKey = `full:${id}`;
+  const folder = await prepareBrowserDownload();
   let blob = await readLocal<Blob>(scope, 'media', mediaKey);
   if (!blob) {
     await waitForBulkTransfer(signal);
@@ -222,6 +240,8 @@ export async function downloadAttachment(id: string, name: string, conversation?
     } finally { bandwidth.release(); }
   }
   if (scope !== storageScope()) return;
+  signal?.throwIfAborted();
+  if (folder) { await writeBrowserDownload(folder, name, blob, signal); return; }
   const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 

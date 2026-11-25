@@ -9,6 +9,7 @@ const run = promisify(execFile);
 export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid: number) {
   const source = spawn(path.resolve(fixture), ['selected'], { stdio: ['ignore', 'pipe', 'inherit'] });
   const previews = process.env.DORHAM_TEST_PICKER_PREVIEWS === '1';
+  const minimized = process.env.DORHAM_TEST_MINIMIZED_SOURCE === '1';
   const second = previews ? spawn(path.resolve(fixture), ['unrelated'], { stdio: ['ignore', 'pipe', 'inherit'] }) : undefined;
   let sourceHandle = '';
   let secondHandle = '';
@@ -36,8 +37,9 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
     const [ready, secondReady] = await Promise.all((second ? [source, second] : [source]).map(child =>
       once(child.stdout, 'data', { signal: AbortSignal.timeout(10000) }),
     ));
+    sourceHandle = String(ready[0]).match(/^\d+/m)?.[0] ?? '';
+    if (minimized && !previews) expect(await sourceWindow('minimize')).toMatchObject({ minimized: true });
     if (previews) {
-      sourceHandle = String(ready[0]).match(/^\d+/m)?.[0] ?? '';
       secondHandle = String(secondReady?.[0]).match(/^\d+/m)?.[0] ?? '';
       expect(sourceHandle).not.toBe('');
       expect(secondHandle).not.toBe('');
@@ -76,6 +78,9 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
       };
       output.ontrack = ({ streams }) => { video.srcObject = streams[0]; };
       const track = share.stream.getVideoTracks()[0];
+      video.addEventListener('change-capture-quality', () => {
+        void share.setQuality!({ width: 192, height: 108, fps: 10 });
+      }, { once: true });
       track.addEventListener('ended', () => { video.dataset.sourceEnded = 'true'; }, { once: true });
       input.addTrack(track, share.stream);
       await input.setLocalDescription(await input.createOffer());
@@ -95,9 +100,9 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
       const search = picker.getByRole('searchbox', { name: 'Search sources' });
       await search.fill('Dorham owned capture fixture selected');
       option = picker.locator(`button:has([data-preview="window:${sourceHandle}:${source.pid}"])`);
-      await expect(option.locator('.preview')).toHaveText('Window minimized');
+      await expect(option.locator('.preview')).toContainText('Minimized.');
       await option.click();
-      await expect(picker.getByRole('button', { name: 'Restore window', exact: true })).toBeEnabled();
+      await expect(picker.getByRole('button', { name: 'Share', exact: true })).toBeEnabled();
       await expect.poll(previewHelpers).toBe(0);
       expect(await sourceWindow('maximize')).toEqual({ minimized: false, maximized: true });
       await picker.bringToFront();
@@ -105,9 +110,9 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
       await expect.poll(() => fingerprint(option.locator('.preview')), { timeout: 15000 }).not.toBeNull();
       expect(await sourceWindow('minimize')).toMatchObject({ minimized: true });
       await picker.bringToFront();
-      await expect(option.locator('.preview')).toHaveText('Window minimized');
+      await expect(option.locator('.preview')).toContainText('Minimized.');
       await expect.poll(previewHelpers).toBe(0);
-      await picker.getByRole('button', { name: 'Restore window', exact: true }).click();
+      expect(await sourceWindow('maximize')).toMatchObject({ minimized: false });
       await expect(picker.getByRole('button', { name: 'Share', exact: true })).toBeEnabled();
       expect(await sourceWindow('inspect')).toMatchObject({ minimized: false });
       await search.fill('Dorham owned capture fixture');
@@ -140,7 +145,7 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
       await search.fill('Dorham owned capture fixture selected');
       await picker.getByRole('tab', { name: 'Applications', exact: true }).click();
       await expect(option.locator('.preview img')).toBeVisible();
-      console.log(JSON.stringify({ previewResumedAfterExternalMaximize: true, previewStoppedAfterExternalMinimize: true, minimizedApplicationRestored: true, simultaneousApplicationPreviews: 2, applicationFrameChanges: changes, changingScreenPreview: true, stoppedWhenNoSourcesVisible: true }));
+      console.log(JSON.stringify({ previewResumedAfterExternalMaximize: true, previewStoppedAfterExternalMinimize: true, externalRestoreVerified: true, simultaneousApplicationPreviews: 2, applicationFrameChanges: changes, changingScreenPreview: true, stoppedWhenNoSourcesVisible: true }));
     }
     await option.click();
     await picker.getByRole('button', { name: 'Share', exact: true }).click();
@@ -151,6 +156,10 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
     });
     expect(captured.tracks).toBe(0);
     const video = page.locator('#dorham-owned-decoded-track');
+    if (minimized && !previews) {
+      expect(await sourceWindow('inspect')).toMatchObject({ minimized: true });
+      expect(await sourceWindow('maximize')).toMatchObject({ minimized: false });
+    }
     await expect.poll(() => video.evaluate((element: HTMLVideoElement) => {
       if (!element.videoWidth || element.readyState < 2) return false;
       const canvas = document.createElement('canvas');
@@ -160,6 +169,9 @@ export async function proveCaptureBridge(page: Page, fixture: string, dorhamPid:
       const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
       return red > 90 && blue > 120 && green < 75;
     }), { timeout: 12000 }).toBe(true);
+    await video.evaluate(element => element.dispatchEvent(new Event('change-capture-quality')));
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) =>
+      element.videoWidth > 0 && element.videoWidth <= 192 && element.videoHeight <= 108)).toBe(true);
     source.kill();
     await expect(video).toHaveAttribute('data-source-ended', 'true', { timeout: 8000 });
     console.log(JSON.stringify({ webviewCaptureBridge: true, decodedWebRTCVideo: true, selectedScope: 'window', deniedOutsideCall: true, sourceClosureStopsTrack: true }));
