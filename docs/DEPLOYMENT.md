@@ -90,6 +90,8 @@ An optional Cloudflare TURN credential adapter uses `CLOUDFLARE_TURN_KEY_ID` and
 
 For LiveKit, set `MEDIA_TRANSPORT=livekit`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. Follow [the official deployment guide](https://docs.livekit.io/transport/self-hosting/deployment/) for public addressing, TLS, and UDP/TCP ports. Keep media services outside Botkeep unless the provider explicitly approves them: [its terms](https://botkeep.cloud/terms) restrict unauthorized relays and excessive network use.
 
+Weak-connection screen sharing uses `ffmpeg` with `libvpx` to produce a 240p-class, 6fps VP8 feed inside the same LiveKit room. Set `SCREEN_RELAY_FFMPEG` to the executable if it is outside the service PATH. `SCREEN_RELAY_SLOTS` defaults to one concurrent conversion and accepts 0 to disable or up to 3 after measuring host CPU. Update the viewer clients as well as the Go backend. Existing clients continue to receive the original screen track.
+
 ## VPS
 
 ### Preserve the current memory allocation

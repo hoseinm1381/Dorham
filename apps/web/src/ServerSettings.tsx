@@ -1,6 +1,7 @@
 import { canManage, type Channel, type Server, type ServerMember } from '@dorham/contracts';
 import { Check, Copy, Hash, LayoutGrid, Link, Plus, Shield, SlidersHorizontal, Trash2, Users, Volume2, X } from 'lucide-react';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import { normalizePeopleSearch } from '../../../packages/contracts/src/persian';
 import { channelLink } from '../../../packages/contracts/src/links';
 import { ChannelPermissions } from './ChannelPermissions';
 import { VoicePolicy } from './ExpansionControls';
@@ -13,7 +14,7 @@ import { Avatar } from './UserAvatar';
 import { request, serverUrl } from './api';
 import { t } from './i18n';
 
-export type ServerSection = 'overview' | 'channels' | 'permissions' | 'roles' | 'members' | 'invites' | 'bans';
+export type ServerSection = 'overview' | 'channels' | 'permissions' | 'roles' | 'members' | 'invites' | 'bans' | 'moderation-log';
 const memberRoles = ['administrator', 'moderator', 'member'] as const;
 
 export function ServerSettings({ server, channels, members, account, instanceAdmin, refresh, error, leave, close, initial, initialKind = 'text', notice }: {
@@ -35,6 +36,9 @@ export function ServerSettings({ server, channels, members, account, instanceAdm
   const [kind, setKind] = useState(initialKind);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [busy, setBusy] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [kick, setKick] = useState<ServerMember>();
+  const [reason, setReason] = useState('');
   const owner = server.ownerId === account;
   const manage = Boolean(server.permissions?.manageChannels);
   const manageRoles = server.role === 'owner' || server.role === 'administrator';
@@ -51,7 +55,7 @@ export function ServerSettings({ server, channels, members, account, instanceAdm
       { id: 'members', label: 'members', icon: Users },
       ...(manage ? [{ id: 'permissions' as const, label: 'permissions', icon: Shield }] : []),
       ...(manage || manageRoles ? [{ id: 'roles' as const, label: 'Roles & tags', icon: Shield }] : []),
-      ...(manageMembers ? [{ id: 'bans' as const, label: 'Server bans', icon: Shield }] : []),
+      ...(manageMembers ? [{ id: 'bans' as const, label: 'Server bans', icon: Shield }, { id: 'moderation-log' as const, label: 'Moderation log', icon: Shield }] : []),
     ] },
   ];
 
@@ -112,7 +116,22 @@ export function ServerSettings({ server, channels, members, account, instanceAdm
         case 'roles': return <MemberAccessSettings server={server} members={members} account={account} instanceAdmin={instanceAdmin}
           manageTags={manage} manageRoles={manageRoles} refresh={refresh} error={error}/>;
         case 'bans': return <ServerBanList serverId={server.id} error={error} initiallyOpen/>;
-        case 'members': return members.map(member => {
+        case 'moderation-log': return <ModerationLog server={server.id}/>;
+        case 'members': return <>
+          <label>{t('Find a member')}<input type="search" value={memberSearch} onChange={event => setMemberSearch(event.target.value)}/></label>
+          {kick && <form className="moderation-confirm" onSubmit={event => {
+            event.preventDefault();
+            void save(async () => {
+              await request(`${serverPath}/members/${kick.user.id}/moderate`, { action: 'kick', reason });
+              setKick(undefined); setReason('');
+            });
+          }}>
+            <h4>{t('Kick from server')} · <bdi>{kick.user.displayName}</bdi></h4>
+            <p>{t('They will leave this server and voice. An invite lets them rejoin.')}</p>
+            <label>{t('Reason (optional)')}<input value={reason} onChange={event => setReason(event.target.value)} maxLength={320}/></label>
+            <div><button type="button" className="secondary" disabled={busy} onClick={() => { setKick(undefined); setReason(''); }}>{t('Cancel')}</button> <button className="danger-button" disabled={busy}>{t('Confirm kick')}</button></div>
+          </form>}
+          {members.filter(member => normalizePeopleSearch(`${member.user.displayName} ${member.user.username}`).includes(normalizePeopleSearch(memberSearch))).map(member => {
           const editable = manageMembers && member.user.id !== account && !member.user.instanceAdmin &&
             canManage(authority, member.authority ?? member.role);
           const assignable = memberRoles.filter(role => canManage(authority, role) && (!member.user.guest || role === 'member'));
@@ -124,14 +143,38 @@ export function ServerSettings({ server, channels, members, account, instanceAdm
               {assignable.map(role => <option value={role} key={role}>{t(role)}</option>)}
             </select> : <small>{t(member.role)}</small>}
             {editable && <button type="button" className="icon-button danger" aria-label={t('Remove {name}', { name: member.user.displayName })}
-              disabled={busy} onClick={() => { void save(() => request(memberPath, { remove: true }, 'PATCH')); }}><X size={18}/></button>}
+              disabled={busy} onClick={() => { setReason(''); setKick(member); }}><X size={18}/></button>}
           </div>;
-        });
+        })}
+        </>;
       }
   }
   return <SettingsDialog title={t('Settings for {name}', { name: server.name })} groups={groups} initial={initial} close={close} notice={notice}>
     {section => <div className="manage-server">{renderSection(section)}</div>}
   </SettingsDialog>;
+}
+
+type ModerationEntry = { id: string; actor?: string; target?: string; action: string; reason: string; createdAt: number };
+const moderationLabels: Record<string, string> = { 'member.kick': 'Kick from server', 'member.ban': 'Ban from server', 'member.unban': 'Unban', 'member.timeout': 'Time out member', 'member.untimeout': 'Remove timeout' };
+
+function ModerationLog({ server }: { server: string }) {
+  const [events, setEvents] = useState<ModerationEntry[]>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    void request<{ events: ModerationEntry[] }>(`/servers/${encodeURIComponent(server)}/moderation-log`, undefined, 'GET', true, { signal: controller.signal })
+      .then(value => { if (!controller.signal.aborted) setEvents(value.events); })
+      .catch(cause => { if (!controller.signal.aborted) setError(cause.message); });
+    return () => controller.abort();
+  }, [server]);
+  if (error) return <p role="alert">{t(error)}</p>;
+  if (!events) return <p role="status">{t('Please wait…')}</p>;
+  if (!events.length) return <p>{t('No moderation actions recorded.')}</p>;
+  return <ul className="moderation-log">{events.map(event => <li key={event.id}>
+    <strong>{t(moderationLabels[event.action] || event.action)}</strong> <bdi>{event.target}</bdi>
+    <div><bdi>{event.actor || t('Server')}</bdi> · <time dateTime={new Date(event.createdAt).toISOString()}>{new Date(event.createdAt).toLocaleString()}</time></div>
+    {event.reason && <p dir="auto">{event.reason}</p>}
+  </li>)}</ul>;
 }
 
 function ChannelEditor({ channel, refresh, error }: { channel: Channel; refresh: () => Promise<void>; error: (error: unknown) => void }) {

@@ -151,6 +151,10 @@ func (s *mediaSpeech) enqueue(uid string, msg M) {
 	if sender == nil {
 		return
 	}
+	if target := Obj(msg["speechTarget"]); len(target) > 0 &&
+		(Str(sender, "channel_id") != Str(target, "channelId") || Str(sender, "epoch") != Str(target, "epoch")) {
+		return
+	}
 	if !mediaSafe(func() {
 		Check(!Bool(sender, "server_muted"), 403, "FORBIDDEN", "Server muted.")
 		db.Tx(func(tx *DB) any { return s.m.a.Service.Channel(tx, uid, Str(sender, "channel_id"), "speak") })

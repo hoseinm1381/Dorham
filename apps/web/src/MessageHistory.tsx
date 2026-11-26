@@ -4,12 +4,13 @@ import { historyIndex, historyOffsets } from './history-layout';
 
 // Variable-height window, with a fixed overscan. The message bodies/images keep
 // their natural sizes; only measured spacer heights are virtualized.
-const HistoryItem = memo(function HistoryItem({ message, index, renderMessage }: { message: Message; index: number; renderMessage: (message: Message, index: number) => ReactNode }) {
-  return <div data-history-id={message.id} data-sequence={message.sequence} data-deleted={message.deleted || undefined}>{renderMessage(message, index)}</div>;
+const HistoryItem = memo(function HistoryItem({ message, index, highlight, renderMessage }: { message: Message; index: number; highlight: boolean; renderMessage: (message: Message, index: number) => ReactNode }) {
+  return <div data-history-id={message.id} data-sequence={message.sequence} data-highlight={highlight || undefined} data-deleted={message.deleted || undefined}>{renderMessage(message, index)}</div>;
 });
-export function MessageHistory({ messages, scroll, renderMessage, visible, jump = 0 }: { messages: Message[]; scroll: RefObject<HTMLDivElement | null>; renderMessage: (message: Message, index: number) => ReactNode; visible: (sequence: number) => void; jump?: number }) {
+export function MessageHistory({ messages, scroll, renderMessage, visible, jump = 0, reveal }: { messages: Message[]; scroll: RefObject<HTMLDivElement | null>; renderMessage: (message: Message, index: number) => ReactNode; visible: (sequence: number) => void; jump?: number; reveal?: { id: string } }) {
   const host = useRef<HTMLDivElement>(null), heights = useRef(new Map<string, number>()), anchor = useRef<{ id: string; offset: number } | null>(null);
   const followingLatest = useRef(true);
+  const lastReveal = useRef<{ id: string }>(undefined);
   const [window, setWindow] = useState({ start: 0, end: 30 }), [revision, resized] = useState(0);
   const offsets = useMemo(() => historyOffsets(messages.map(m => m.id), heights.current), [messages, revision]);
   const indexes = useMemo(() => new Map(messages.map((message, i) => [message.id, i])), [messages]);
@@ -58,7 +59,16 @@ export function MessageHistory({ messages, scroll, renderMessage, visible, jump 
   useLayoutEffect(() => {
     const root = scroll.current, node = host.current; if (!root || !node) return;
     if (lastJump.current !== jump) { followingLatest.current = true; lastJump.current = jump; }
-    if (followingLatest.current) root.scrollTop = root.scrollHeight;
+    const revealed = reveal && reveal !== lastReveal.current ? indexes.get(reveal.id) : undefined;
+    if (revealed !== undefined) {
+      lastReveal.current = reveal;
+      followingLatest.current = false;
+      hostTop.current = node.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+      const offset = Math.min(80, root.clientHeight / 4);
+      anchor.current = { id: messages[revealed].id, offset };
+      root.scrollTop = Math.max(0, hostTop.current + offsets[revealed] - offset);
+      knownScroll.current = root.scrollTop;
+    } else if (followingLatest.current) root.scrollTop = root.scrollHeight;
     else if (anchor.current) {
       const index = indexes.get(anchor.current.id);
       if (index !== undefined) {
@@ -73,7 +83,7 @@ export function MessageHistory({ messages, scroll, renderMessage, visible, jump 
     }
     previousMessages.current = messages;
     schedule.current();
-  }, [offsets, indexes, jump, scroll, messages]);
+  }, [offsets, indexes, jump, scroll, messages, reveal]);
   useLayoutEffect(() => {
     const children = new Set(host.current?.querySelectorAll('[data-history-id]') || []);
     for (const child of observed.current) if (!children.has(child)) { observer.current?.unobserve(child); observed.current.delete(child); }
@@ -82,5 +92,5 @@ export function MessageHistory({ messages, scroll, renderMessage, visible, jump 
   }, [messages, window.start, window.end]);
   useEffect(() => { const ids = new Set(messages.map(m => m.id)); for (const id of heights.current.keys()) if (!ids.has(id)) heights.current.delete(id); }, [messages]);
   const start = Math.min(window.start, messages.length), end = Math.max(start, Math.min(window.end, messages.length));
-  return <div ref={host} className="message-history" style={{ overflowAnchor: 'none' }}><div aria-hidden="true" style={{ height: offsets[start] }}/>{messages.slice(start, end).map((message, i) => <HistoryItem key={message.id} message={message} index={start + i} renderMessage={renderMessage}/>)}<div aria-hidden="true" style={{ height: offsets.at(-1)! - offsets[end] }}/></div>;
+  return <div ref={host} className="message-history" style={{ overflowAnchor: 'none' }}><div aria-hidden="true" style={{ height: offsets[start] }}/>{messages.slice(start, end).map((message, i) => <HistoryItem key={message.id} message={message} index={start + i} highlight={message.id === reveal?.id} renderMessage={renderMessage}/>)}<div aria-hidden="true" style={{ height: offsets.at(-1)! - offsets[end] }}/></div>;
 }

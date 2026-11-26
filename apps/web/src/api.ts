@@ -98,7 +98,12 @@ export async function request<T = any>(route: string, body?: unknown, method = b
   if (!native && response.status === 401 && retry && route !== '/auth/renew' && (webRenewal || credentialGeneration !== webCredentialGeneration)) {
     await webRenewal; return request<T>(route, payload, method, false, options);
   }
-  const data = await response.json().catch(e => { if (timeout.aborted) throw Object.assign(new Error('Connection timed out. Your message was not automatically resent.'), { code: 'TIMEOUT' }); if (options.signal?.aborted) throw e; return { error: { message: 'The server returned an invalid response.' } }; });
+  const data = await response.json().catch(e => {
+    if (timeout.aborted) throw Object.assign(new Error('Connection timed out. Please try again.'), { code: 'TIMEOUT' });
+    if (options.signal?.aborted) throw e;
+    if (response.ok) throw new Error('The server returned an invalid response.');
+    return { error: { message: 'The server returned an invalid response.' } };
+  });
   const identityRejected = response.status === 401 && data.error?.code === 'UNAUTHENTICATED';
   if (native && identityRejected && retry && !/^\/auth\/(login|register|guest|recover|logout)(\/|$)/.test(route) &&
       ((access && access !== sentAccess) || await refreshSession())) {
@@ -152,20 +157,28 @@ export async function uploadAttachment(file: File, conversationId: string, signa
     const route = `/attachments/${reserved.id}`;
     let progress = await request<{ offset: number; state: string }>(`${route}/transfer`, undefined, 'GET', true, { signal });
     onProgress?.(progress.offset);
-    let retries = 0;
+    const minChunk = 128 * 1024, maxChunk = 1024 * 1024;
+    let retries = 0, chunkSize = minChunk;
     while (progress.state !== 'ready') {
       signal?.throwIfAborted();
       await waitForBulkTransfer(signal);
       if (storageScope() !== scope) throw new Error('Your account changed. Reopen the upload to continue.');
       if (!Number.isSafeInteger(progress.offset) || progress.offset < 0 || progress.offset > file.size) throw new Error('The server returned an invalid upload position.');
-      const end = Math.min(progress.offset + 128 * 1024, file.size);
+      const offset = progress.offset, end = Math.min(offset + chunkSize, file.size);
       const bandwidth = pauseBulkRequest(signal);
+      const started = performance.now();
       try {
-        progress = await request(`${route}/content?offset=${progress.offset}`, file.slice(progress.offset, end), 'PATCH', true, { signal: bandwidth.signal, timeoutMs: 90000 });
+        progress = await request(`${route}/content?offset=${offset}`, file.slice(offset, end), 'PATCH', true, { signal: bandwidth.signal, timeoutMs: 90000 });
+        if (progress.offset !== end) throw new Error('The server returned an invalid upload position.');
+        const elapsed = performance.now() - started;
+        if (elapsed < 750) chunkSize = Math.min(maxChunk, chunkSize * 2);
+        else if (elapsed > 2500) chunkSize = Math.max(minChunk, chunkSize / 2);
         retries = 0;
         onProgress?.(progress.offset);
       } catch (cause: any) {
+        if (cause.status === 413 && chunkSize > minChunk) { chunkSize = minChunk; continue; }
         if (signal?.aborted || cause.status && cause.status < 500 && ![408, 409, 429].includes(cause.status) && cause.code !== 'UPLOAD_INTERRUPTED' || retries++ >= 2) throw cause;
+        chunkSize = Math.max(minChunk, chunkSize / 2);
         await new Promise(resolve => setTimeout(resolve, retries * 900));
         signal?.throwIfAborted();
         progress = await request(`${route}/transfer`, undefined, 'GET', true, { signal });
@@ -210,10 +223,9 @@ export async function downloadAttachment(id: string, name: string, conversation?
       try {
         transfer?.throwIfAborted();
         transfer?.addEventListener('abort', pause, { once: true });
-        await files.download({ url: `${base}/api/v1/attachments/${encodeURIComponent(id)}/download`, name, accessToken: access, scope, limit, gallery, cachedData });
+        return await files.download({ url: `${base}/api/v1/attachments/${encodeURIComponent(id)}/download`, name, accessToken: access, scope, limit, gallery, cachedData }) as { saved: boolean; handle?: string };
       } finally { transfer?.removeEventListener('abort', pause); await listener.remove(); }
     } finally { bandwidth?.release(); }
-    return;
   }
   if (!blob) {
     await waitForBulkTransfer(signal);
@@ -236,7 +248,24 @@ export async function downloadAttachment(id: string, name: string, conversation?
     const pieces: BlobPart[] = partial ? [partial.blob] : [];
     let received = partial?.blob.size || 0;
     const total = received + Number(response.headers.get('Content-Length') || 0);
+    if (folder && response.body && !partial) {
+      const transfer = new TransformStream<Uint8Array, Uint8Array>({
+        transform(piece, controller) {
+          if (scope !== storageScope()) throw new Error('Your account changed. Reopen the download to continue.');
+          received += piece.byteLength;
+          if (total) onProgress?.(received / total);
+          controller.enqueue(piece);
+        },
+        flush() {
+          if (total && received !== total) throw new Error('Download paused. Select Download to resume.');
+        }
+      });
+      await writeBrowserDownload(folder, name, response.body.pipeThrough(transfer, { signal }), signal);
+      await removeLocal(scope, 'media', partialKey).catch(() => {});
+      return;
+    }
     const reader = response.body?.getReader();
+    let checkpoint = received;
     try {
       if (!reader) blob = await response.blob();
       else {
@@ -245,6 +274,10 @@ export async function downloadAttachment(id: string, name: string, conversation?
           if (piece.done) break;
           pieces.push(new Uint8Array(piece.value)); received += piece.value.byteLength;
           if (total) onProgress?.(received / total);
+          if (etag && received - checkpoint >= 8 * 1024 * 1024 && storageScope() === scope) {
+            checkpoint = received;
+            await savePartialMedia(scope, partialKey, new Blob(pieces), etag, conversation).catch(() => {});
+          }
         }
         if (total && received !== total) throw new Error('Download paused. Select Download to resume.');
         blob = new Blob(pieces);
@@ -261,6 +294,14 @@ export async function downloadAttachment(id: string, name: string, conversation?
   signal?.throwIfAborted();
   if (folder) { await writeBrowserDownload(folder, name, blob, signal); return; }
   const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+export async function openSavedAttachment(handle: string) { await files.openSaved({ handle }); }
+export async function consumeSharedAndroidImage(): Promise<File | undefined> {
+  const { data, type, name } = await files.consumeSharedImage();
+  if (!data) return;
+  const bytes = Uint8Array.from(atob(data), char => char.charCodeAt(0));
+  return new File([bytes], name, { type });
 }
 
 export async function speechAudio(id: string) {

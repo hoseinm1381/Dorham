@@ -31,6 +31,10 @@ var baseSchema = []string{
 }
 
 var expansionSchema = map[int][]string{
+	20: {
+		"CREATE TABLE message_pins (message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, created_at BIGINT NOT NULL)",
+		"CREATE INDEX message_pins_conversation ON message_pins(conversation_id,created_at)",
+	},
 	19: {
 		"ALTER TABLE members ADD COLUMN hidden_from_member_list INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE servers ADD COLUMN member_list_revision BIGINT NOT NULL DEFAULT 0",

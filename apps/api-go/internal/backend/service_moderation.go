@@ -103,6 +103,24 @@ func (s *Service) ServerBans(actor, server string) M {
 		return M{"bans": bans}
 	}))
 }
+
+func (s *Service) ServerModerationLog(actor, server string) M {
+	return serviceResult(s.DB.Tx(func(tx *DB) any {
+		s.Member(tx, actor, server, "manageMembers")
+		rows := tx.All(`SELECT l.*,a.display_name AS actor_name,u.display_name AS target_name FROM audit_log l
+			LEFT JOIN users a ON a.id=l.actor_id LEFT JOIN users u ON u.id=l.target_id
+			WHERE l.action IN ('member.kick','member.ban','member.unban','member.timeout','member.untimeout') AND l.details LIKE ?
+			ORDER BY l.created_at DESC LIMIT 100`, "%\"serverId\":"+JSON(server)+"%")
+		events := []M{}
+		for _, row := range rows {
+			details := Obj(Parse(Str(row, "details")))
+			if Str(details, "serverId") == server {
+				events = append(events, M{"id": row["id"], "action": row["action"], "actor": row["actor_name"], "target": row["target_name"], "createdAt": Num(row, "created_at"), "reason": Str(details, "reason")})
+			}
+		}
+		return M{"events": events}
+	}))
+}
 func (s *Service) Tags(uid, server string) []M {
 	s.Member(s.DB, uid, server)
 	tags := []M{}

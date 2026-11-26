@@ -1,0 +1,17 @@
+.message-finder, .message-finder form { display: grid; gap: 12px; }
+.message-finder form label { display: flex; gap: 8px; }
+.message-finder form label:first-child { flex-direction: column; }
+.message-finder-modes { display: flex; flex-wrap: wrap; gap: 8px; }
+.message-finder-modes [aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+.message-finder ul { display: grid; gap: 6px; list-style: none; padding: 0; margin: 0; max-height: 45dvh; overflow: auto; }
+.message-finder li { display: flex; align-items: center; gap: 8px; border-block-end: 1px solid var(--line); }
+.message-finder-result { display: block; flex: 1; text-align: start; padding: 10px; color: inherit; min-width: 0; overflow-wrap: anywhere; }
+.message-finder-result:hover, .message-finder-result:focus-visible { background: var(--theme-tint, #8883); }
+.message-finder-result span { display: block; margin-block-start: 4px; }
+.message-finder-result small { color: var(--muted); }
+.reply-preview { max-width: 100%; text-align: start; }
+.reply-preview:hover { text-decoration: underline; }
+[data-highlight=true] .message { background: var(--theme-tint, #8580f124); outline: 1px solid var(--accent); outline-offset: -1px; }
+.gaming-voice .stream-last-frame { flex: 1 1 0; min-height: 0; width: 100%; object-fit: contain; background: #0b0d12; }
+.gaming-voice .stream-last-frame[hidden], .gaming-voice video[hidden] { display: none; }
+.stream-no-audio button { margin-inline-start: 8px; }

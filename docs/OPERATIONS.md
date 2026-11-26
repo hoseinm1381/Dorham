@@ -53,6 +53,12 @@ For PostgreSQL use `pg_dump` with connection credentials supplied securely throu
 
 ## SQLite restore
 
+To verify a database snapshot without changing live data, run
+`python3 scripts/verify-database-backup.py /private/snapshot.sqlite.gz --receipt /var/lib/dorham-ops/last-verified-restore.json`.
+The check restores a temporary copy, checks SQLite integrity, and reads the Dorham schema and core tables. The receipt covers the database.
+Dorham Monitor shows the age of that receipt alongside the Go backend's chat response and aggregate call quality samples.
+Set `DORHAM_RESTORE_RECEIPT` on the API if the receipt is stored elsewhere. Give the API read access to the receipt and keep the backup private.
+
 1. Stop the server and confirm it is offline. Keep an independent copy of its current data first.
 2. Run `npm run db:restore -- <verified-backup.sqlite>`.
 3. The restore command checks database integrity and schema identity. It refuses a live instance lock, creates a new database from the backup, and preserves existing database/WAL/SHM files with timestamped names.

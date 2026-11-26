@@ -10,6 +10,7 @@ vi.mock('livekit-client', async importOriginal => {
     localParticipant = {
       createTracks: vi.fn(async () => [{ mute: async () => {}, setProcessor: async () => {}, stop: () => {}, mediaStreamTrack: { enabled: false } }]),
       publishTrack: vi.fn(async (track: any) => { this.microphone = track; }),
+      unpublishTrack: vi.fn(async () => {}),
       setMicrophoneEnabled: vi.fn(async () => {}), getTrackPublication: () => this.microphone ? { audioTrack: this.microphone } : undefined, setScreenShareEnabled: vi.fn(async () => {})
     };
     connect = vi.fn(async () => { this.state = 'connected'; }); startAudio = async () => {};
@@ -181,22 +182,29 @@ it('a positive volume gesture resumes playback and reapplies the latest amplific
   } finally { await f.transport.destroy(); }
 });
 it('passes selected-window audio to native Chrome and publishes screen audio independently from the microphone', async () => {
-  const f = fixture(), video = { kind: 'video', stop: vi.fn(), getSettings: () => ({ displaySurface: 'window' }) }, audio = { kind: 'audio', stop: vi.fn(), getSettings: () => ({ channelCount: 2 }) };
+  const f = fixture();
+  const videoClone = { kind: 'video', stop: vi.fn() }, audioClone = { kind: 'audio', stop: vi.fn() };
+  const video = { kind: 'video', readyState: 'live', clone: vi.fn(() => videoClone), stop: vi.fn(), getSettings: () => ({ displaySurface: 'window' }) };
+  const audio = { kind: 'audio', clone: vi.fn(() => audioClone), stop: vi.fn(), getSettings: () => ({ channelCount: 2 }) };
   try {
     const participant = (f.transport as any).media.localParticipant, published = new Map();
     participant.permissions = { canPublish: true, canPublishSources: [] };
     const capture = vi.fn(async (options: any) => ({ getVideoTracks: () => [video], getAudioTracks: () => options.audio ? [audio] : [], getTracks: () => options.audio ? [video, audio] : [video] }));
     (navigator.mediaDevices as any).getDisplayMedia = capture;
-    participant.publishTrack = vi.fn(async (track: any, options: any) => { published.set(options.source, { audioTrack: track.kind === 'audio' ? track : undefined }); });
+    participant.publishTrack = vi.fn(async (track: any, options: any) => {
+      const publication = { audioTrack: track.kind === 'audio' ? track : undefined };
+      published.set(options.source, publication);
+      return publication;
+    });
     participant.getTrackPublication = (source: string) => published.get(source);
     (f.socket as any).timeout = () => ({ emit: (_name: string, body: any, reply: any) => reply(null, { ok: true, data: { lease: { id: 'screen', policyRevision: 1, includeAudio: Boolean(body.includeAudio), maxFrameRate: 30 } } }) });
     await f.transport.startShare('720p15', { includeAudio: true });
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({ windowAudio: 'window', systemAudio: 'include', audio: expect.objectContaining({ restrictOwnAudio: true }), selfBrowserSurface: 'exclude' }));
-    expect(participant.publishTrack).toHaveBeenCalledWith(video, expect.objectContaining({
+    expect(participant.publishTrack).toHaveBeenCalledWith(videoClone, expect.objectContaining({
       source: 'screen_share', videoCodec: 'vp8', simulcast: false, backupCodec: false,
       screenShareEncoding: { maxBitrate: 402000, maxFramerate: 15, priority: 'low' },
     }));
-    expect(participant.publishTrack).toHaveBeenCalledWith(audio, expect.objectContaining({ source: 'screen_share_audio', forceStereo: true, audioPreset: { maxBitrate: 48000 } }));
+    expect(participant.publishTrack).toHaveBeenCalledWith(audioClone, expect.objectContaining({ source: 'screen_share_audio', forceStereo: true, audioPreset: { maxBitrate: 48000 } }));
     await f.transport.stopShare(); expect(video.stop).toHaveBeenCalled(); expect(audio.stop).toHaveBeenCalled();
     published.clear(); await f.transport.startShare('720p15', { includeAudio: false });
     expect(capture).toHaveBeenLastCalledWith(expect.objectContaining({ windowAudio: 'exclude', systemAudio: 'exclude', audio: false }));
@@ -205,7 +213,7 @@ it('passes selected-window audio to native Chrome and publishes screen audio ind
     vi.stubGlobal('RTCRtpSender', {});
     vi.mocked(supportsVP9).mockReturnValueOnce(true);
     await f.transport.startShare('720p15', { includeAudio: false });
-    expect(participant.publishTrack).toHaveBeenLastCalledWith(video, expect.objectContaining({
+    expect(participant.publishTrack).toHaveBeenLastCalledWith(videoClone, expect.objectContaining({
       videoCodec: 'vp9', simulcast: false, backupCodec: false,
     }));
   } finally { await f.transport.destroy(); }
@@ -221,7 +229,8 @@ it('a stream sound gesture resumes suspended playback while mute never wakes it'
   } finally { await f.transport.destroy(); }
 });
 it('stops native window tracks and releases the lease if publication fails', async () => {
-  const f = fixture(), stop = vi.fn(), video = { kind: 'video', stop, getSettings: () => ({ displaySurface: 'window' }) };
+  const f = fixture(), stop = vi.fn(), stopClone = vi.fn();
+  const video = { kind: 'video', readyState: 'live', stop, clone: () => ({ stop: stopClone }), getSettings: () => ({ displaySurface: 'window' }) };
   try {
     (navigator.mediaDevices as any).getDisplayMedia = async () => ({ getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] });
     const participant = (f.transport as any).media.localParticipant;
@@ -229,7 +238,7 @@ it('stops native window tracks and releases the lease if publication fails', asy
     participant.publishTrack.mockRejectedValueOnce(new Error('SFU publication failed'));
     (f.socket as any).timeout = () => ({ emit: (_name: string, _body: any, reply: any) => reply(null, { ok: true, data: { lease: { id: 'screen', includeAudio: true, policyRevision: 1 } } }) });
     await expect(f.transport.startShare('720p15', { includeAudio: true })).rejects.toThrow('SFU publication failed');
-    expect(stop).toHaveBeenCalled(); expect((f.transport as any).lease).toBeNull();
+    expect(stop).toHaveBeenCalled(); expect(stopClone).toHaveBeenCalled(); expect((f.transport as any).lease).toBeNull();
     expect(participant.setScreenShareEnabled).toHaveBeenCalledWith(false);
   } finally { await f.transport.destroy(); }
 });

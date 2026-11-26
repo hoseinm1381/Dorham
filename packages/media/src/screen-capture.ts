@@ -2,7 +2,7 @@
 // Use the browser API directly so a window request never silently becomes
 // a request for all system sound when the user chooses a window.
 export type ScreenCaptureSettings = { width: number; height: number; fps: number };
-type Selection = { sourceName: string; audioScope: 'none' | 'application' | 'system' };
+type Selection = { sourceName: string; audioScope: 'none' | 'application' | 'system'; includesDorhamAudio?: boolean };
 export type NativeVideo = { stream: MediaStream; stop(): void; setQuality?(settings: ScreenCaptureSettings): Promise<void>; selection: Selection & { surface: 'window' | 'monitor' } };
 type CaptureAudio = { id: string; pcm?: Uint8Array; error?: string };
 type DesktopCapture = { systemAudioSafe?: boolean; captureNativeVideo?(settings: ScreenCaptureSettings, audio: boolean): Promise<NativeVideo>; chooseCompatibilitySource?(): Promise<{ sourceId: string } | null>; getCaptureSelection?(): Promise<Selection | null>; startCaptureAudio?(): Promise<Selection & { id: string }>; stopCaptureAudio?(id: string): void; acknowledgeCaptureAudio?(id: string): void; onCaptureAudio?(listener: (packet: CaptureAudio) => void): () => void };
@@ -12,11 +12,19 @@ const desktop = () => (globalThis as typeof globalThis & { desktop?: DesktopCapt
 export function setDesktopCaptureCapabilities(value: { sharedAudio: boolean; compatibilityVideo?: boolean }) { desktopSound = value.sharedAudio === true; compatibilityVideo = value.compatibilityVideo === true; }
 export function sharedSoundSupported() { return !desktop() || (desktopSound ?? Boolean(desktop()?.systemAudioSafe)); }
 const cleanups = new WeakMap<MediaStream, () => void>(), selections = new WeakMap<MediaStream, Selection & { surface?: string }>();
+const audioCleanups = new WeakMap<MediaStream, () => void>();
 const qualityUpdates = new WeakMap<MediaStream, NonNullable<NativeVideo['setQuality']>>();
 export async function updateCaptureQuality(stream: MediaStream | null, settings: ScreenCaptureSettings) {
   if (stream) await qualityUpdates.get(stream)?.(settings);
 }
 export function stopScreenCapture(stream?: MediaStream | null) { if (!stream) return; cleanups.get(stream)?.(); cleanups.delete(stream); stream.getTracks().forEach(track => track.stop()); }
+export function stopScreenAudio(stream: MediaStream) {
+  audioCleanups.get(stream)?.();
+  audioCleanups.delete(stream);
+  for (const audio of stream.getAudioTracks()) { audio.stop(); stream.removeTrack(audio); }
+  const selection = selections.get(stream);
+  if (selection) selections.set(stream, { ...selection, audioScope: 'none', includesDorhamAudio: false });
+}
 async function captureCompatibilityScreen(choose: NonNullable<DesktopCapture['chooseCompatibilitySource']>, settings: ScreenCaptureSettings) {
   const selection = await choose();
   if (!selection) throw new DOMException('Screen sharing was cancelled.', 'NotAllowedError');
@@ -38,8 +46,16 @@ export async function captureScreen(settings: ScreenCaptureSettings, includeAudi
     : await navigator.mediaDevices.getDisplayMedia(options));
   if (!nativeVideo && !native?.getCaptureSelection) return stream;
   let context: AudioContext | undefined, node: AudioWorkletNode | undefined, remove: (() => void) | undefined, id: string | undefined, closed = false;
-  const close = () => { if (closed) return; closed = true; nativeVideo?.stop(); remove?.(); if (id) native?.stopCaptureAudio?.(id); node?.port.postMessage('destroy'); node?.port.close(); node?.disconnect(); void context?.close().catch(() => {}); };
+  const stopAudio = () => {
+    remove?.(); remove = undefined;
+    if (id) native?.stopCaptureAudio?.(id);
+    id = undefined;
+    node?.port.postMessage('destroy'); node?.port.close(); node?.disconnect(); node = undefined;
+    void context?.close().catch(() => {}); context = undefined;
+  };
+  const close = () => { if (closed) return; closed = true; stopScreenAudio(stream); nativeVideo?.stop(); };
   cleanups.set(stream, close);
+  audioCleanups.set(stream, stopAudio);
   if (nativeVideo?.setQuality) qualityUpdates.set(stream, nativeVideo.setQuality);
   const video = stream.getVideoTracks()[0];
   video?.addEventListener('ended', close, { once: true });

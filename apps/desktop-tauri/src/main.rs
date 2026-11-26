@@ -221,7 +221,11 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
                     store.change(|settings| settings.set_secret(value.as_deref()))?;
                     Ok(Value::Null)
                 }
-                DesktopRequest::GetOverlay => Ok(json!(store.value.voice_overlay)),
+                DesktopRequest::GetOverlay => {
+                    let mut value = json!(store.value.voice_overlay);
+                    value["monitors"] = json!(overlay::monitor_names(&window));
+                    Ok(value)
+                }
                 DesktopRequest::ConfigureOverlay(preferences) => {
                     store.change(|settings| {
                         settings.voice_overlay = preferences;
@@ -233,7 +237,9 @@ fn desktop_command(window: WebviewWindow, request: DesktopRequest) -> Result<Val
                     window
                         .emit_to(MAIN, "desktop-overlay-preferences", preferences)
                         .map_err(|_| "Could not update overlay preferences")?;
-                    Ok(json!(preferences))
+                    let mut value = json!(preferences);
+                    value["monitors"] = json!(overlay::monitor_names(&window));
+                    Ok(value)
                 }
                 DesktopRequest::GetPendingStorage => Ok(json!(store.pending_storage())),
                 DesktopRequest::FinishMigration => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type SetStateAction } from 'react';
-import { DraftStore, type Draft } from './drafts';
+import { composeDraft, DraftStore, type Draft } from './drafts';
 import { request } from './api';
 let store: DraftStore;
 export function draftStore() { if (!store) { let storage: Storage | undefined; try { storage = localStorage; } catch { /* unavailable */ } store = new DraftStore(storage); } return store; }
@@ -14,12 +14,25 @@ export function useConversationDraftActions(account: string | undefined, origin:
       cache.set(key, { ...old, [field]: result });
       clearTimeout(timer.current); timer.current = setTimeout(() => cache.flush(), 250);
     }
-    return { read: () => cache.get(key), setDraft: (v: SetStateAction<string>) => update('text', v), setReply: (v: SetStateAction<Draft['reply']>) => update('reply', v), setEditing: (v: SetStateAction<Draft['editing']>) => update('editing', v), setPendingFiles: (v: SetStateAction<Draft['files']>) => update('files', v), setPendingSend: (v: SetStateAction<Draft['pending']>) => update('pending', v) };
+    return {
+      read: () => composeDraft(cache.get(key)),
+      setDraft: (text: string) => { if (cache.get(key).editing) update('editText', text); else update('text', text); },
+      setReply: (v: Draft['reply']) => update('reply', v),
+      setEditing: (editing: Draft['editing']) => {
+        const old = cache.get(key);
+        if (editing && old.pending) return;
+        cache.set(key, { ...old, editing, editText: editing?.content, pending: old.editing ? null : old.pending });
+        cache.flush();
+      },
+      setPendingFiles: (v: SetStateAction<Draft['files']>) => update('files', v),
+      setPendingSend: (v: SetStateAction<Draft['pending']>) => update('pending', v)
+    };
   }, [cache, key]);
 }
 export function useConversationDraft(account: string | undefined, origin: string, conversation: string | null) {
   const cache = draftStore(), key = cache.key(account || '', origin, conversation || '');
-  const value = useSyncExternalStore(useCallback(notify => cache.subscribe(key, notify), [cache, key]), useCallback(() => cache.get(key), [cache, key]));
+  const stored = useSyncExternalStore(useCallback(notify => cache.subscribe(key, notify), [cache, key]), useCallback(() => cache.get(key), [cache, key]));
+  const value = composeDraft(stored);
   const actions = useConversationDraftActions(account, origin, conversation);
   useEffect(() => {
     if (!account || !conversation) return;

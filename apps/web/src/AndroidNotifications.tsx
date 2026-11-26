@@ -4,7 +4,15 @@ import { request, serverUrl } from './api';
 import { currentLanguage, t } from './i18n';
 import { Bell, BellOff } from 'lucide-react';
 type NotificationState = { enabled: boolean; configured: boolean; permission: boolean; batteryExempt: boolean; deviceId: string; accountId: string | null; connection: string; sessionGeneration: number };
-const notifications = registerPlugin<{ info(): Promise<NotificationState>; configure(options: Record<string, unknown>): Promise<NotificationState>; consumeLink(): Promise<{ url: string | null }>; batterySettings(): Promise<void>; connectionNoticeSettings(): Promise<void>; getChatMutes(options: { origin: string; accountId: string }): Promise<{ mutedConversationIds: string[] }>; setChatMuted(options: { origin: string; accountId: string; conversationId: string; muted: boolean }): Promise<{ mutedConversationIds: string[] }> }>('DorhamNotifications');
+const connectionMessages: Record<string, string> = {
+  connected: 'Notification connection is active.',
+  'sign-in': 'Open Dorham and sign in to reconnect notifications.',
+  permission: 'Allow notifications in Android settings to receive alerts.',
+  'open-app': 'Open Dorham to restart background notifications.',
+  reconnecting: 'Notifications are reconnecting to Dorham.',
+  stopped: 'The background notification connection is stopped.'
+};
+const notifications = registerPlugin<{ info(): Promise<NotificationState>; configure(options: Record<string, unknown>): Promise<NotificationState>; consumeLink(): Promise<{ url: string | null }>; batterySettings(): Promise<void>; connectionNoticeSettings(): Promise<void>; testAlert(): Promise<void>; getChatMutes(options: { origin: string; accountId: string }): Promise<{ mutedConversationIds: string[] }>; setChatMuted(options: { origin: string; accountId: string; conversationId: string; muted: boolean }): Promise<{ mutedConversationIds: string[] }> }>('DorhamNotifications');
 let muteScope = '', mutedChats = new Set<string>();
 const foregroundAlerts = new Map<string, number>();
 function cacheMutes(account: string, values: string[]) {
@@ -65,6 +73,7 @@ export function useAndroidNotifications(userId: string | undefined, language: st
   }, [userId, language]);
 }
 export function AndroidNotificationSettings() {
+  const [test, setTest] = useState('');
   const [state, setState] = useState<NotificationState | null>(null), [busy, setBusy] = useState(false), [failed, setFailed] = useState(false);
   useEffect(() => {
     if (Capacitor.getPlatform() !== 'android') return;
@@ -82,5 +91,5 @@ export function AndroidNotificationSettings() {
       else { setState(await notifications.configure({ enabled: false })); await request('/notifications/devices', {}, 'DELETE'); }
     } catch { setFailed(true); } finally { setBusy(false); }
   };
-  return <section><h3>{t('Android notifications')}</h3><label className="check-row"><input type="checkbox" checked={state.enabled} disabled={busy} onChange={event => { void change(event.target.checked); }}/>{t('Notify me about direct messages and mentions')}</label><p>{t('Receive private alerts directly from your Dorham server, without Google services or another app.')}</p><p>{t('Each chat can alert once every 15 seconds. Muted chats stay muted until you unmute them from the chat header.')}</p><p>{t('Android requires a background connection notice. You can hide only that category and keep Messages and mentions enabled.')}</p><button type="button" className="secondary" onClick={() => { void notifications.connectionNoticeSettings().catch(() => setFailed(true)); }}>{t('Hide connection notice')}</button><p>{t('Android Force stop pauses alerts until you reopen Dorham.')}</p>{state.enabled && <><p role="status">{t(state.connection === 'connected' ? 'Notification connection is active.' : state.connection === 'sign-in' ? 'Open Dorham and sign in to reconnect notifications.' : 'Notification connection is starting or reconnecting.')}</p>{!state.permission && <p>{t('Allow notifications in Android settings to receive alerts.')}</p>}{!state.batteryExempt && <><p>{t('Allow background battery use for timely alerts while your screen is off.')}</p><button type="button" disabled={busy} onClick={() => { void notifications.batterySettings().catch(() => setFailed(true)); }}>{t('Allow background notifications')}</button></>}</>}{failed && <p role="alert">{t('Notification settings could not be saved. Check your connection and try again.')}</p>}</section>;
+  return <section><h3>{t('Android notifications')}</h3><label className="check-row"><input type="checkbox" checked={state.enabled} disabled={busy} onChange={event => { void change(event.target.checked); }}/>{t('Notify me about direct messages and mentions')}</label><p>{t('Receive private alerts directly from your Dorham server, without Google services or another app.')}</p><p>{t('Each chat can alert once every 15 seconds. Muted chats stay muted until you unmute them from the chat header.')}</p><p>{t('Android requires a background connection notice. You can hide only that category and keep Messages and mentions enabled.')}</p><button type="button" className="secondary" onClick={() => { void notifications.connectionNoticeSettings().catch(() => setFailed(true)); }}>{t('Hide connection notice')}</button><p>{t('Android Force stop pauses alerts until you reopen Dorham.')}</p>{state.enabled && <><p role="status">{t(!state.permission ? connectionMessages.permission : connectionMessages[state.connection] || 'Notification connection is starting.')}</p><button type="button" className="secondary" disabled={!state.permission} onClick={() => { void notifications.testAlert().then(() => setTest('Test notification sent to this device.')).catch(cause => setTest(cause.message)); }}>{t('Send test notification')}</button>{test && <p role="status">{t(test)}</p>}{!state.batteryExempt && <><p>{t('Allow background battery use for timely alerts while your screen is off.')}</p><button type="button" disabled={busy} onClick={() => { void notifications.batterySettings().catch(() => setFailed(true)); }}>{t('Allow background notifications')}</button></>}</>}{failed && <p role="alert">{t('Notification settings could not be saved. Check your connection and try again.')}</p>}</section>;
 }

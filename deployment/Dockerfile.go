@@ -1,6 +1,6 @@
 # Build context: contents of artifacts/server-<version>-go (Linux x86-64).
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 libwebp7 libwebpdemux2 libwebpmux3 && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg python3 libwebp7 libwebpdemux2 libwebpmux3 && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home dorham
 WORKDIR /app
 COPY --chown=dorham:dorham . .

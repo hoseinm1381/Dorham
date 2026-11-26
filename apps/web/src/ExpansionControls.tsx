@@ -1,30 +1,39 @@
 import { AttachmentCard } from './AttachmentMedia';
 import { compressPicture } from './image-compression';
 import { t as tr, formatFileSize } from './i18n';
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type RefObject } from 'react';
 import type { Attachment, Channel, PublicUser, Tag, VoiceRoom } from '@dorham/contracts';
 import { cancelAttachmentUpload, request, uploadAttachment, type UploadDraft } from './api';
-import { readLocal, storageScope } from './offline-storage';
+import { readLocal, saveUpload, storageScope, subscribeStorage } from './offline-storage';
 import { FolderOpen, Images, Paperclip, X } from 'lucide-react';
 import { UploadAllowance } from './UploadAllowance';
 import './android-attachments.css';
 
 const fileTypes = '.pdf,.txt,.md,.csv,.json,.zip,.7z,.png,.jpg,.jpeg,.webp,.gif,.mp3,.ogg,.wav,.mp4,.webm';
 type AndroidPicker = { open: boolean; close: () => void; setPending: (pending: boolean) => void };
+const activeUploads = new Map<string, { scope: string; controller: AbortController; draft: UploadDraft; uploaded: number }>();
+const announceUpload = (key: string) => window.dispatchEvent(new CustomEvent('dorham-upload-state', { detail: key }));
+subscribeStorage(() => {
+  const current = storageScope();
+  for (const upload of activeUploads.values()) {
+    if (upload.scope !== current) upload.controller.abort();
+  }
+});
 
-export function FileComposer({ conversationId, files, change, error, androidPicker }: { conversationId: string; files: Attachment[]; change: (files: Attachment[] | ((previous: Attachment[]) => Attachment[])) => void; error: (e: unknown) => void; androidPicker?: AndroidPicker }) {
+export function FileComposer({ conversationId, files, change, error, androidPicker, fileInput, setPending, sharedImage, clearSharedImage }: { conversationId: string; files: Attachment[]; change: (files: Attachment[] | ((previous: Attachment[]) => Attachment[])) => void; error: (e: unknown) => void; androidPicker?: AndroidPicker; fileInput?: RefObject<HTMLInputElement | null>; setPending?: (pending: boolean) => void; sharedImage?: File; clearSharedImage?: () => void }) {
   const [busy, setBusy] = useState(false), [abort, setAbort] = useState<AbortController | null>(null), [picture, setPicture] = useState<{ original: File; compressed: File; url: string } | null>(null);
   const [usageRevision, setUsageRevision] = useState(0);
   const [paused, setPaused] = useState<UploadDraft>();
   const [uploaded, setUploaded] = useState(0);
   const [queued, setQueued] = useState(0);
   const scope = storageScope();
+  const transferKey = JSON.stringify([scope, conversationId]);
   const element = useRef<HTMLDivElement>(null), locked = useRef(false), mounted = useRef(true);
   const dialog = useRef<HTMLDialogElement>(null), galleryInput = useRef<HTMLInputElement>(null), filesInput = useRef<HTMLInputElement>(null);
   const queue = useRef<{ items: File[]; gallery: boolean }>({ items: [], gallery: false });
-  const setPending = androidPicker?.setPending;
+  const updatePending = setPending ?? androidPicker?.setPending;
   const pending = busy || Boolean(picture || paused) || queued > 0;
-  useEffect(() => { setPending?.(pending); return () => setPending?.(false); }, [pending, setPending]);
+  useEffect(() => { updatePending?.(pending); return () => updatePending?.(false); }, [pending, updatePending]);
   useEffect(() => {
     const sheet = dialog.current;
     if (!sheet || !androidPicker?.open) return;
@@ -33,7 +42,23 @@ export function FileComposer({ conversationId, files, change, error, androidPick
   }, [androidPicker?.open]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { let active = true; void readLocal<UploadDraft>(scope, 'upload', conversationId).then(draft => { if (active && !locked.current) setPaused(draft); }); return () => { active = false; }; }, [scope, conversationId]);
-  useEffect(() => () => { abort?.abort(); }, [abort]);
+  useEffect(() => {
+    const adopt = () => {
+      const running = activeUploads.get(transferKey);
+      setAbort(running?.controller ?? null);
+      setBusy(Boolean(running));
+      if (running) { setPaused(running.draft); setUploaded(running.uploaded); }
+      else void readLocal<UploadDraft>(scope, 'upload', conversationId).then(draft => {
+        if (mounted.current && !activeUploads.has(transferKey)) setPaused(draft);
+      });
+    };
+    const listener = (event: Event) => {
+      if ((event as CustomEvent).detail === transferKey) adopt();
+    };
+    if (activeUploads.has(transferKey)) adopt();
+    window.addEventListener('dorham-upload-state', listener);
+    return () => window.removeEventListener('dorham-upload-state', listener);
+  }, [transferKey, scope, conversationId]);
   useEffect(() => () => { if (picture) URL.revokeObjectURL(picture.url); }, [picture]);
   useEffect(() => {
     const composer = element.current?.closest('.composer-wrap');
@@ -47,35 +72,43 @@ export function FileComposer({ conversationId, files, change, error, androidPick
     composer?.addEventListener('paste', paste); return () => composer?.removeEventListener('paste', paste);
   });
   function transfer(file: File, draft: UploadDraft = { file, requestId: crypto.randomUUID() }) {
+    if (storageScope() !== scope || activeUploads.has(transferKey)) return;
     const controller = new AbortController(); setAbort(controller); setBusy(true); setPicture(null);
     locked.current = true; setPaused(draft);
+    const upload = { scope, controller, draft, uploaded: 0 };
+    activeUploads.set(transferKey, upload);
+    announceUpload(transferKey);
     let advance = false;
-    void uploadAttachment(file, conversationId, controller.signal, setUploaded, draft).then(value => {
+    void uploadAttachment(file, conversationId, controller.signal, bytes => {
+      upload.uploaded = bytes; announceUpload(transferKey);
+    }, draft).then(value => {
+      if (storageScope() !== scope) return;
       advance = true;
-      if (mounted.current) { change(previous => [...previous, value]); setPaused(undefined); setUploaded(0); }
+      change(previous => previous.length < 4 && !previous.some(file => file.id === value.id) ? [...previous, value] : previous);
     }).catch(async cause => {
-      if (!mounted.current) return;
+      if (storageScope() !== scope) return;
       if (cause.status === 410 || draft.reserved && !draft.reserved.resumable) {
-        await cancelAttachmentUpload(conversationId, draft).catch(() => {}); setPaused(undefined);
-        advance = true;
+        await cancelAttachmentUpload(conversationId, draft).catch(() => {});
+        const restart = { file, requestId: crypto.randomUUID() };
+        await saveUpload(scope, conversationId, restart).catch(() => {});
       }
       if (!controller.signal.aborted) error(cause);
     }).finally(() => {
+      activeUploads.delete(transferKey);
       locked.current = false;
-      if (!mounted.current) return;
-      setBusy(false); setAbort(null); setUsageRevision(value => value + 1);
-      if (advance) void nextAndroidFile();
+      announceUpload(transferKey);
+      if (mounted.current) { setBusy(false); setAbort(null); setUploaded(0); setUsageRevision(value => value + 1); }
+      if (advance && storageScope() === scope) void nextAndroidFile();
     });
   }
   async function nextAndroidFile() {
     const file = queue.current.items.shift();
-    setQueued(queue.current.items.length);
+    if (mounted.current) setQueued(queue.current.items.length);
     if (!file) return;
     locked.current = true;
-    setBusy(true);
-    setPending?.(true);
+    if (mounted.current) { setBusy(true); updatePending?.(true); }
     const upload = queue.current.gallery ? await compressPicture(file).catch(() => null) || file : file;
-    if (mounted.current) transfer(upload);
+    if (storageScope() === scope) transfer(upload);
   }
   function selectAndroidFiles(input: HTMLInputElement, gallery: boolean) {
     const picked = [...(input.files || [])];
@@ -103,7 +136,12 @@ export function FileComposer({ conversationId, files, change, error, androidPick
     try { const compressed = await compressPicture(file); if (!mounted.current) return; if (compressed) { setPicture({ original: file, compressed, url: URL.createObjectURL(compressed) }); setBusy(false); } else transfer(file); }
     catch { if (mounted.current) transfer(file); }
   }
-  return <div className="file-composer" ref={element}><div className="upload-tools">{!androidPicker && <label className="upload-attach" title={tr('Attach file')}><Paperclip size={16}/><span className="upload-label">{tr('Attach file')}</span><input type="file" disabled={busy || Boolean(picture || paused) || files.length >= 4} accept={fileTypes} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void choose(file); }}/></label>}{busy && abort && <button type="button" className="secondary" onClick={() => abort.abort()}>{tr('Pause upload')}</button>}<UploadAllowance revision={usageRevision}/></div>
+  function attachSharedImage() {
+    if (!sharedImage || pending || files.length >= 4) return;
+    clearSharedImage?.();
+    void choose(sharedImage);
+  }
+  return <div className="file-composer" ref={element}>{sharedImage && <div className="upload-tools"><button type="button" className="secondary" disabled={pending || files.length >= 4} onClick={attachSharedImage}>{tr('Attach shared photo')}</button><button type="button" className="icon-button" aria-label={tr('Dismiss shared photo')} onClick={clearSharedImage}><X size={16}/></button></div>}<div className="upload-tools">{!androidPicker && <label className="upload-attach" title={tr('Attach file')}><Paperclip size={16}/><span className="upload-label">{tr('Attach file')}</span><input ref={fileInput} type="file" disabled={busy || Boolean(picture || paused) || files.length >= 4} accept={fileTypes} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void choose(file); }}/></label>}{busy && abort && <button type="button" className="secondary" onClick={() => abort.abort()}>{tr('Pause upload')}</button>}<UploadAllowance revision={usageRevision}/></div>
     {androidPicker && <>
       <input ref={galleryInput} type="file" hidden multiple accept="image/*,video/*" onChange={e => selectAndroidFiles(e.currentTarget, true)}/>
       <input ref={filesInput} type="file" hidden multiple accept={fileTypes} onChange={e => selectAndroidFiles(e.currentTarget, false)}/>

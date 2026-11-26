@@ -81,7 +81,7 @@ export function SettingsDialog<Id extends string>({
           {groups.map(group => <div className="settings-group" key={group.label}>
             <h3>{t(group.label)}</h3>
             {group.sections.map(({ id, label, icon: Icon }) => <button key={id} type="button" data-section={id} role="tab"
-              id={`${idPrefix}-${id}`} aria-controls={`${idPrefix}-panel`} aria-selected={active.id === id}
+              id={`${idPrefix}-${id}`} aria-controls={`${idPrefix}-panel`} aria-selected={active.id === id} tabIndex={active.id === id ? 0 : -1}
               onClick={() => {
                 setSelected(id);
                 if (mobile()) requestAnimationFrame(() => content.current?.querySelector<HTMLElement>('h3')?.focus());

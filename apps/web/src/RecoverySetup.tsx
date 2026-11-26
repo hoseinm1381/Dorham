@@ -2,6 +2,7 @@ import { SignedInPasswordReset } from './SignedInPasswordReset';
 import { useEffect, useRef, useState } from 'react';
 import { request, serverUrl } from './api';
 import { t } from './i18n';
+import { storageScope } from './offline-storage';
 
 // Sensitive plaintext is held in this tab's memory only, until acknowledged.
 let issued: { account: string; origin: string; codes: string[] } | null = null;
@@ -19,17 +20,42 @@ export function PasswordResetGuide() {
 export function RecoverySetup({ account, username, error }: { account: string; username: string; error: (e: unknown) => void }) {
   const [open, setOpen] = useState(false), [codes, setCodes] = useState(() => issued?.account === account && issued.origin === serverUrl() ? issued.codes : []);
   const [password, setPassword] = useState(''), [busy, setBusy] = useState(false), [hasCodes, setHasCodes] = useState(false), [saved, setSaved] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { let live = true; void request('/auth/recovery').then(value => { if (live) { setHasCodes(value.codesRemaining > 0); setOpen(Boolean(value.prompt || codes.length)); } }).catch(error); return () => { live = false; issued = null; }; }, [account]);
   useEffect(() => { if (!open) return; const node = dialog.current!, previous = document.activeElement as HTMLElement | null; node.showModal(); return () => { node.close(); if (previous?.isConnected) previous.focus(); }; }, [open]);
-  async function dismiss() {
-    setBusy(true); try { await request('/auth/recovery-acknowledge', {}); issued = null; setCodes([]); setOpen(false); } catch (e) { error(e); } finally { setBusy(false); }
+  useEffect(() => {
+    if (!dismissed) return;
+    const scope = storageScope(), controller = new AbortController();
+    let inFlight = false, done = false;
+    const acknowledge = async () => {
+      if (inFlight || done || controller.signal.aborted || storageScope() !== scope || navigator.onLine === false) return;
+      inFlight = true;
+      try {
+        await request('/auth/recovery-acknowledge', {}, 'POST', true, { signal: controller.signal });
+        done = true;
+        clearInterval(retry);
+      } catch { /* The account page stays usable while acknowledgment is retried. */ }
+      finally { inFlight = false; }
+    };
+    const retry = setInterval(() => { if (document.visibilityState === 'visible') void acknowledge(); }, 8000);
+    void acknowledge();
+    const online = () => { void acknowledge(); };
+    window.addEventListener('online', online);
+    return () => { controller.abort(); clearInterval(retry); window.removeEventListener('online', online); };
+  }, [account, dismissed]);
+  function dismiss() {
+    issued = null;
+    setCodes([]);
+    setPassword('');
+    setOpen(false);
+    setDismissed(true);
   }
   if (!open) return null;
-  return <dialog ref={dialog} className="modal-backdrop" aria-label={t('Protect your account')} onCancel={e => { e.preventDefault(); }}><div className="modal recovery-setup">
+  return <dialog ref={dialog} className="modal-backdrop" aria-label={t('Protect your account')} onCancel={e => { e.preventDefault(); if (!busy) dismiss(); }}><div className="modal recovery-setup">
     <header><div><span className="eyebrow">{t('ACCOUNT RECOVERY')}</span><h2>{t('Protect your account')}</h2></div></header>
     <p>{t('Save your recovery codes now so you can reset a forgotten password. This reminder appears once for your account.')}</p>
-    {codes.length ? <><p>{t('Each code works once. Save this set before continuing.')}</p><pre className="recovery-code-grid" dir="ltr">{codes.join('\n')}</pre><button className="secondary" disabled={busy} onClick={() => { const blob = new Blob([`Dorham recovery codes\nUsername: ${username}\n${codes.join('\n')}\nKeep private. Each code works once.`], { type: 'text/plain' }), url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'dorham-recovery-codes.txt'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}>{t('Save recovery codes')}</button><label className="check-row"><input type="checkbox" checked={saved} onChange={e => setSaved(e.target.checked)}/>{t('I have saved my recovery codes')}</label><button className="primary" disabled={!saved || busy} onClick={() => { void dismiss(); }}>{t('Continue to Dorham')}</button></> : <><p>{t(hasCodes ? 'You already have recovery codes. Keep them if you saved them; generating a new set invalidates the previous set.' : 'Confirm your current password to generate a private set of recovery codes.')}</p><SignedInPasswordReset error={error}/><form onSubmit={e => { e.preventDefault(); setBusy(true); void request('/auth/recovery-codes', { password }).then(value => { issued = null; setCodes(value.codes); setPassword(''); }).catch(error).finally(() => setBusy(false)); }}><label>{t('Current password')}<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)}/></label><button className="primary" disabled={busy || !password}>{t('Generate recovery codes')}</button></form><button className="secondary" disabled={busy} onClick={() => { void dismiss(); }}>{t(hasCodes ? 'I already saved my codes' : 'Set up later in Account settings')}</button></>}
+    {codes.length ? <><p>{t('Each code works once. Save this set before continuing.')}</p><pre className="recovery-code-grid" dir="ltr">{codes.join('\n')}</pre><button className="secondary" disabled={busy} onClick={() => { const blob = new Blob([`Dorham recovery codes\nUsername: ${username}\n${codes.join('\n')}\nKeep private. Each code works once.`], { type: 'text/plain' }), url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'dorham-recovery-codes.txt'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}>{t('Save recovery codes')}</button><label className="check-row"><input type="checkbox" checked={saved} onChange={e => setSaved(e.target.checked)}/>{t('I have saved my recovery codes')}</label><button className="primary" disabled={!saved || busy} onClick={() => { void dismiss(); }}>{t('Continue to Dorham')}</button><button className="secondary" type="button" disabled={busy} onClick={dismiss}>{t('Set up later in Account settings')}</button></> : <><p>{t(hasCodes ? 'You already have recovery codes. Keep them if you saved them; generating a new set invalidates the previous set.' : 'Confirm your current password to generate a private set of recovery codes.')}</p><SignedInPasswordReset error={error}/><form onSubmit={e => { e.preventDefault(); setBusy(true); void request('/auth/recovery-codes', { password }).then(value => { issued = null; setCodes(value.codes); setPassword(''); }).catch(error).finally(() => setBusy(false)); }}><label>{t('Current password')}<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)}/></label><button className="primary" disabled={busy || !password}>{t('Generate recovery codes')}</button></form><button className="secondary" disabled={busy} onClick={() => { void dismiss(); }}>{t(hasCodes ? 'I already saved my codes' : 'Set up later in Account settings')}</button></>}
     <PasswordResetGuide/>
   </div></dialog>;
 }

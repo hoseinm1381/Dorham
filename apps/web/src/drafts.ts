@@ -1,6 +1,10 @@
 import type { Attachment, Message } from '@dorham/contracts';
-export type PendingSend = { requestId: string; content: string; replyTo: string | null; attachmentIds: string[]; createdAt: number; status: 'sending' | 'failed'; error?: string; editMessageId?: string; tts?: boolean };
-export type Draft = { text: string; reply: Message | null; editing: Message | null; files: Attachment[]; pending: PendingSend | null; updatedAt: number };
+export type SpeechTarget = { channelId: string; epoch: string; sentAt: number };
+export type PendingSend = { requestId: string; content: string; replyTo: string | null; attachmentIds: string[]; createdAt: number; status: 'sending' | 'failed'; error?: string; editMessageId?: string; tts?: boolean; speech?: SpeechTarget };
+export type Draft = { text: string; reply: Message | null; editing: Message | null; editText?: string; files: Attachment[]; pending: PendingSend | null; updatedAt: number };
+export function composeDraft(draft: Draft): Draft {
+  return draft.editing ? { ...draft, text: draft.editText ?? '', reply: null, files: [] } : draft;
+}
 const storageKey = 'dorham-drafts-v1', maximumBytes = 1048576, maximumAge = 7 * 86400000;
 const empty = (): Draft => ({ text: '', reply: null, editing: null, files: [], pending: null, updatedAt: Date.now() });
 function target(id: string | undefined, conversationId: string): Message | null {
@@ -16,8 +20,13 @@ export class DraftStore {
         const conversation = key.split('\n').at(-1)!;
         const files = Array.isArray(value.files) ? value.files.filter((f: Attachment) => f && typeof f.id === 'string' && typeof f.name === 'string' && Number(f.expiresAt) > Date.now()).slice(0, 4) : [];
         const p = value.pending;
+        const voice = p?.speech;
+        const speech = voice && typeof voice.channelId === 'string' && voice.channelId.length <= 80 &&
+          typeof voice.epoch === 'string' && voice.epoch.length <= 80 && Number.isSafeInteger(voice.sentAt) ? voice : undefined;
         const pending: PendingSend | null = p && typeof p.requestId === 'string' && p.requestId.length <= 100 && typeof p.content === 'string' && p.content.length <= 4000 && Number.isFinite(p.createdAt) && p.createdAt <= Date.now() + 60000 && (p.replyTo === null || typeof p.replyTo === 'string') && Array.isArray(p.attachmentIds) && p.attachmentIds.length <= 4 && p.attachmentIds.every((id: unknown) => typeof id === 'string' && id.length <= 100) ? { requestId: p.requestId, content: p.content, tts: p.tts === true, createdAt: p.createdAt, replyTo: p.replyTo, attachmentIds: p.attachmentIds, editMessageId: typeof p.editMessageId === 'string' ? p.editMessageId : undefined, status: 'failed', error: 'Delivery was interrupted. Retry explicitly.' } : null;
-        this.data.set(key, { text: value.text, files, reply: target(value.replyId, conversation), editing: target(value.editingId, conversation), pending, updatedAt: value.updatedAt });
+        const editing = target(value.editingId, conversation);
+        const editText = typeof value.editText === 'string' ? value.editText.slice(0, 4000) : undefined;
+        this.data.set(key, { text: editing && editText === undefined ? '' : value.text, files, reply: target(value.replyId, conversation), editing, editText: editing ? editText ?? value.text : undefined, pending: pending && { ...pending, speech }, updatedAt: value.updatedAt });
       }
     } catch { /* Storage is optional; malformed records are never sent. */ }
   }
@@ -34,7 +43,7 @@ export class DraftStore {
   flush() {
     try {
       const records = [...this.data].filter(([, v]) => Date.now() - v.updatedAt <= maximumAge && (v.text || v.files.length || v.reply || v.editing || v.pending)).sort((a, b) => a[1].updatedAt - b[1].updatedAt).slice(-200)
-        .map(([key, v]) => [key, { text: v.text, replyId: v.reply?.id, editingId: v.editing?.id, files: v.files, pending: v.pending, updatedAt: v.updatedAt }]);
+        .map(([key, v]) => [key, { text: v.text, replyId: v.reply?.id, editingId: v.editing?.id, editText: v.editText, files: v.files, pending: v.pending, updatedAt: v.updatedAt }]);
       let serialized = JSON.stringify(records);
       while (records.length && new TextEncoder().encode(serialized).length > maximumBytes) { const removed = records.shift()!; this.data.delete(removed[0] as string); serialized = JSON.stringify(records); }
       if (records.length) this.storage?.setItem(storageKey, serialized); else this.storage?.removeItem(storageKey);

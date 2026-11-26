@@ -30,22 +30,26 @@ type peer struct {
 	probing                                           bool
 }
 type Hub struct {
-	a              *App
-	server         *sio.Server
-	mu             sync.RWMutex
-	peers          map[string]*peer
-	capacity       instanceCapacity
-	voiceResumeKey string
-	detachedVoice  map[string]detachedVoice
-	voiceRefresh   revisionFlight
-	closed         bool
-	workWG         sync.WaitGroup
-	loopWG         sync.WaitGroup
-	metricMu       sync.Mutex
-	actions        map[string]M
-	disconnects    map[string]int64
-	maintenance    M
-	directCalls    directCalls
+	a                 *App
+	server            *sio.Server
+	mu                sync.RWMutex
+	peers             map[string]*peer
+	capacity          instanceCapacity
+	voiceResumeKey    string
+	detachedVoice     map[string]detachedVoice
+	voiceRefresh      revisionFlight
+	closed            bool
+	workWG            sync.WaitGroup
+	loopWG            sync.WaitGroup
+	metricMu          sync.Mutex
+	chatDelivery      [len(chatDeliveryBuckets)]int64
+	connectionSamples int64
+	concealmentTotal  int64
+	freezeTotal       int64
+	actions           map[string]M
+	disconnects       map[string]int64
+	maintenance       M
+	directCalls       directCalls
 }
 
 func NewHub(a *App) *Hub {
@@ -473,7 +477,7 @@ func (h *Hub) handlers(p *peer) {
 	})
 	h.handle(p, "message:send", func(raw M) any {
 		b := CoreMessageBody(raw)
-		return s.Send(p.uid, Str(b, "requestId"), Str(b, "conversationId"), Str(b, "content"), coreMessageReply(b), Strings(b["attachmentIds"]), Bool(b, "tts"))
+		return s.Send(p.uid, Str(b, "requestId"), Str(b, "conversationId"), Str(b, "content"), coreMessageReply(b), Strings(b["attachmentIds"]), Bool(b, "tts"), Obj(b["speech"]))
 	})
 	h.handle(p, "game:watch", func(b M) any {
 		id := VString(b, "id", 1, 80, false)

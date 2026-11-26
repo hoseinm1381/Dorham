@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import { t } from './i18n';
 import './appearance.css';
 
-const palettes = { default: 'Dorham', ocean: 'Ocean', forest: 'Forest', ember: 'Ember', dusk: 'Dusk' } as const;
+const palettes = { default: 'Dorham', ocean: 'Ocean', forest: 'Forest', ember: 'Ember', dusk: 'Dusk', contrast: 'High contrast' } as const;
 type Palette = keyof typeof palettes;
 const key = 'dorham.palette';
 
@@ -15,10 +15,17 @@ function storedPalette(): Palette {
   return 'default';
 }
 
-export function initializeAppearance() { document.documentElement.dataset.palette = storedPalette(); }
+const textKey = 'dorham.large-text';
+function largeText() { try { return localStorage.getItem(textKey) === 'true'; } catch { return false; } }
+
+export function initializeAppearance() {
+  document.documentElement.dataset.palette = storedPalette();
+  document.documentElement.dataset.largeText = String(largeText());
+}
 
 export function AppearanceSettings() {
   const [active, setActive] = useState(storedPalette);
+  const [large, setLarge] = useState(largeText);
   return <fieldset className="app-palettes">
     <legend>{t('Color palette')}</legend>
     <div className="palette-grid">
@@ -39,5 +46,10 @@ export function AppearanceSettings() {
         <span className="palette-name">{t(palettes[id])}<span className="palette-selected" aria-hidden="true"><Check size={13}/></span></span>
       </label>)}
     </div>
+    <label className="check-row"><input type="checkbox" checked={large} onChange={event => {
+      const value = event.target.checked;
+      setLarge(value); document.documentElement.dataset.largeText = String(value);
+      try { localStorage.setItem(textKey, String(value)); } catch { /* Use the setting for this session. */ }
+    }}/>{t('Larger chat text')}</label>
   </fieldset>;
 }

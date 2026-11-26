@@ -332,7 +332,7 @@ func (d *DB) Backup(destination string) {
 	d.Run("VACUUM INTO ?", destination)
 }
 func (d *DB) migrate() {
-	for version := 2; version <= 19; version++ {
+	for version := 2; version <= 20; version++ {
 		v := version
 		d.Tx(func(tx *DB) any {
 			if tx.One("SELECT version FROM schema_migrations WHERE version=?", v) != nil {

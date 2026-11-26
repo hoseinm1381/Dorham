@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 type UpdateInfo = { current: string; latest: string; available: boolean };
-type UpdateStatus = { state: string; progress: number };
-export type WindowsUpdateState = UpdateInfo & { phase: string; progress: number };
+type UpdateStatus = { state: string; progress: number; installFailed?: boolean };
+export type WindowsUpdateState = UpdateInfo & { phase: string; progress: number; installFailed?: boolean };
 const android = registerPlugin<{ check(): Promise<UpdateInfo>; install(): Promise<{started: boolean}>; prepare(options: { automatic: boolean }): Promise<unknown>; cancel(): Promise<void>; getStatus(): Promise<UpdateStatus>; addListener(name: string, listener: (status: UpdateStatus) => void): Promise<{ remove(): Promise<void> }> }>('DorhamUpdates');
 export const releasePlatform = typeof window !== 'undefined' && window.desktop ? 'windows' : Capacitor.getPlatform() === 'android' ? 'android' : null;
 const Releases = createContext<{ info: UpdateInfo | null; status: UpdateStatus; refresh(): Promise<void>; install(): Promise<void>; prepare(): Promise<void>; cancel(): Promise<void> }>({ info: null, status: { state: 'idle', progress: 0 }, refresh: async () => {}, install: async () => {}, prepare: async () => {}, cancel: async () => {} });
@@ -27,7 +27,7 @@ export function ReleaseProvider({ children }: { children: ReactNode }) {
     const update = (value: WindowsUpdateState) => {
       received = true;
       setInfo(value);
-      setStatus({ state: value.phase, progress: value.progress });
+      setStatus({ state: value.phase, progress: value.progress, installFailed: value.installFailed });
     };
     const unsubscribe = desktop.onUpdateState(update);
     void desktop.getUpdateState?.().then(value => { if (!disposed && !received) update(value); }).catch(() => {});

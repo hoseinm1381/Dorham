@@ -12,7 +12,7 @@ export function InviteBranding() {
     }).catch(() => {});
     return () => controller.abort();
   }, [code]);
-  if (!branding?.banner && !branding?.blurb) return null;
+  if (!branding?.name) return null;
   return <section className="feature-announcement" dir="auto">
     {branding.banner && <img className="profile-banner-image" src={assetUrl(branding.banner)} alt=""/>}
     <strong>{branding.name}</strong>{branding.blurb && <p>{branding.blurb}</p>}

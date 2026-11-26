@@ -37,6 +37,8 @@ const gaming = process.argv.includes('--gaming');
 const ttsLoading = process.argv.includes('--tts-loading');
 if (ttsLoading) { process.env.DORHAM_TTS_FIXTURE = '1'; process.env.DORHAM_TTS_LOADING_FIXTURE = '1'; }
 const web108 = process.argv.includes("--web108");
+const messageReliability = process.argv.includes('--message-reliability');
+if (messageReliability) process.env.DORHAM_BACKEND_ENGINE = 'go';
 const sessionProof = process.argv.includes("--session-proof");
 const mentions = process.argv.includes('--mentions');
 const manaReplay = process.argv.includes('--mana-tts-replay');
@@ -53,6 +55,19 @@ const muteSounds = process.argv.includes('--mute-sounds');
 const microphoneGain = process.argv.includes('--microphone-gain');
 const microphoneSelftest = process.argv.includes('--microphone-selftest');
 const screenSharing = process.argv.includes('--screen-sharing');
+const screenRelay = process.argv.includes('--screen-relay');
+if (screenRelay) {
+  if (!process.env.DORHAM_TEST_LIVEKIT_EXE || !process.env.SCREEN_RELAY_FFMPEG || !process.env.DORHAM_GO_FIXTURE_BINARY) {
+    throw Error('Set DORHAM_TEST_LIVEKIT_EXE, SCREEN_RELAY_FFMPEG and DORHAM_GO_FIXTURE_BINARY for the local test.');
+  }
+  Object.assign(process.env, {
+    DORHAM_SCREEN_RELAY_TEST: '1', DORHAM_BACKEND_ENGINE: 'go', DORHAM_SFU_ISOLATED_TEST: '1',
+    HOST: '127.0.0.1', MEDIA_TRANSPORT: 'livekit', LIVEKIT_URL: 'ws://127.0.0.1:37900',
+    LIVEKIT_API_URL: 'http://127.0.0.1:37900', LIVEKIT_API_KEY: 'dorhamweaktest',
+    LIVEKIT_API_SECRET: 'fixture-screen-relay-local-only-do-not-use-in-production',
+    SCREEN_RELAY_SLOTS: '1', MUSIC_ENABLED: 'false', MEDIA_ADMISSION_SECRET: '',
+  });
+}
 const communityUpdate = process.argv.includes('--community-update');
 const voiceVolume = process.argv.includes('--voice-volume');
 const memberInvites = process.argv.includes('--member-invites');
@@ -79,7 +94,7 @@ const baseline = await usage();
 if (baseline.totalMiB > (gamingCapacity ? 4200 : 2800)) { console.error(`Browser tests were not started: existing Chrome/Edge uses ${baseline.totalMiB} MiB. Keeping headroom below the user's 4 GiB limit.`); process.exit(2); }
 const fixtureNonce = randomUUID(), fixtureManifest = path.resolve('.tools', `browser-fixture-${fixtureNonce}.json`);
 process.env.DORHAM_FIXTURE_NONCE = fixtureNonce; process.env.DORHAM_FIXTURE_MANIFEST = fixtureManifest;
-const child = spawn(process.execPath, nativePublic ? ['node_modules/tsx/dist/cli.mjs', 'tests/native-public-release.ts', path.resolve(nativePublic)] : desktopLoading ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-tts-loading.ts', path.resolve(desktopLoading)] : desktopScreen ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-screen-sharing.ts', path.resolve(desktopScreen)] : desktopRelease ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-release.ts', path.resolve(desktopRelease)] : desktopAudio ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-audio-refresh.ts', path.resolve(desktopAudio)] : desktop ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-smoke.ts', path.resolve(desktop)] : ['node_modules/@playwright/test/cli.js', 'test', sessionProof ? 'tests/browser/web-session-proof.spec.ts' : web108 ? 'tests/browser/web108.spec.ts' : ttsLoading ? 'tests/browser/tts-loading.spec.ts' : mentions ? 'tests/browser/mentions.spec.ts' : manaReplay ? 'tests/browser/mana-tts-replay.spec.ts' : ttsPerformance ? 'tests/browser/tts-performance.spec.ts' : voiceTts ? 'tests/browser/voice-tts.spec.ts' : features ? 'tests/browser/features.spec.ts' : emojis ? 'tests/browser/emojis.spec.ts' : releases ? 'tests/browser/releases.spec.ts' : audioRefresh ? 'tests/browser/audio-refresh.spec.ts' : communityUpdate ? 'tests/browser/community-update.spec.ts' : windowsSfu ? 'tests/browser/windows-sfu.spec.ts' : rtcLocal ? 'tests/browser/rtc-local.spec.ts' : gamingCapacity ? 'tests/browser/gaming-capacity.spec.ts' : screenSharing ? 'tests/browser/screen-sharing.spec.ts' : arcade ? 'tests/browser/arcade.spec.ts' : chess ? 'tests/browser/chess.spec.ts' : muteSounds ? 'tests/browser/mute-sounds.spec.ts' : microphoneSelftest ? 'tests/browser/microphone-selftest.spec.ts' : microphoneGain ? 'tests/browser/microphone-gain.spec.ts' : memberInvites ? 'tests/browser/member-invites.spec.ts' : moderation ? 'tests/browser/moderation.spec.ts' : voiceVolume ? 'tests/browser/voice-volume.spec.ts' : gamingAudio ? 'tests/browser/gaming-audio.spec.ts' : gaming ? 'tests/browser/gaming.spec.ts' : hostedSfu ? 'tests/browser/sfu.spec.ts' : relay ? 'tests/browser/relay.spec.ts' : capacity ? 'tests/browser/capacity.spec.ts' : clipboard ? 'tests/browser/clipboard.spec.ts' : audioControls ? 'tests/browser/audio-controls.spec.ts' : persian ? 'tests/browser/persian-ping.spec.ts' : mediaUi ? 'tests/browser/media-layout.spec.ts' : expansion ? 'tests/browser/expansion.spec.ts' : 'tests/browser/application.spec.ts', ...filter], { stdio: 'inherit', windowsHide: true, env: { ...process.env, DORHAM_SFU_BASE_URL: hostedSfu ? process.env.DORHAM_SFU_BASE_URL : '', DORHAM_RELAY_TEST: relay ? '1' : '0', DORHAM_RELAY_BASE_URL: hostedRelay ? process.env.DORHAM_RELAY_BASE_URL : '' } });
+const child = spawn(process.execPath, nativePublic ? ['node_modules/tsx/dist/cli.mjs', 'tests/native-public-release.ts', path.resolve(nativePublic)] : desktopLoading ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-tts-loading.ts', path.resolve(desktopLoading)] : desktopScreen ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-screen-sharing.ts', path.resolve(desktopScreen)] : desktopRelease ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-release.ts', path.resolve(desktopRelease)] : desktopAudio ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-audio-refresh.ts', path.resolve(desktopAudio)] : desktop ? ['node_modules/tsx/dist/cli.mjs', 'tests/desktop-smoke.ts', path.resolve(desktop)] : ['node_modules/@playwright/test/cli.js', 'test', messageReliability ? 'tests/browser/message-reliability.spec.ts' : sessionProof ? 'tests/browser/web-session-proof.spec.ts' : web108 ? 'tests/browser/web108.spec.ts' : ttsLoading ? 'tests/browser/tts-loading.spec.ts' : mentions ? 'tests/browser/mentions.spec.ts' : manaReplay ? 'tests/browser/mana-tts-replay.spec.ts' : ttsPerformance ? 'tests/browser/tts-performance.spec.ts' : voiceTts ? 'tests/browser/voice-tts.spec.ts' : features ? 'tests/browser/features.spec.ts' : emojis ? 'tests/browser/emojis.spec.ts' : releases ? 'tests/browser/releases.spec.ts' : audioRefresh ? 'tests/browser/audio-refresh.spec.ts' : communityUpdate ? 'tests/browser/community-update.spec.ts' : windowsSfu ? 'tests/browser/windows-sfu.spec.ts' : rtcLocal ? 'tests/browser/rtc-local.spec.ts' : gamingCapacity ? 'tests/browser/gaming-capacity.spec.ts' : screenRelay ? 'tests/browser/screen-relay.spec.ts' : screenSharing ? 'tests/browser/screen-sharing.spec.ts' : arcade ? 'tests/browser/arcade.spec.ts' : chess ? 'tests/browser/chess.spec.ts' : muteSounds ? 'tests/browser/mute-sounds.spec.ts' : microphoneSelftest ? 'tests/browser/microphone-selftest.spec.ts' : microphoneGain ? 'tests/browser/microphone-gain.spec.ts' : memberInvites ? 'tests/browser/member-invites.spec.ts' : moderation ? 'tests/browser/moderation.spec.ts' : voiceVolume ? 'tests/browser/voice-volume.spec.ts' : gamingAudio ? 'tests/browser/gaming-audio.spec.ts' : gaming ? 'tests/browser/gaming.spec.ts' : hostedSfu ? 'tests/browser/sfu.spec.ts' : relay ? 'tests/browser/relay.spec.ts' : capacity ? 'tests/browser/capacity.spec.ts' : clipboard ? 'tests/browser/clipboard.spec.ts' : audioControls ? 'tests/browser/audio-controls.spec.ts' : persian ? 'tests/browser/persian-ping.spec.ts' : mediaUi ? 'tests/browser/media-layout.spec.ts' : expansion ? 'tests/browser/expansion.spec.ts' : 'tests/browser/application.spec.ts', ...filter], { stdio: 'inherit', windowsHide: true, env: { ...process.env, DORHAM_SFU_BASE_URL: hostedSfu ? process.env.DORHAM_SFU_BASE_URL : '', DORHAM_RELAY_TEST: relay ? '1' : '0', DORHAM_RELAY_BASE_URL: hostedRelay ? process.env.DORHAM_RELAY_BASE_URL : '' } });
 const known = new Set(); const samples = [baseline]; let polling = false, limited = false;
 async function stopOwnBrowsers() {
   // End the entire test tree, including the fixture API, before its parent exits.
@@ -107,7 +122,7 @@ try {
   const target = path.resolve(owned.dataDir), temp = path.resolve(os.tmpdir());
   if (owned.nonce !== fixtureNonce || path.dirname(target) !== temp || !path.basename(target).startsWith('dorham-browser-')) throw new Error('Fixture ownership verification failed');
   // This directory was created for this nonce, never a shared/live data folder.
-  if (process.env.DORHAM_SFU_ISOLATED_TEST === '1') {
+  if (process.env.DORHAM_SFU_ISOLATED_TEST === '1' && !screenRelay) {
     const { default: Database } = await import('better-sqlite3'); const { RoomServiceClient } = await import('livekit-server-sdk');
     const db = new Database(path.join(target, 'dorham.sqlite'), { readonly: true, fileMustExist: true });
     const rooms = db.prepare("SELECT id FROM channels WHERE kind='voice'").all(); db.close();

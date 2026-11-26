@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(state);
         getBridge().getWebView().setWebChromeClient(new DorhamWebChromeClient(getBridge()));
         captureLink(getIntent());
+        captureShare(getIntent());
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {
                 getBridge().getWebView().evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){d.dispatchEvent(new Event('cancel',{cancelable:true}));return true;}const e=new Event('dorham-back',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented;})()", result -> { if (!"true".equals(result)) moveTaskToBack(true); });
@@ -21,7 +22,14 @@ public class MainActivity extends BridgeActivity {
     }
     private boolean sameNotificationOrigin(android.net.Uri value) { String saved = getSharedPreferences("dorham.notifications", 0).getString("origin", ""); android.net.Uri expected = android.net.Uri.parse(saved); return value.getUserInfo() == null && value.getHost() != null && value.getHost().equals(expected.getHost()) && value.getPort() == expected.getPort(); }
     private void captureLink(android.content.Intent intent) { if (intent == null || intent.getData() == null) return; android.net.Uri uri = intent.getData(); if ("https".equals(uri.getScheme()) && ("dorhamapp.ir".equals(uri.getHost()) || sameNotificationOrigin(uri)) && "/".equals(uri.getPath())) { DorhamNotificationsPlugin.Companion.setPendingUrl(uri.toString()); if (getBridge() != null) getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('dorham-open-link'))", null); } }
-    @Override protected void onNewIntent(android.content.Intent intent) { super.onNewIntent(intent); setIntent(intent); captureLink(intent); }
+    private void captureShare(android.content.Intent intent) {
+        if (intent == null || !android.content.Intent.ACTION_SEND.equals(intent.getAction()) || intent.getType() == null || !intent.getType().startsWith("image/")) return;
+        android.net.Uri uri = intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM);
+        if (uri == null || !"content".equals(uri.getScheme())) return;
+        DorhamFilesPlugin.Companion.setPendingImage(uri);
+        if (getBridge() != null) getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('dorham-share-image'))", null);
+    }
+    @Override protected void onNewIntent(android.content.Intent intent) { super.onNewIntent(intent); setIntent(intent); captureLink(intent); captureShare(intent); }
     @Override public void onWindowFocusChanged(boolean focused) { super.onWindowFocusChanged(focused); if (focused && getBridge() != null) getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('dorham-app-state'))", null); }
     @Override public void onPause() { DorhamNotificationService.Companion.setAppVisible(false); if (DorhamMediaPlugin.Companion.getActive() != null) DorhamMediaPlugin.Companion.getActive().visibility(false); super.onPause(); }
     @Override public void onResume() { super.onResume(); DorhamNotificationService.Companion.setAppVisible(true); DorhamNotificationService.Companion.resume(this); if (DorhamMediaPlugin.Companion.getActive() != null) DorhamMediaPlugin.Companion.getActive().visibility(true); if (getBridge() != null) getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('dorham-app-state'))", null); }

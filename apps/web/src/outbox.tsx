@@ -3,8 +3,10 @@ import type { ConversationEvent } from '@dorham/contracts';
 import { request } from './api';
 import { readLocal, storageScope, updateOutbox } from './offline-storage';
 import { t } from './i18n';
+import { confirmMessageDelivery } from './message-delivery';
+import type { SpeechTarget } from './drafts';
 
-export type OutgoingMessage = { conversationId: string; requestId: string; content: string; tts: boolean; replyTo: string | null; attachmentIds: string[]; createdAt: number; state?: 'failed'; error?: string };
+export type OutgoingMessage = { conversationId: string; requestId: string; content: string; tts?: boolean; speech?: SpeechTarget; replyTo: string | null; attachmentIds: string[]; createdAt: number; state?: 'failed'; error?: string };
 const day = 24 * 60 * 60 * 1000;
 const retryStatus = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -68,7 +70,8 @@ export function useOutbox(scope: string, ready: boolean, accepted: (event: Conve
         try {
           const { createdAt: _createdAt, state: _state, error: _error, ...body } = item;
           const [, account] = JSON.parse(scope) as [string, string];
-          const delivery = await request<ConversationEvent>(`/messages?sender=${encodeURIComponent(account)}`, body);
+          const response = await request<unknown>(`/messages?sender=${encodeURIComponent(account)}`, body);
+          const delivery = confirmMessageDelivery(response, item.conversationId, account, item.requestId);
           if (storageScope() !== scope || active.current.scope !== scope) return;
           active.current.accepted(delivery);
           await change(current => current.filter(row => row.requestId !== item.requestId));

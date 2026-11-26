@@ -159,6 +159,14 @@ func (m *Media) synchronizePass() {
 					}
 					continue
 				}
+				if strings.HasPrefix(identity, screenRelayPrefix) {
+					if !m.screenRelay.valid(tx, name, identity) {
+						remove()
+					} else {
+						enforce(true, []int{1})
+					}
+					continue
+				}
 				vm := tx.One("SELECT * FROM voice_members WHERE user_id=? AND epoch=? AND channel_id=? AND heartbeat>=?", uid, epoch, name, Now()-30000)
 				if vm == nil {
 					remove()
@@ -222,6 +230,8 @@ func mediaSourceSet(value any) string {
 	default:
 		for _, n := range Arr(value) {
 			switch S(n) {
+			case "CAMERA", "camera":
+				set[1] = true
 			case "MICROPHONE", "microphone":
 				set[2] = true
 			case "SCREEN_SHARE", "screen_share":
@@ -260,6 +270,15 @@ func (m *Media) registerAdmission() {
 		claims := mediaVerifyJWT(raw, m.a.C.LivekitKey, m.a.C.LivekitSecret)
 		video := Obj(claims["video"])
 		identity := Str(claims, "sub")
+		if strings.HasPrefix(identity, screenRelayPrefix) {
+			sources := Arr(video["canPublishSources"])
+			if !Bool(video, "roomJoin") || !Bool(video, "canPublish") || !Bool(video, "canSubscribe") ||
+				Bool(video, "canPublishData") || Bool(video, "canUpdateOwnMetadata") || len(sources) != 1 ||
+				!mediaSourceIs(sources[0], "camera", 1) || !m.screenRelay.valid(m.a.DB, Str(video, "room"), identity) {
+				denied()
+			}
+			return M{"allowed": true}
+		}
 		if strings.HasPrefix(identity, musicIdentity+":") {
 			room := Str(video, "room")
 			sources := Arr(video["canPublishSources"])

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Capacitor } from '@capacitor/core';
 import type { Attachment } from '@dorham/contracts';
-import { assetUrl, downloadAttachment, request } from './api';
+import { assetUrl, downloadAttachment, openSavedAttachment, request } from './api';
+import { enqueueAndroidDownload, pauseAndroidDownload, useAndroidDownloads } from './android-transfer-queue';
 import { AndroidMediaViewer } from './AndroidMediaViewer';
 import { t as tr, currentLanguage, formatFileSize } from './i18n';
 import { readLocal, saveMedia, storageScope, storageSettings, subscribeStorage } from './offline-storage';
@@ -14,13 +15,16 @@ export function AttachmentCard({ file, conversation, error }: { file: Attachment
   const host = useRef<HTMLDivElement>(null), dialog = useRef<HTMLDialogElement>(null), video = useRef<HTMLVideoElement>(null), retry = useRef(0), lastFailure = useRef(0), returnFocus = useRef<HTMLElement | null>(null);
   const [visible, setVisible] = useState(false), [source, setSource] = useState(''), [failed, setFailed] = useState(false), [expanded, setExpanded] = useState(false), [attempt, setAttempt] = useState(0);
   const [mediaRequested, setMediaRequested] = useState(false);
-  const [progress, setProgress] = useState<number>();
-  const [saveStatus, setSaveStatus] = useState('');
+  const [browserProgress, setBrowserProgress] = useState<number>();
+  const jobs = useAndroidDownloads();
   const [viewerTime, setViewerTime] = useState(0);
   const download = useRef<AbortController>(undefined);
   const dataSaver = useSyncExternalStore(subscribeStorage, () => storageSettings().dataSaver);
   const kind = attachmentKind(file.name);
   const android = Capacitor.getPlatform() === 'android';
+  const job = android ? jobs.find(job => job.id === file.id) : undefined;
+  const progress = job?.state === 'downloading' || job?.state === 'waiting' ? job.progress : browserProgress;
+  const saveStatus = job?.state === 'saved' ? job.gallery ? 'Saved to gallery' : 'File saved' : job?.state === 'paused' ? job.error || 'Download paused. Select Download to resume.' : '';
   const gallery = android && kind !== null;
   const canDownload = file.available && file.expiresAt > Date.now();
   const shouldLoad = visible || (android && expanded);
@@ -44,7 +48,6 @@ export function AttachmentCard({ file, conversation, error }: { file: Attachment
       if (full && file.size > 8 * 1024 * 1024) { if (!abort.signal.aborted) setSource(url.href); return; }
       const response = await fetch(url, { signal: abort.signal, referrerPolicy: 'no-referrer' });
       if (!response.ok) {
-        if (!full && response.status === 415 && !dataSaver) { url.searchParams.delete('thumbnail'); if (!abort.signal.aborted) setSource(url.href); return; }
         throw new Error('Preview unavailable');
       }
       const blob = await response.blob();
@@ -73,17 +76,21 @@ export function AttachmentCard({ file, conversation, error }: { file: Attachment
   }, [expanded]);
   function unavailable() { if (Date.now() - lastFailure.current > 30000) retry.current = 0; lastFailure.current = Date.now(); if (retry.current++ < 1) { setSource(''); setAttempt(n => n + 1); } else setFailed(true); }
   function startDownload(toGallery = false) {
+    if (android) {
+      if (job?.state === 'downloading' || job?.state === 'waiting') pauseAndroidDownload(file.id);
+      else if (canDownload) {
+        try { enqueueAndroidDownload(file.id, file.name, conversation, toGallery); }
+        catch (cause) { error(cause); }
+      }
+      return;
+    }
     if (download.current) { download.current.abort(); return; }
     if (!canDownload) return;
-    setSaveStatus('');
-    const controller = new AbortController(); download.current = controller; setProgress(0);
-    void downloadAttachment(file.id, file.name, conversation, setProgress, controller.signal, toGallery).then(() => {
-      if (gallery && !controller.signal.aborted) setSaveStatus(toGallery ? 'Saved to gallery' : 'File saved');
-    }).catch(cause => {
+    const controller = new AbortController(); download.current = controller; setBrowserProgress(0);
+    void downloadAttachment(file.id, file.name, conversation, setBrowserProgress, controller.signal).catch(cause => {
       if (controller.signal.aborted) return;
-      if (gallery) setSaveStatus(toGallery ? 'Could not save to gallery. Try again.' : cause.message);
       error(cause);
-    }).finally(() => { download.current = undefined; setProgress(undefined); });
+    }).finally(() => { download.current = undefined; setBrowserProgress(undefined); });
   }
   useEffect(() => () => download.current?.abort(), [file.id]);
   function openVideo() {
@@ -105,6 +112,7 @@ export function AttachmentCard({ file, conversation, error }: { file: Attachment
     {progress === undefined ? <>
       <button type="button" className="attachment-download" disabled={!canDownload} onClick={() => startDownload(true)}>{tr('Save to gallery')}</button>
       <button type="button" className="attachment-download" disabled={!canDownload} onClick={() => startDownload()}>{tr('Save as file')}</button>
+      {job?.handle && <button type="button" className="attachment-download" onClick={() => { void openSavedAttachment(job.handle!).catch(error); }}>{tr('Open saved file')}</button>}
     </> : <button type="button" className="attachment-download" onClick={() => startDownload()}>{tr('Pause download')}</button>}
   </div>;
   const progressBar = progress !== undefined && <progress value={progress} max={1} aria-label={tr('Download progress')}/>;
@@ -113,7 +121,7 @@ export function AttachmentCard({ file, conversation, error }: { file: Attachment
     {file.available && kind && <div className="attachment-preview">
       {source && !failed && (kind === 'image' ? <button className="attachment-image-button" aria-label={tr('Open image: {name}', { name: file.name })} onClick={() => setExpanded(true)}><img src={source} crossOrigin="anonymous" referrerPolicy="no-referrer" alt={file.name} loading="lazy" decoding="async" onError={unavailable}/></button> : <video ref={video} src={source} crossOrigin="anonymous" controls playsInline preload="metadata" aria-label={tr('Play video: {name}', { name: file.name })} onError={unavailable} onPlay={videoStarted}/>)}
       {!source && !failed && ((kind === 'video' || dataSaver) && !mediaRequested ? <button type="button" className="secondary" onClick={android && kind === 'video' ? openVideo : () => setMediaRequested(true)}>{tr(kind === 'video' ? android ? 'Open video' : 'Load video' : 'Load image')}</button> : <span className="preview-status">{tr('Loading preview…')}</span>)}
-      {failed && <span className="preview-status">{tr('Preview unavailable. Download the file to view it.')}</span>}
+      {failed && <div className="preview-status">{tr('Preview unavailable. Download the file to view it.')}{!full && <button className="secondary" type="button" onClick={() => setMediaRequested(true)}>{tr('Load original')}</button>}</div>}
     </div>}
     <div className="attachment-caption"><span>{description}{progressBar}{gallery && saveStatus && <small role="status">{tr(saveStatus)}</small>}</span>
       {gallery ? <>{kind === 'video' && source && !failed && <button type="button" className="attachment-download" onClick={openVideo}>{tr('Full screen')}</button>}{galleryActions}</> :

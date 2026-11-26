@@ -48,6 +48,7 @@ type Media struct {
 	verifiedReads, verificationHits    int64
 	images                             *mediaImages
 	speech                             *mediaSpeech
+	screenRelay                        *screenRelayManager
 	sfuMu                              sync.Mutex
 	sfuActive                          bool
 	sfuClosed                          bool
@@ -66,6 +67,7 @@ func NewMedia(a *App) *Media {
 		}
 	}
 	m.speech = newMediaSpeech(m)
+	m.screenRelay = newScreenRelayManager(m)
 	return m
 }
 func (m *Media) RegisterRoutes() {
@@ -85,6 +87,7 @@ func (m *Media) Close() {
 	if pending != nil {
 		<-pending
 	}
+	m.screenRelay.close()
 	m.images.close()
 	m.speech.close()
 	m.scanMu.Lock()

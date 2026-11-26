@@ -54,7 +54,7 @@ export async function prepareBrowserDownload() {
   return folder;
 }
 
-export async function writeBrowserDownload(folder: Directory, name: string, blob: Blob, signal?: AbortSignal) {
+export async function writeBrowserDownload(folder: Directory, name: string, data: Blob | ReadableStream<Uint8Array>, signal?: AbortSignal) {
   const clean = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').slice(0, 180) || 'download';
   const dot = clean.lastIndexOf('.');
   const base = dot > 0 ? clean.slice(0, dot) : clean;
@@ -70,8 +70,18 @@ export async function writeBrowserDownload(folder: Directory, name: string, blob
         if (error.name !== 'NotFoundError') throw error;
         const handle = await folder.getFileHandle(candidate, { create: true });
         const writable = await handle.createWritable();
-        try { signal?.throwIfAborted(); await writable.write(blob); signal?.throwIfAborted(); await writable.close(); }
-        catch (cause) { await writable.abort().catch(() => {}); throw cause; }
+        try {
+          signal?.throwIfAborted();
+          if (data instanceof Blob) {
+            await writable.write(data);
+            signal?.throwIfAborted();
+            await writable.close();
+          } else await data.pipeTo(writable, { signal });
+        } catch (cause) {
+          await writable.abort().catch(() => {});
+          await folder.removeEntry(candidate).catch(() => {});
+          throw cause;
+        }
         return;
       }
     }

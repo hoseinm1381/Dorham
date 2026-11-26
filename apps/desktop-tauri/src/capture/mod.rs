@@ -712,6 +712,7 @@ pub async fn capture_audio_start(window: WebviewWindow) -> Result<Value, String>
         let id = video.id;
         let selection = json!({
             "id": id.to_string(), "sourceName": video.selection.source.name, "audioScope": video.selection.audio_scope,
+            "includesDorhamAudio": video.selection.audio_scope == AudioScope::System && OsVersion::current().build < 20348,
         });
         capture.audio = Some(audio);
         (id, selection, ready)

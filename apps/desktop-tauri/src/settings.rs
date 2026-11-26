@@ -115,11 +115,12 @@ pub struct OverlayPreferences {
     pub position: OverlayPosition,
     pub opacity: u8,
     pub speakers_only: bool,
+    pub monitor: Option<usize>,
 }
 
 impl Default for OverlayPreferences {
     fn default() -> Self {
-        Self { enabled: true, position: OverlayPosition::default(), opacity: 60, speakers_only: false }
+        Self { enabled: true, position: OverlayPosition::default(), opacity: 60, speakers_only: false, monitor: None }
     }
 }
 
@@ -130,6 +131,7 @@ struct StoredOverlayPreferences {
     position: OverlayPosition,
     opacity: Option<u8>,
     speakers_only: bool,
+    monitor: Option<usize>,
 }
 
 impl From<StoredOverlayPreferences> for OverlayPreferences {
@@ -139,6 +141,7 @@ impl From<StoredOverlayPreferences> for OverlayPreferences {
             position: value.position,
             opacity: value.opacity.unwrap_or(60).clamp(10, 100),
             speakers_only: value.speakers_only,
+            monitor: value.monitor.filter(|index| *index < 32),
         }
     }
 }

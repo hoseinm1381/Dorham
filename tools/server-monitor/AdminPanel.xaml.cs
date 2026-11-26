@@ -63,6 +63,32 @@ public partial class AdminPanel : UserControl
     }
 
     private async void Refresh(object sender, RoutedEventArgs e) => await Run(async () => { await LoadUsers(); Notice.Text = "User list refreshed."; });
+    private async void ConnectionQuality(object sender, RoutedEventArgs e) => await Run(async () =>
+    {
+        if (client == null) return;
+        using var report = await client.ServiceMetrics();
+        var root = report.RootElement;
+        string chat = "No chat samples yet";
+        string voice = "No voice samples yet";
+        string freezes = "No stream samples yet";
+        if (root.TryGetProperty("realtime", out var realtime) && realtime.TryGetProperty("connectionQuality", out var quality))
+        {
+            if (quality.TryGetProperty("chatP95UpperMs", out var response)) chat = $"Chat server response (95th percentile): up to {response.GetInt64():N0} ms";
+            if (quality.TryGetProperty("concealmentPercent", out var concealment))
+            {
+                voice = $"Voice loss concealed by the client: {concealment.GetDouble():N2}%";
+                if (quality.TryGetProperty("streamFreezes", out var count)) freezes = $"Stream freezes reported since restart: {count.GetInt64():N0}";
+            }
+        }
+        else chat = "Connection quality needs the matching Dorham backend.";
+        string backup = "No verified database restore receipt";
+        if (root.TryGetProperty("backupRestoreVerifiedAt", out var stamp) && stamp.ValueKind == System.Text.Json.JsonValueKind.String && stamp.TryGetDateTimeOffset(out var checkedAt))
+        {
+            var age = DateTimeOffset.UtcNow - checkedAt;
+            backup = $"Last verified database restore: {Math.Max(0, age.TotalHours):N1} hours ago";
+        }
+        Notice.Text = string.Join(Environment.NewLine, chat, voice, freezes, backup);
+    });
     private async Task LoadUsers()
     {
         if (client == null) return;

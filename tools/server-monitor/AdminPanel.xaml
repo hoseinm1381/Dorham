@@ -19,7 +19,7 @@
     <Grid x:Name="UsersView" Grid.Row="1" Visibility="Collapsed">
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
       <DockPanel Margin="0,0,0,10">
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="FeaturesButton" Content="Server tools" Click="OpenFeatures" Margin="0,0,8,0" ToolTip="Feature policies, communities, library, speech, announcements and audit history" /><Button Content="Refresh" Click="Refresh" Margin="0,0,8,0" /><Button Content="Sign out" Click="SignOut" /></StackPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="FeaturesButton" Content="Server tools" Click="OpenFeatures" Margin="0,0,8,0" ToolTip="Feature policies, communities, library, speech, announcements and audit history" /><Button Content="Connection quality" Click="ConnectionQuality" Margin="0,0,8,0" /><Button Content="Refresh" Click="Refresh" Margin="0,0,8,0" /><Button Content="Sign out" Click="SignOut" /></StackPanel>
         <TextBlock x:Name="SessionLabel" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
       </DockPanel>
       <TextBlock x:Name="CapabilityNotice" Grid.Row="1" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,12" />

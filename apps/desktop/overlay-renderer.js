@@ -29,6 +29,11 @@ window.voiceOverlay.onState(value => {
  const list = document.getElementById('members'), wanted = new Set(), fa = value.language === 'fa-IR';
  document.body.style.opacity = String((value.opacity ?? 60) / 100);
  const audience = document.getElementById('audience');
+ const overflow = document.getElementById('overflow');
+ if (overflow) {
+  overflow.hidden = !value.overflow;
+  overflow.textContent = value.overflow ? '+' + new Intl.NumberFormat(fa ? 'fa-IR' : 'en-US').format(value.overflow) + (fa ? ' نفر دیگر' : ' more') : '';
+ }
  audience.hidden = !value.sharing;
  if (value.sharing) {
   const count = value.viewerCount ?? value.members.filter(member => member.watching).length;

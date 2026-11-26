@@ -59,6 +59,8 @@ export class DeferredTransport implements MediaTransport {
   async startShare(quality?: ScreenQuality, options?: { includeAudio?: boolean; bandwidth?: number }) { if (!this.inner?.room) throw new Error('Join a voice channel first.'); await this.inner.startShare(quality, options); }
   async setShareQuality(quality: ScreenQuality, bandwidth?:number) { await this.inner?.setShareQuality(quality,bandwidth); }
   async stopShare() { await this.inner?.stopShare(); }
+  get stopShareAudio() { return this.inner?.stopShareAudio?.bind(this.inner); }
+  async getConnectionQuality() { return this.inner?.getConnectionQuality?.(); }
   async subscribe(share: Share, enabled: boolean) { await this.inner?.subscribe(share, enabled); }
   async getStats() { return await this.inner?.getStats() || {}; }
 }

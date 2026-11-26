@@ -24,6 +24,7 @@ const clearerSettings = { version: '1.5.1', notes: [
 ] };
 const changes: Record<Platform, { version: string; notes: string[] }[]> = {
   Web: [
+    { version: '1.5.7', notes: ['On a weak connection, screen shares can switch to smaller video while keeping voice clear.', 'Find old messages with search, reply links, and pins.', 'Drafts stay put when you edit or cancel a reply. Chats catch up more reliably after a weak connection.', 'Invitations are easier to accept on a phone.'] },
     { version: '1.5.4', notes: [reliableConnections, strongerMicrophone, quickerTalk, louderCues, 'Choose where to save chat attachments in supported browsers.'] },
     clearerSettings,
     organizedSettings,
@@ -38,6 +39,7 @@ const changes: Record<Platform, { version: string; notes: string[] }[]> = {
     { version: '1.4.0', notes: ['Listen to music together in voice and set your own listening volume.'] },
   ],
   Android: [
+    { version: '1.5.7', notes: ['On a weak connection, screen shares can switch to smaller video while keeping voice clear.', 'Save files while you move between chats, and open them from Downloads when they finish.', 'Share a photo from your phone directly to Dorham.', 'Test notifications from Settings and see when background notifications need attention.', 'Find old messages with search, reply links, and pins.'] },
     { version: '1.5.6', notes: ['Save chat photos and videos directly to your gallery or keep them as files.', 'Open photos and videos full screen and pinch or double-tap to zoom.'] },
     { version: '1.5.5', notes: ['Tap + in chat to share photos and videos from Gallery or browse your files. You can pick up to four attachments at once.'] },
     { version: '1.5.4', notes: [louderCues, downloadLocation] },
@@ -54,6 +56,7 @@ const changes: Record<Platform, { version: string; notes: string[] }[]> = {
     { version: '1.4.0', notes: ['Listen to Dorham Music with friends in a voice channel.'] },
   ],
   Windows: [
+    { version: '1.5.7', notes: ['On a weak connection, screen shares can switch to smaller video while keeping voice clear.', 'Choose which display shows your voice overlay.', 'See exactly what sound is shared and stop sharing sound while keeping the video on.', 'Screen sharing can recover after a connection drop when the capture is still available.', 'Find old messages with search, reply links, and pins.'] },
     { version: '1.5.4', notes: [reliableConnections, strongerMicrophone, quickerTalk, louderCues, downloadLocation, 'Keep the game overlay compact by showing only people who are speaking.'] },
     { version: '1.5.3', notes: ["Windows screen sharing uses less memory bandwidth and follows quality changes during a share. You can select a minimized window if its application keeps drawing."] },
     { version: '1.5.2', notes: ['Windows screen sharing uses borderless capture and delivers frames while Dorham is in the background.'] },

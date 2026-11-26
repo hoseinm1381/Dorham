@@ -23,12 +23,28 @@ for (const legacy of ['resources/app.asar','icudtl.dat','chrome_100_percent.pak'
 const bootstrapper = path.resolve(process.env.DORHAM_WEBVIEW_BOOTSTRAPPER || path.join(root,'.tools/webview2/MicrosoftEdgeWebview2Setup.exe'));
 if (!existsSync(bootstrapper)) throw Error('Provide the official signed Microsoft Evergreen WebView2 bootstrapper via DORHAM_WEBVIEW_BOOTSTRAPPER. See installer/README.md.');
 const env = { ...process.env, DORHAM_WEBVIEW_BOOTSTRAPPER: bootstrapper, CSC_IDENTITY_AUTO_DISCOVERY: 'false' };
+const signer = process.env.DORHAM_WINDOWS_SIGNER_THUMBPRINT;
+function signFile(file) {
+  if (!signer) return;
+  const tool = process.env.DORHAM_WINDOWS_SIGNTOOL;
+  const timestamp = process.env.DORHAM_WINDOWS_TIMESTAMP_URL;
+  if (!/^[a-f0-9]{40}$/i.test(signer) || !tool || !existsSync(tool) || !timestamp || !/^https?:\/\//i.test(timestamp)) {
+    throw Error('Configure SignTool, the code-signing certificate thumbprint, and an RFC 3161 timestamp URL.');
+  }
+  for (const args of [['sign', '/sha1', signer, '/fd', 'SHA256', '/tr', timestamp, '/td', 'SHA256', file], ['verify', '/pa', '/tw', file]]) {
+    const result = spawnSync(tool, args, { windowsHide: true, stdio: 'inherit' });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw Error('Windows signing or timestamp verification failed.');
+  }
+}
 if (tauri) {
   for (const name of ['VoiceHotkey.exe', 'CaptureVideo.exe', 'ShareAudio.exe']) {
     if (!existsSync(path.join(payload, 'native', name))) throw Error(`Tauri payload is missing ${name}`);
   }
   env.DORHAM_PROFILE_VALIDATOR = path.join(payload, 'Dorham.exe');
+  for (const name of ['VoiceHotkey.exe', 'CaptureVideo.exe', 'ShareAudio.exe']) signFile(path.join(payload, 'native', name));
 }
+signFile(path.join(payload, 'Dorham.exe'));
 const checkSignature = spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop'; Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1'); $s=Get-AuthenticodeSignature -LiteralPath $env:DORHAM_WEBVIEW_BOOTSTRAPPER; if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation'){throw 'Official WebView2 bootstrapper signature verification failed.'}"],{env,windowsHide:true,encoding:'utf8',timeout:30000});
 if(checkSignature.error)throw checkSignature.error;
 if(checkSignature.status!==0)throw Error(checkSignature.stderr || 'WebView2 bootstrapper signature verification failed.');
@@ -45,6 +61,7 @@ for (const name of ['migration.nsh', 'migrate-electron.ps1', 'export-electron.cj
 const arguments_ = [path.join(root,'node_modules/electron-builder/cli.js'),'--config',path.join(directory,'electron-builder.yml'),'--prepackaged',payload,'--win','nsis','--x64',`--config.directories.output=${output}`,`--config.directories.buildResources=${resources}`,`--config.extraMetadata.version=${version}`];
 const result = spawnSync(process.execPath,arguments_,{cwd:root,env,windowsHide:true,stdio:'inherit'});
 if(result.error)throw result.error;if(result.status!==0)process.exit(result.status??1);
+signFile(path.join(output, `Dorham-${version}-Windows-x64.exe`));
 const hashes={};
 async function inventory(dir,prefix=''){for(const name of(await readdir(dir)).sort()){const relative=prefix+name,file=path.join(dir,name);if((await stat(file)).isDirectory())await inventory(file,relative+'/');else hashes[relative]=createHash('sha256').update(await readFile(file)).digest('hex');}}
 await inventory(payload);

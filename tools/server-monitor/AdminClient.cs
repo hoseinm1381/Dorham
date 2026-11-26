@@ -104,6 +104,7 @@ public sealed class AdminClient : IDisposable
     }
 
     public async Task<List<ManagedUser>> Users() => await RemainingUsers(await UsersPage(0));
+    public Task<JsonDocument> ServiceMetrics() => Send(HttpMethod.Get, "admin/metrics");
 
     public async Task<string?> Act(ManagedUser user, string action, string? password = null, string? confirmation = null)
     {

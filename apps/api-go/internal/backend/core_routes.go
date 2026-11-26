@@ -85,11 +85,20 @@ func coreQueryInt(r *Request, key string, min int64) *int64 {
 // CoreMessageBody is shared by HTTP and Socket.IO. It strips unknown fields in
 // the same way as messageSchema, while preserving omitted versus null replyTo.
 func CoreMessageBody(raw M) M {
-	b := corePick(raw, "conversationId", "content", "tts", "replyTo", "attachmentIds", "requestId")
+	b := corePick(raw, "conversationId", "content", "tts", "replyTo", "attachmentIds", "requestId", "speech")
 	RID(b)
 	coreID(b, "conversationId")
 	coreString(b, "content", 0, 4000, true)
 	VBool(b, "tts", true)
+	if value, ok := b["speech"]; ok {
+		target, valid := value.(map[string]any)
+		Check(valid && target != nil, 400, "VALIDATION", "Invalid speech target.")
+		b["speech"] = corePick(M(target), "channelId", "epoch", "sentAt")
+		target = Obj(b["speech"])
+		coreID(target, "channelId")
+		coreID(target, "epoch")
+		Check(Num(target, "sentAt") > 0, 400, "VALIDATION", "Invalid speech time.")
+	}
 	if reply, ok := b["replyTo"]; ok && reply != nil {
 		coreID(b, "replyTo")
 	}
@@ -248,14 +257,50 @@ func (a *App) registerCore() {
 		return result
 	})
 	a.Route("GET", "/api/v1/conversations/{id}/messages", true, func(r *Request) any {
+		if anchor := r.Query("around"); anchor != "" {
+			return s.MessageContext(r.UID(), r.Param("id"), anchor)
+		}
 		return s.History(r.UID(), r.Param("id"), coreQueryInt(r, "before", 1), coreQueryInt(r, "after", 0))
 	})
+	a.Route("GET", "/api/v1/messages/search", true, func(r *Request) any {
+		a.takeRate("message-search:"+r.UID(), 10, 10000)
+		q := r.Query("q")
+		Check(len(q) <= 512, 400, "VALIDATION", "Search for 2 to 120 characters.")
+		before := int64(9007199254740991)
+		if cursor := coreQueryInt(r, "before", 1); cursor != nil {
+			before = *cursor
+		}
+		return s.SearchMessages(r.UID(), r.Query("conversation"), r.Query("server"), q, r.Query("beforeId"), before)
+	})
+	a.Route("GET", "/api/v1/messages/retention", true, func(r *Request) any {
+		return M{"days": a.C.RetentionDays, "messageLimit": a.C.MaxMessages}
+	})
+	a.Route("GET", "/api/v1/conversations/{id}/pins", true, func(r *Request) any {
+		return s.PinnedMessages(r.UID(), r.Param("id"))
+	})
+	a.Route("PATCH", "/api/v1/conversations/{id}/pins/{messageId}", true, func(r *Request) any {
+		b := corePick(r.Body, "pinned", "requestId")
+		return s.PinMessage(r.UID(), RID(b), r.Param("id"), r.Param("messageId"), VBool(b, "pinned"))
+	})
 	a.Route("POST", "/api/v1/messages", true, func(r *Request) any {
+		started := Now()
 		if account := r.Query("sender"); account != "" {
 			Check(Equal(account, r.UID()), 403, "SESSION_CHANGED", "Your signed-in account changed. Reopen Dorham before sending.")
 		}
 		b := CoreMessageBody(r.Body)
-		return s.Send(r.UID(), S(b["requestId"]), S(b["conversationId"]), S(b["content"]), coreMessageReply(b), serviceStrings(b["attachmentIds"]), B(b["tts"]))
+		event := s.Send(r.UID(), S(b["requestId"]), S(b["conversationId"]), S(b["content"]), coreMessageReply(b), serviceStrings(b["attachmentIds"]), B(b["tts"]), Obj(b["speech"]))
+		if a.Hub != nil {
+			a.Hub.recordChatDelivery(Now() - started)
+		}
+		return event
+	})
+	a.Route("POST", "/api/v1/connection/quality", true, func(r *Request) any {
+		a.takeRate("connection-quality:"+r.UID(), 8, 60000)
+		Check(a.DB.One("SELECT user_id FROM voice_members WHERE user_id=? AND heartbeat>?", r.UID(), Now()-30000) != nil, 403, "FORBIDDEN", "Join voice to report connection quality.")
+		voice := VInt(r.Body, "concealmentBasisPoints", 0, 10000)
+		freezes := VInt(r.Body, "streamFreezes", 0, 1000)
+		a.Hub.recordConnectionQuality(voice, freezes)
+		return M{"success": true}
 	})
 	a.Route("PATCH", "/api/v1/messages/{id}", true, func(r *Request) any {
 		b := corePick(r.Body, "content", "delete", "emoji", "removeReaction", "requestId")
@@ -276,6 +321,9 @@ func (a *App) registerCore() {
 	})
 	a.Route("GET", "/api/v1/voice/{id}", true, func(r *Request) any { return s.Room(r.UID(), r.Param("id")) })
 	a.Route("GET", "/api/v1/servers/{serverId}/members/{userId}/moderation", true, func(r *Request) any { return s.ModerationInfo(r.UID(), r.Param("serverId"), r.Param("userId")) })
+	a.Route("GET", "/api/v1/servers/{serverId}/moderation-log", true, func(r *Request) any {
+		return s.ServerModerationLog(r.UID(), r.Param("serverId"))
+	})
 	a.Route("POST", "/api/v1/servers/{serverId}/members/{userId}/moderate", true, func(r *Request) any {
 		Strict(r.Body, "requestId", "action", "seconds", "reason")
 		b := corePick(r.Body, "requestId", "action", "seconds", "reason")

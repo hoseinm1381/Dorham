@@ -2,11 +2,35 @@ package backend
 
 import (
 	"database/sql"
+	"encoding/json"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
+
+func backupRestoreVerifiedAt() any {
+	path := os.Getenv("DORHAM_RESTORE_RECEIPT")
+	if path == "" {
+		path = "/var/lib/dorham-ops/last-verified-restore.json"
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	var receipt struct {
+		Schema     int       `json:"schema"`
+		VerifiedAt time.Time `json:"verifiedAt"`
+	}
+	if json.NewDecoder(io.LimitReader(file, 4096)).Decode(&receipt) != nil ||
+		receipt.Schema != 1 || receipt.VerifiedAt.IsZero() || receipt.VerifiedAt.After(time.Now()) {
+		return nil
+	}
+	return receipt.VerifiedAt.UTC()
+}
 
 // OfflineBackup shares the existing instance lock but starts no HTTP, game,
 // speech or voice lifecycle. In particular it does not clear voice_members or

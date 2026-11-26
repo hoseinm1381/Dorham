@@ -20,14 +20,17 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.Executors
 
 @CapacitorPlugin(name = "DorhamFiles")
 class DorhamFilesPlugin : Plugin() {
+    companion object { @Volatile var pendingImage: Uri? = null }
     private val worker = Executors.newSingleThreadExecutor()
     private var busy = false
     @Volatile private var cancelled = false
     @Volatile private var activeConnection: HttpURLConnection? = null
+    private val recentSaves = LinkedHashMap<String, Uri>()
     private val preferences get() = context.getSharedPreferences("dorham-downloads", 0)
     private fun folderUri() = preferences.getString("folder", null)?.let(Uri::parse)
     private fun result(folder: String?) = JSObject().put("folder", folder ?: org.json.JSONObject.NULL)
@@ -66,6 +69,48 @@ class DorhamFilesPlugin : Plugin() {
         call.resolve()
     }
     @PluginMethod fun cancel(call: PluginCall) { cancelled = true; activeConnection?.disconnect(); call.resolve() }
+    @PluginMethod fun openSaved(call: PluginCall) {
+        val uri = synchronized(recentSaves) { recentSaves[call.getString("handle")] }
+        if (uri == null) { call.reject("Open the saved file from Gallery or Files."); return }
+        activity.runOnUiThread {
+            try {
+                activity.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                call.resolve()
+            } catch (_: Exception) { call.reject("Open the saved file from Gallery or Files.") }
+        }
+    }
+    @PluginMethod fun consumeSharedImage(call: PluginCall) {
+        val uri = pendingImage
+        pendingImage = null
+        if (uri == null) { call.resolve(JSObject()); return }
+        worker.execute {
+            try {
+                val resolver = context.contentResolver
+                val type = resolver.getType(uri)
+                val extension = when (type) {
+                    "image/png" -> "png"
+                    "image/jpeg" -> "jpg"
+                    "image/webp" -> "webp"
+                    "image/gif" -> "gif"
+                    else -> throw IllegalArgumentException()
+                }
+                val buffer = java.io.ByteArrayOutputStream()
+                resolver.openInputStream(uri)?.use { input ->
+                    val block = ByteArray(65536)
+                    while (true) {
+                        val count = input.read(block)
+                        if (count < 0) break
+                        require(buffer.size() + count <= 8 * 1024 * 1024)
+                        buffer.write(block, 0, count)
+                    }
+                }
+                require(buffer.size() > 0)
+                val encoded = Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP)
+                call.resolve(JSObject().put("data", encoded).put("type", type).put("name", "Shared image.$extension"))
+            } catch (_: Exception) { call.reject("Choose a PNG, JPG, GIF or WebP image up to 8 MiB.") }
+        }
+    }
     private fun progress(value: Int, active: Boolean = true) { notifyListeners("download", JSObject().put("progress", value).put("active", active)) }
     private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
     private fun cache(scope: String) = File(File(context.cacheDir, "dorham-transfers"), digest(scope))
@@ -198,7 +243,12 @@ class DorhamFilesPlugin : Plugin() {
                     check(published == 1) { "Could not publish download" }
                 }
                 trim(directory, maximum)
-                call.resolve(JSObject().put("saved", true))
+                val handle = UUID.randomUUID().toString()
+                synchronized(recentSaves) {
+                    recentSaves[handle] = target
+                    while (recentSaves.size > 20) recentSaves.remove(recentSaves.keys.first())
+                }
+                call.resolve(JSObject().put("saved", true).put("handle", handle))
             } catch (error: Exception) {
                 destination?.let { uri -> runCatching {
                     if (DocumentsContract.isDocumentUri(context, uri)) DocumentsContract.deleteDocument(context.contentResolver, uri)

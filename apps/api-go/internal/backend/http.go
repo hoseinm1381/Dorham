@@ -86,6 +86,7 @@ func NewApp(c Config) *App {
 	})
 	a.DB.EnableRuntimeStorage()
 	a.Media = NewMedia(a)
+	a.Media.screenRelay.start()
 	a.Games = NewGames(a)
 	a.Music = newMusic(a)
 	a.Service.MusicEnabled = a.Music.enabled()
@@ -242,6 +243,9 @@ func (a *App) sourceIP(r *http.Request) string {
 func (a *App) takeRate(key string, max int, window int64) {
 	a.rateMu.Lock()
 	defer a.rateMu.Unlock()
+	if a.rates == nil {
+		a.rates = map[string]windowBudget{}
+	}
 	now := Now()
 	v := a.rates[key]
 	if v.At+window <= now {
@@ -439,7 +443,7 @@ func (a *App) metrics() M {
 	media := a.Media.Metrics()
 	mediaStorage := a.Media.Storage()
 	mediaStorage["io"] = media["attachmentIO"]
-	return M{"uptimeSeconds": time.Since(a.started).Seconds(), "runtime": "go", "version": Version, "databaseIO": a.DB.Metrics(), "memory": M{"rss": processRSS(), "heapUsed": m.HeapAlloc, "heapTotal": m.HeapSys, "external": m.Sys - m.HeapSys, "arrayBuffers": 0}, "go": M{"goroutines": runtime.NumGoroutine(), "gcCycles": m.NumGC}, "tts": media["tts"], "images": media["images"], "sfuControl": media["sfuControl"], "cpu": processCPU(), "eventLoop": M{"meanMs": 0, "p95Ms": 0, "maxMs": 0, "applicable": false}, "realtime": a.Hub.Metrics(), "dataBytes": disk, "storage": a.storageStatus(), "attachments": mediaStorage, "connectedUsers": len(a.Hub.Users()), "accounts": a.DB.One("SELECT COUNT(*) AS count FROM users")["count"], "messages": a.DB.One("SELECT COUNT(*) AS count FROM messages")["count"], "shares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases")["count"], "hdShares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases WHERE quality_height=1080")["count"]}
+	return M{"uptimeSeconds": time.Since(a.started).Seconds(), "runtime": "go", "version": Version, "databaseIO": a.DB.Metrics(), "memory": M{"rss": processRSS(), "heapUsed": m.HeapAlloc, "heapTotal": m.HeapSys, "external": m.Sys - m.HeapSys, "arrayBuffers": 0}, "go": M{"goroutines": runtime.NumGoroutine(), "gcCycles": m.NumGC}, "tts": media["tts"], "images": media["images"], "sfuControl": media["sfuControl"], "cpu": processCPU(), "eventLoop": M{"meanMs": 0, "p95Ms": 0, "maxMs": 0, "applicable": false}, "realtime": a.Hub.Metrics(), "backupRestoreVerifiedAt": backupRestoreVerifiedAt(), "dataBytes": disk, "storage": a.storageStatus(), "attachments": mediaStorage, "connectedUsers": len(a.Hub.Users()), "accounts": a.DB.One("SELECT COUNT(*) AS count FROM users")["count"], "messages": a.DB.One("SELECT COUNT(*) AS count FROM messages")["count"], "shares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases")["count"], "hdShares": a.DB.One("SELECT COUNT(*) AS count FROM share_leases WHERE quality_height=1080")["count"]}
 }
 
 var _ = fmt.Sprint

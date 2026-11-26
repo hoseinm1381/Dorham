@@ -9,6 +9,7 @@ use tauri::{
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_HIDEWINDOW,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WS_EX_NOACTIVATE,
+    SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
 };
 use windows_core::{HSTRING, w};
 
@@ -48,7 +49,9 @@ fn avatar(value: &Value) -> Option<&str> {
 pub fn sanitize(value: Value, previous: Option<&Value>) -> Option<Value> {
     value["channel"].as_str()?;
     let old = previous.and_then(|value| value["members"].as_array());
-    let members: Vec<_> = value["members"].as_array()?.iter().take(16).filter(|member| member["name"].is_string())
+    let input = value["members"].as_array()?;
+    let viewers = if value["sharing"] == true { input.iter().filter(|member| member["watching"] == true).count() } else { 0 };
+    let members: Vec<_> = input.iter().take(64).filter(|member| member["name"].is_string())
         .enumerate().map(|(index, member)| {
             let id = text(&member["id"], 80);
             let image = if let Some(explicit) = member.get("avatar") {
@@ -70,15 +73,35 @@ pub fn sanitize(value: Value, previous: Option<&Value>) -> Option<Value> {
         "language": if value["language"] == "fa-IR" { "fa-IR" } else { "en-US" },
         "members": members,
         "sharing": value["sharing"] == true,
+        "viewerCount": viewers,
     }))
 }
 
-fn render(window: &WebviewWindow, mut packet: Value, position: OverlayPosition, opacity: u8) -> Result<(), Box<dyn std::error::Error>> {
+pub fn monitor_names(window: &WebviewWindow) -> Vec<String> {
+    window.available_monitors().unwrap_or_default().iter().take(32).enumerate().map(|(i, monitor)| {
+        let name = monitor.name().map(String::as_str).unwrap_or("Display");
+        format!("{} · {} × {} · {}", i + 1, monitor.size().width, monitor.size().height, name)
+    }).collect()
+}
+
+fn render(window: &WebviewWindow, mut packet: Value, position: OverlayPosition, opacity: u8, monitor_index: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
     packet["opacity"] = json!(opacity);
-    if let Some(monitor) = window.primary_monitor()? {
+    let monitor = monitor_index.and_then(|index| window.available_monitors().ok()?.into_iter().nth(index))
+        .or_else(|| window.app_handle().get_webview_window(crate::MAIN)?.current_monitor().ok().flatten())
+        .or(window.primary_monitor()?);
+    if let Some(monitor) = monitor {
         let area = monitor.work_area();
         let scale = monitor.scale_factor();
-        let height = 20 + packet["members"].as_array().map_or(0, Vec::len) * 38 + if packet["sharing"] == true { 24 } else { 0 };
+        let header = 20 + if packet["sharing"] == true { 24 } else { 0 };
+        let rows = packet["members"].as_array().map_or(0, Vec::len);
+        let logical_height = (area.size.height.saturating_sub(32) as f64 / scale) as usize;
+        let max_rows = (logical_height.saturating_sub(header + 22) / 38).clamp(1, 16);
+        let overflow = rows.saturating_sub(max_rows);
+        if let Some(members) = packet["members"].as_array_mut() {
+            members.truncate(max_rows);
+        }
+        packet["overflow"] = json!(overflow);
+        let height = header + rows.min(max_rows) * 38 + if overflow > 0 { 22 } else { 0 };
         let width = (270.0 * scale).round() as u32;
         let height =
             ((height as f64 * scale).round() as u32).min(area.size.height.saturating_sub(32));
@@ -103,8 +126,10 @@ fn render(window: &WebviewWindow, mut packet: Value, position: OverlayPosition, 
             } else {
                 margin
             };
-        window.set_size(PhysicalSize::new(width, height))?;
-        window.set_position(PhysicalPosition::new(x, y))?;
+        let size = PhysicalSize::new(width, height);
+        let origin = PhysicalPosition::new(x, y);
+        if window.inner_size()? != size { window.set_size(size)?; }
+        if window.outer_position()? != origin { window.set_position(origin)?; }
     }
     let payload = HSTRING::from(packet.to_string());
     window.with_webview(move |view| unsafe {
@@ -169,10 +194,8 @@ fn reconcile(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     };
     if preferences.speakers_only {
         if let Some(members) = packet["members"].as_array_mut() {
-            let viewers = members.iter().filter(|member| member["watching"] == true).count();
             members.retain(|member| member["id"] != "dorham-music" && member["speaking"] == true
                 && member["muted"] != true && member["deafened"] != true && member["serverMuted"] != true);
-            packet["viewerCount"] = json!(viewers);
         }
         if packet["sharing"] != true && packet["members"].as_array().is_some_and(Vec::is_empty) {
             if let Some(window) = app.get_webview_window(WINDOW) {
@@ -190,7 +213,7 @@ fn reconcile(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(window) = app.get_webview_window(WINDOW) {
         if host.overlay_ready.load(Ordering::Acquire) {
-            render(&window, packet, preferences.position, preferences.opacity)?;
+            render(&window, packet, preferences.position, preferences.opacity, preferences.monitor)?;
         }
         return Ok(());
     }
@@ -253,6 +276,7 @@ fn create(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     window.set_ignore_cursor_events(true)?;
     let hwnd = window.hwnd()?;
     unsafe {
+        let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE.0 as isize);
     }

@@ -8,7 +8,7 @@ export function ReleaseActions({ inCall = false }: { inCall?: boolean }) {
   const { info, status, refresh, install, prepare, cancel } = useRelease();
   const windows = releasePlatform === 'windows';
   const downloading = ['downloading','verifying'].includes(status.state);
-  const [open, setOpen] = useState(false), [manifest, setManifest] = useState<Pick<ReleaseManifest, 'windows' | 'android'> | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false), [manifest, setManifest] = useState<Pick<ReleaseManifest, 'windows' | 'android' | 'androidArm64'> | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -40,6 +40,7 @@ export function ReleaseActions({ inCall = false }: { inCall?: boolean }) {
     <button type="button" className="release-trigger" aria-label={t('Download apps')} aria-expanded={open} onClick={() => { if (open) setOpen(false); else void load(); }}><Download size={14}/><span>{t('Get apps')}</span></button>
     {open && <section className="release-menu" role="dialog" aria-label={t('Download apps')}><header><strong>{t('Dorham apps')}</strong><button type="button" aria-label={t('Close downloads')} onClick={() => setOpen(false)}><X size={14}/></button></header>
       {busy && <p role="status">{t('Please wait…')}</p>}
+      {windows && status.installFailed && <p role="status">{t('The previous Windows update did not finish. Try installing it again.')}</p>}
       {windows && info?.available && <div className="android-update-status">
         {downloading && <><progress aria-label={t('Update download progress')} max={100} value={status.progress}/><span>{status.progress}%</span></>}
         {status.state === 'error' && <p role="status">{t('Update download failed. Retry when connected.')}</p>}
@@ -47,7 +48,7 @@ export function ReleaseActions({ inCall = false }: { inCall?: boolean }) {
         {!downloading && status.state !== 'installing' && <button disabled={busy || inCall} onClick={() => { void update(); }}>{t(status.state === 'ready' ? 'Install update' : status.state === 'error' ? 'Try again' : 'Download update')}</button>}
       </div>}
       {releasePlatform === 'android' && info?.available && <div className="android-update-status"><p role="status">{t(status.state === 'ready' ? 'Update verified and ready to install.' : status.state === 'waiting-wifi' ? 'Waiting for Wi-Fi to download the update.' : status.state === 'paused' ? 'Update download paused.' : status.state === 'error' ? 'Update download failed. Retry when connected.' : downloading ? 'Downloading update' : 'An update is available.')}</p>{downloading && <><progress aria-label={t('Update download progress')} max={100} value={status.progress}/><span>{status.progress}%</span><button onClick={() => { void cancel(); }}>{t('Cancel download')}</button></>}{!downloading && status.state !== 'ready' && <button disabled={inCall} onClick={() => { void prepare().catch(() => setError('The update could not be started. Try again later.')); }}>{t('Download update')}</button>}</div>}
-      {manifest && !busy && <><a href={manifest.windows.url} target="_blank" rel="noopener noreferrer">Windows <small>{manifest.windows.version}</small></a><a href={manifest.android.url} target="_blank" rel="noopener noreferrer">Android <small>{manifest.android.version}</small></a></>}
+      {manifest && !busy && <><a href={manifest.windows.url} target="_blank" rel="noopener noreferrer">Windows <small>{manifest.windows.version}</small></a><a href={manifest.android.url} target="_blank" rel="noopener noreferrer">Android <small>{manifest.android.version}</small></a>{manifest.androidArm64 && <a href={manifest.androidArm64.url} target="_blank" rel="noopener noreferrer">{t('Android for ARM64 phones')} <small>{manifest.androidArm64.version}</small></a>}</>}
       {releasePlatform && !busy && <button type="button" className="release-check" onClick={() => { void refresh(); }}>{t('Check for updates')}</button>}
       {error && <p role="status">{t(error)} <button type="button" onClick={() => { void load(); }}>{t('Try again')}</button></p>}
     </section>}

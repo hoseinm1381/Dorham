@@ -178,6 +178,11 @@ export class NativeTransport implements MediaTransport {
   async stopShare() { this.captureGeneration++; this.captureActive = false; this.localLeaseId = null; this.options.emit('localScreen', null); const lease = this.lease; this.lease = null; await NativeMedia.stopShare(); if (lease && this.options.socket.connected) await ack(this.options.socket, 'share:stop', { requestId: crypto.randomUUID() }).catch(() => {}); }
   async subscribe(share: Share, enabled: boolean) { await NativeMedia.subscribe({ userId: share.userId, leaseId: share.id, enabled }); }
   async getStats() { return NativeMedia.getStats(); }
+  async getConnectionQuality() {
+    const { connectionQuality: quality } = await NativeMedia.getStats();
+    if (typeof quality?.speechLoss === 'number' && typeof quality?.streamFreezes === 'number')
+      return { concealment: quality.speechLoss, streamFreezes: quality.streamFreezes };
+  }
   leave(notifyServer = true) {
     this.leaving ??= this.finishLeave(notifyServer).finally(() => { this.leaving = undefined; });
     return this.leaving;

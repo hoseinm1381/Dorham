@@ -2,6 +2,51 @@ package backend
 
 import "time"
 
+var chatDeliveryBuckets = [...]int64{10, 25, 50, 100, 200, 350, 500, 750, 1000, 2000, 5000, 30000}
+
+func (h *Hub) recordChatDelivery(elapsed int64) {
+	h.metricMu.Lock()
+	defer h.metricMu.Unlock()
+	bucket := len(chatDeliveryBuckets) - 1
+	for i, upper := range chatDeliveryBuckets {
+		if elapsed <= upper {
+			bucket = i
+			break
+		}
+	}
+	h.chatDelivery[bucket]++
+}
+
+func (h *Hub) recordConnectionQuality(voice, freezes int64) {
+	h.metricMu.Lock()
+	defer h.metricMu.Unlock()
+	h.connectionSamples++
+	h.concealmentTotal += voice
+	h.freezeTotal += freezes
+}
+
+func (h *Hub) connectionMetricsLocked() M {
+	var total int64
+	for _, count := range h.chatDelivery {
+		total += count
+	}
+	value := M{"chatSamples": total, "mediaSamples": h.connectionSamples, "streamFreezes": h.freezeTotal}
+	if total > 0 {
+		var cumulative int64
+		for i, count := range h.chatDelivery {
+			cumulative += count
+			if cumulative*100 >= total*95 {
+				value["chatP95UpperMs"] = chatDeliveryBuckets[i]
+				break
+			}
+		}
+	}
+	if h.connectionSamples > 0 {
+		value["concealmentPercent"] = float64(h.concealmentTotal) / (100 * float64(h.connectionSamples))
+	}
+	return value
+}
+
 func (h *Hub) recordAction(event string, elapsed time.Duration, failed bool) {
 	h.metricMu.Lock()
 	defer h.metricMu.Unlock()
@@ -66,5 +111,5 @@ func (h *Hub) Metrics() M {
 	if h.maintenance == nil {
 		maintenance = M{"passes": 0, "maxMs": 0, "maxTimerDelayMs": 0}
 	}
-	return M{"actions": actions, "disconnects": disconnects, "maintenance": maintenance}
+	return M{"actions": actions, "disconnects": disconnects, "maintenance": maintenance, "connectionQuality": h.connectionMetricsLocked()}
 }

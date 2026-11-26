@@ -13,6 +13,11 @@ use std::sync::{
 };
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use windows::Win32::Security::Cryptography::{
+    BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_P256_ALGORITHM, BCRYPT_ECDSA_PUBLIC_P256_MAGIC,
+    BCRYPT_KEY_HANDLE, BCryptCloseAlgorithmProvider, BCryptDestroyKey, BCryptImportKeyPair,
+    BCryptOpenAlgorithmProvider, BCryptVerifySignature,
+};
 
 const ORIGIN: &str = "https://dorhamapp.ir";
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -26,6 +31,8 @@ pub struct Status {
     pub available: bool,
     pub phase: &'static str,
     pub progress: u64,
+    #[serde(rename = "installFailed")]
+    pub install_failed: bool,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -43,6 +50,7 @@ struct Manifest {
     schema: u32,
     version: String,
     windows: Release,
+    signature: Option<String>,
 }
 
 fn version(value: &str) -> Option<[u64; 3]> {
@@ -83,7 +91,44 @@ fn parse_manifest(bytes: &[u8]) -> Result<Release, String> {
     {
         return Err("Untrusted Windows release manifest".into());
     }
+    if let Some(public) = option_env!("DORHAM_WINDOWS_MANIFEST_P256") {
+        let signature = manifest.signature.as_deref().ok_or("Unsigned Windows update manifest")?;
+        let bytes = format!("{}\n{}\n{}\n{}\n{}\n", file.version, file.app_id, file.url, file.size, file.sha256);
+        if !verify_manifest_signature(public, signature, bytes.as_bytes()) {
+            return Err("Untrusted Windows update signature".into());
+        }
+    }
     Ok(file)
+}
+
+fn hex64(value: &str) -> Option<[u8; 64]> {
+    if value.len() != 128 || !value.bytes().all(|part| part.is_ascii_hexdigit()) { return None; }
+    let mut bytes = [0; 64];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
+fn verify_manifest_signature(public: &str, signature: &str, payload: &[u8]) -> bool {
+    let (Some(coordinates), Some(signature)) = (hex64(public), hex64(signature)) else { return false };
+    let mut blob = [0; 72];
+    blob[..4].copy_from_slice(&BCRYPT_ECDSA_PUBLIC_P256_MAGIC.to_le_bytes());
+    blob[4..8].copy_from_slice(&32u32.to_le_bytes());
+    blob[8..].copy_from_slice(&coordinates);
+    let hash = Sha256::digest(payload);
+    unsafe {
+        let mut algorithm = Default::default();
+        if BCryptOpenAlgorithmProvider(&mut algorithm, BCRYPT_ECDSA_P256_ALGORITHM, None, Default::default()).is_err() {
+            return false;
+        }
+        let mut key = BCRYPT_KEY_HANDLE::default();
+        let imported = BCryptImportKeyPair(algorithm, None, BCRYPT_ECCPUBLIC_BLOB, &mut key, &blob, 0).is_ok();
+        let valid = imported && BCryptVerifySignature(key, None, &hash, &signature, Default::default()).is_ok();
+        if imported { let _ = BCryptDestroyKey(key); }
+        let _ = BCryptCloseAlgorithmProvider(algorithm, 0);
+        valid
+    }
 }
 
 pub struct Updater {
@@ -104,6 +149,10 @@ impl Drop for Busy<'_> {
 
 impl Updater {
     pub fn new(directory: PathBuf) -> Result<Self, reqwest::Error> {
+        let marker = directory.join("pending-install");
+        let install_failed = fs::read_to_string(&marker).ok().and_then(|target| version(target.trim()))
+            .is_some_and(|target| target > version(CURRENT).expect("app version"));
+        if !install_failed { let _ = fs::remove_file(marker); }
         Ok(Self {
             client: Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -119,6 +168,7 @@ impl Updater {
                 available: false,
                 phase: "idle",
                 progress: 0,
+                install_failed,
             }),
             operation: AtomicBool::new(false),
             pause_epoch: AtomicU64::new(0),
@@ -392,19 +442,29 @@ impl Updater {
         let _read_lock =
             verified(&installer, &release).map_err(|_| "Windows update verification failed")?;
         self.outside_call(app, epoch)?;
-        Command::new(&installer)
+        let marker = self.directory.join("pending-install");
+        fs::write(&marker, &release.version).map_err(|_| "Could not prepare the Windows install status")?;
+        let mut child = match Command::new(&installer)
             .args(["/S", "--updated", "--force-run"])
             .creation_flags(0x08000008)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| "Could not start the verified Windows installer")?;
-        self.publish(app, |state| state.phase = "installing");
+            .spawn() {
+                Ok(child) => child,
+                Err(_) => { let _ = fs::remove_file(marker); return Err("Could not start the verified Windows installer".into()); }
+            };
+        self.publish(app, |state| { state.phase = "installing"; state.install_failed = false; });
         std::mem::forget(lock);
         let app = app.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(750));
+            if child.try_wait().ok().flatten().is_some_and(|result| !result.success()) {
+                let host = app.state::<Host>();
+                host.updater.operation.store(false, Ordering::Release);
+                host.updater.publish(&app, |state| { state.phase = "error"; state.install_failed = true; });
+                return;
+            }
             app.exit(0);
         });
         Ok(())

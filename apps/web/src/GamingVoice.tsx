@@ -23,7 +23,8 @@ function StreamView({ screen, name, close, videoOnly, children }: { screen?: Rem
   const browser = !android && !window.desktop;
   const container = useRef<HTMLDivElement>(null), [fullscreen, setFullscreen] = useState(false);
   const expandedDialog = useRef<HTMLDialogElement>(null), [expanded, setExpanded] = useState(false);
-  const video = useRef<HTMLVideoElement>(null), [received, setReceived] = useState(false), [delayed, setDelayed] = useState(false);
+  const video = useRef<HTMLVideoElement>(null), lastFrame = useRef<HTMLCanvasElement>(null);
+  const [received, setReceived] = useState(false), [delayed, setDelayed] = useState(false), [stalled, setStalled] = useState(false);
   const stream = screen?.stream, attach = screen?.attach;
   useEffect(() => {
     const element = video.current;
@@ -33,7 +34,22 @@ function StreamView({ screen, name, close, videoOnly, children }: { screen?: Rem
     const detach = attach?.(element);
     if (!attach) element.srcObject = stream;
     const timeout = setTimeout(() => setDelayed(true), 15000);
-    return () => { clearTimeout(timeout); detach?.(); element.srcObject = null; };
+    let previousTime = -1, lastMotion = performance.now();
+    const health = setInterval(() => {
+      if (!element.videoWidth || element.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || element.currentTime === previousTime) {
+        if (performance.now() - lastMotion > 3000) setStalled(true);
+        return;
+      }
+      previousTime = element.currentTime; lastMotion = performance.now();
+      setReceived(true); setStalled(false);
+      const canvas = lastFrame.current;
+      if (canvas) {
+        canvas.width = Math.min(element.videoWidth, 640);
+        canvas.height = Math.round(canvas.width * element.videoHeight / element.videoWidth);
+        canvas.getContext('2d')?.drawImage(element, 0, 0, canvas.width, canvas.height);
+      }
+    }, 1000);
+    return () => { clearTimeout(timeout); clearInterval(health); detach?.(); element.srcObject = null; };
   }, [stream, attach]);
   useEffect(() => {
     if (android) return;
@@ -78,9 +94,10 @@ function StreamView({ screen, name, close, videoOnly, children }: { screen?: Rem
   };
   const isFullscreen = fullscreen || expanded;
   const player = <div ref={container} className={`stream-view ${android && fullscreen ? 'android-stream-expanded' : ''}`}>
-    {screen ? <div className="screen">
-      {screen.native ? <NativeScreenSurface screen={screen}/> : <video ref={video} onDoubleClick={toggleFullscreen} autoPlay playsInline muted onLoadedData={() => setReceived(true)} onEmptied={() => setReceived(false)}/>}
-      {!screen.native && !received && <p className="screen-status" role="status">{t(delayed ? 'No video received yet. Check the media connection or reopen this stream.' : 'Connecting to screen…')}</p>}
+    {screen || lastFrame.current?.width ? <div className="screen">
+      {screen?.native ? <NativeScreenSurface screen={screen}/> : <video ref={video} hidden={!screen} onDoubleClick={toggleFullscreen} autoPlay playsInline muted onLoadedData={() => setReceived(true)} onEmptied={() => setReceived(false)}/>}
+      <canvas className="stream-last-frame" ref={lastFrame} width={0} height={0} hidden={Boolean(screen || !lastFrame.current?.width)} aria-hidden="true"/>
+      {!screen?.native && (!received || !screen || stalled) && <p className="screen-status" role="status">{t(lastFrame.current?.width ? 'Video interrupted. Keeping the last frame while reconnecting.' : delayed ? 'No video received yet. Check the media connection or reopen this stream.' : 'Connecting to screen…')}</p>}
       <div className="screen-controls">
         <bdi>{name}</bdi>
         {browser && videoOnly && <small className="screen-video-only" title={t(noStreamSound)}>{t('Video only')}</small>}
@@ -128,7 +145,10 @@ export function GamingVoice(p: Props) {
     </span></header>
     {p.participants && <div className="mobile-voice-people"><button onClick={p.participants}>{t('Show participants')} · {formatNumber(p.room.members.filter(m => m.user.kind !== "music").length)}</button><ParticipantList musicRow={p.musicRow} members={p.room.members} actions={p.memberActions || (() => {})}/></div>}
     <div className="share-list">{p.room.shares.map(share => <div key={share.id}><MonitorUp size={17}/><span><bdi>{person(share.userId)}</bdi><small className="live-badge">LIVE</small></span>{share.userId === p.userId ? <><StreamAudience names={p.audienceNames}/><span className="share-tier">{t(share.tier === 'fallback' ? '15fps · waiting for a 30fps slot' : '30fps available')}</span><label className="own-preview-toggle"><input type="checkbox" checked={previewSelected} onChange={() => { if (p.previewOwn && previewClosed) setPreviewClosed(false); else { setPreviewClosed(false); p.toggleOwn(); } }}/>{t('Preview my screen')}</label></> : <button className="watch-stream" data-watching={selected.includes(share.id)} aria-label={t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')} onClick={() => { void watch(share).catch(p.error); }}>{t(selected.includes(share.id) ? 'Close stream' : 'Watch stream')}</button>}</div>)}</div>
-    {own && p.localScreen?.sourceName && <p className="stream-no-audio" role="status"><bdi>{p.localScreen.sourceName}</bdi> · {t(p.localScreen.audioScope === 'application' ? 'Selected application sound' : p.localScreen.audioScope === 'system' ? p.localScreen.native ? 'Phone sound, excluding Dorham' : 'Computer sound, excluding Dorham' : 'Video only')}</p>}
+    {own && p.localScreen?.sourceName && <div className="stream-no-audio">
+      <span role="status"><bdi>{p.localScreen.sourceName}</bdi> · {t(p.localScreen.audioScope === 'application' ? 'Selected application sound' : p.localScreen.audioScope !== 'system' ? 'Video only' : p.localScreen.native ? 'Phone sound, excluding Dorham' : p.localScreen.includesDorhamAudio === false ? 'Computer sound, excluding Dorham' : 'Computer sound, may include Dorham voices and notifications')}</span>
+      {own.includeAudio && p.localScreen.audioScope !== 'none' && p.transport?.stopShareAudio && <button type="button" className="secondary" onClick={() => { void p.transport?.stopShareAudio?.().catch(p.error); }}>{t('Stop sharing sound')}</button>}
+    </div>}
     {active && <div className={`screens ${multi ? 'multi-streams' : 'single-stream'}`}>
       {showOwn && p.localScreen && <StreamView key="local" screen={p.localScreen} name={t('Your screen preview')} close={() => setPreviewClosed(true)}/>}
       {selected.map(id => {

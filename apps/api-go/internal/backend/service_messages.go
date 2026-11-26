@@ -223,7 +223,7 @@ func (s *Service) Event(tx *DB, conversation, kind string, payload any) M {
 
 type ServiceUndefined struct{}
 
-func (s *Service) Send(uid, rid, conversation, content string, replyTo any, attachmentIDs []string, asTTS bool) M {
+func (s *Service) Send(uid, rid, conversation, content string, replyTo any, attachmentIDs []string, asTTS bool, speech ...M) M {
 	reopened, posted := false, false
 	requested, text := TTSMessage(content)
 	if attachmentIDs == nil {
@@ -237,6 +237,11 @@ func (s *Service) Send(uid, rid, conversation, content string, replyTo any, atta
 	}
 	if asTTS {
 		payload["tts"] = true
+	}
+	var speechTarget M
+	if len(speech) > 0 && len(speech[0]) > 0 {
+		speechTarget = speech[0]
+		payload["speech"] = speechTarget
 	}
 	event := serviceResult(s.Mutate(uid, rid, "message.send", payload, func(tx *DB) any {
 		cv := s.Conversation(tx, uid, conversation, true)
@@ -286,10 +291,17 @@ func (s *Service) Send(uid, rid, conversation, content string, replyTo any, atta
 	if posted {
 		s.Notify("conversation:event", event)
 	}
-	if !Bool(event, "direct") && (requested || asTTS) && text != "" && s.OnTTS != nil {
-		s.OnTTS(uid, Obj(event["payload"]))
+	if !Bool(event, "direct") && text != "" && s.OnTTS != nil {
+		if speechTarget != nil {
+			sentAt, now := Num(speechTarget, "sentAt"), Now()
+			if sentAt >= now-30000 && sentAt <= now+120000 {
+				s.OnTTS(uid, Merge(Obj(event["payload"]), M{"speechTarget": speechTarget}))
+			}
+		} else if len(speech) == 0 && (requested || asTTS) {
+			s.OnTTS(uid, Obj(event["payload"]))
+		}
 	}
-	return event
+	return Merge(event, M{"requestId": rid})
 }
 func (s *Service) ChangeMessage(uid, rid, id string, body M) M {
 	event := serviceResult(s.Mutate(uid, rid, "message.change", servicePayload(M{"messageId": id}, body), func(tx *DB) any {

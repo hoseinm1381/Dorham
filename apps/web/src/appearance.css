@@ -74,6 +74,40 @@
   --line: color-mix(in srgb, var(--theme-text) 12%, transparent);
   --theme-tint: color-mix(in srgb, var(--theme-accent) 12%, transparent);
 }
+
+:is(:root[data-palette=contrast], [data-swatch=contrast]) {
+  --theme-rail: #090b11;
+  --theme-side: #141721;
+  --theme-main: #181c28;
+  --theme-panel: #232837;
+  --theme-control: #0b0e17;
+  --theme-text: #fff;
+  --theme-muted: #d5d9e6;
+  --theme-accent: #ffe18b;
+  --theme-action: #ffe18b;
+  --theme-ink: #211a09;
+  --theme-glow: #6d5824;
+}
+:root[data-large-text=true] :is(.message-body>p, .composer textarea, .message-finder-result, .composer-context) {
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+[data-palette] :is(.music-dialog, .attachment-card, .member-context-menu, .android-attachment-panel) {
+  background: var(--theme-panel);
+  color: var(--text);
+  border-color: var(--line);
+}
+[data-palette] :is(.music-dialog>header, .music-search, .music-playing, .android-attachment-options button) {
+  background: var(--theme-control);
+  color: var(--text);
+}
+[data-palette] :is(.music-dialog, .attachment-card, .member-context-menu, .message-finder) :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.moderation-log { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.moderation-log li, .moderation-confirm { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-block: 6px; }
+.android-transfer-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-block: 6px; }
 [data-palette] .server-rail { background: var(--theme-rail); }
 [data-palette] :is(.sidebar, .members-sidebar, .settings-navigation) { background: var(--theme-side); }
 [data-palette] :is(.main, .settings-content) { background: var(--theme-main); }

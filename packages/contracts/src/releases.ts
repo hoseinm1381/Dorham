@@ -2,7 +2,7 @@ export const RELEASE_ORIGIN = 'https://dorhamapp.ir';
 export const APP_ID = 'com.dorham.chat';
 export type ReleasePlatform = 'windows' | 'android';
 export type ReleaseFile = { version: string; url: string; sha256: string; size: number; appId: string; versionCode?: number };
-export type ReleaseManifest = { schema: 1; version: string; publishedAt: string; windows: ReleaseFile; android: ReleaseFile };
+export type ReleaseManifest = { schema: 1; version: string; publishedAt: string; windows: ReleaseFile; android: ReleaseFile; androidArm64?: ReleaseFile };
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 export function validReleaseVersion(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 50 && versionPattern.test(value) && value.split('.').every(part => Number.isSafeInteger(Number(part)));
@@ -25,8 +25,15 @@ export function releaseFile(value: unknown, platform: ReleasePlatform): ReleaseF
   return file;
 }
 
-export function releaseDownloads(value: unknown): Pick<ReleaseManifest, 'windows' | 'android'> {
+export function releaseDownloads(value: unknown): Pick<ReleaseManifest, 'windows' | 'android' | 'androidArm64'> {
   const catalog = value as { schema?: number; windows?: unknown; android?: unknown };
-  if (catalog?.schema === 2) return { windows: releaseFile(catalog.windows, 'windows'), android: releaseFile(catalog.android, 'android') };
-  return { windows: releaseFile(value, 'windows'), android: releaseFile(value, 'android') };
+  const windows = releaseFile(catalog?.schema === 2 ? catalog.windows : value, 'windows');
+  const androidManifest = (catalog?.schema === 2 ? catalog.android : value) as ReleaseManifest;
+  const android = releaseFile(androidManifest, 'android');
+  const variant = androidManifest.androidArm64;
+  const androidArm64 = variant && variant.version === android.version && variant.appId === android.appId &&
+    variant.versionCode === android.versionCode && /^[a-f0-9]{64}$/.test(variant.sha256) &&
+    Number.isSafeInteger(variant.size) && variant.size >= 1024 && variant.size <= android.size &&
+    variant.url === `${RELEASE_ORIGIN}/downloads/${android.version}/Dorham-${android.version}-Android-arm64-v8a.apk` ? variant : undefined;
+  return { windows, android, ...(androidArm64 ? { androidArm64 } : {}) };
 }

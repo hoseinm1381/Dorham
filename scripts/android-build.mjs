@@ -28,5 +28,6 @@ if (metadata.applicationId !== 'com.dorham.chat' || metadata.elements[0].version
 const signer = path.join(env.ANDROID_HOME, 'build-tools', '36.0.0', process.platform === 'win32' ? 'apksigner.bat' : 'apksigner');
 result = spawnSync(process.platform === 'win32' ? 'cmd.exe' : signer, process.platform === 'win32' ? ['/d', '/s', '/c', signer, 'verify', '--verbose', '--print-certs', path.resolve(apk)] : ['verify', '--verbose', '--print-certs', apk], { env, stdio: 'inherit' });
 if (result.status !== 0) process.exit(result.status ?? 1);
-await cp(apk, path.join(output, `Dorham-${version}-Android${debug ? '-debug' : ''}.apk`));
+const abi = env.DORHAM_ANDROID_ABI;
+await cp(apk, path.join(output, `Dorham-${version}-Android${abi ? `-${abi}` : ''}${debug ? '-debug' : ''}.apk`));
 console.log(debug ? 'Explicit debug APK built.' : 'Signed release APK verified and copied. Keep the permanent signing key for every future update.');

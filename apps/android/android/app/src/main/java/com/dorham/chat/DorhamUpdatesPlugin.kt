@@ -2,14 +2,15 @@ package com.dorham.chat
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
-import android.os.SystemClock
 import android.net.ConnectivityManager
 import androidx.core.content.FileProvider
 import com.getcapacitor.*
 import com.getcapacitor.annotation.CapacitorPlugin
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -44,6 +45,13 @@ class DorhamUpdatesPlugin : Plugin() {
    require(file.getString("url") == "$origin/downloads/$version/Dorham-$version-Android.apk")
    require(file.getString("sha256").matches(Regex("[a-f0-9]{64}")) && file.getLong("size") in 1024..157286400)
    require(file.getLong("versionCode") in 1..2100000000)
+   if (Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a") {
+    val arm64 = manifest.optJSONObject("androidArm64")
+    if (arm64 != null && arm64.optString("version") == version && arm64.optString("appId") == context.packageName &&
+        arm64.optLong("versionCode") == file.getLong("versionCode") &&
+        arm64.optString("url") == "$origin/downloads/$version/Dorham-$version-Android-arm64-v8a.apk" &&
+        arm64.optLong("size") in 1024..157286400 && arm64.optString("sha256").matches(Regex("[a-f0-9]{64}"))) return arm64
+   }
    return file
   } finally { conn.disconnect() }
  }
@@ -73,7 +81,6 @@ class DorhamUpdatesPlugin : Plugin() {
   var offset = partial.length(); val total = file.getLong("size")
   if (offset == total && total > 0) { if (verified(partial, file)) { require(partial.renameTo(apk)); status("ready", 100); return apk }; partial.delete(); offset = 0 }
   val conn = connection(file.getString("url")); activeConnection = conn
-  val deadline = SystemClock.elapsedRealtime() + 300000
   try {
    if (offset > 0) conn.setRequestProperty("Range", "bytes=$offset-")
    val code = conn.responseCode
@@ -83,7 +90,7 @@ class DorhamUpdatesPlugin : Plugin() {
    java.io.FileOutputStream(partial, offset > 0).use { output -> conn.inputStream.use { input ->
     val buffer = ByteArray(65536)
     while (true) {
-     check(!cancelled.get() && DorhamMediaPlugin.active == null && SystemClock.elapsedRealtime() < deadline) { "Download paused" }
+     check(!cancelled.get() && DorhamMediaPlugin.active == null) { "Download paused" }
      val n = input.read(buffer); if (n < 0) break; received += n; require(received <= total); output.write(buffer, 0, n)
      val next = (received * 100 / total).toInt(); if (next != percentage) status("downloading", next)
     }
@@ -98,7 +105,7 @@ class DorhamUpdatesPlugin : Plugin() {
   if (!busy.compareAndSet(false, true)) { call.resolve(JSObject().put("state", state)); return }
   cancelled.set(false)
   worker.execute { try { val file = latest(); require(file.getLong("versionCode") > installed().longVersionCode); download(file); call.resolve(JSObject().put("state", state)) }
-   catch (_: Exception) { status(if (cancelled.get() || DorhamMediaPlugin.active != null) "paused" else "error"); call.reject("The update could not be downloaded. Retry when the connection is ready.") }
+   catch (error: Exception) { status(if (error is IOException || cancelled.get() || DorhamMediaPlugin.active != null) "paused" else "error"); call.reject("The update could not be downloaded. Retry when the connection is ready.") }
    finally { busy.set(false) } }
  }
  @PluginMethod fun cancel(call: PluginCall) { cancelled.set(true); activeConnection?.disconnect(); status("paused"); call.resolve() }

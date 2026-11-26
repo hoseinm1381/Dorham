@@ -30,6 +30,19 @@ default is `artifacts/v<version>/windows`. Packaging does not install the app or
 read the operator's private profile. Native version changes are coordinated by
 the release owner; this package currently targets 1.1.1.
 
+For signed Windows builds, set `DORHAM_WINDOWS_SIGNTOOL` to the Windows SDK
+SignTool executable, `DORHAM_WINDOWS_SIGNER_THUMBPRINT` to the trusted signing
+certificate in the current user's store, and `DORHAM_WINDOWS_TIMESTAMP_URL` to
+its RFC 3161 timestamp service. Packaging signs the runtime, native helpers,
+and installer before the release file hashes are created.
+
+Windows update manifests can also use a separate P-256 release key. Set
+`DORHAM_WINDOWS_MANIFEST_P256` at desktop compile time to the concatenated
+32-byte public X and Y coordinates as hex. The release operator sets
+`DORHAM_WINDOWS_MANIFEST_KEY` to the PEM private key path when generating the
+downloads feed. Installations built with the public key require a valid
+signature for every subsequent Windows feed.
+
 ## One-time profile import contract
 
 The installer runs migration during initialization, before the previous

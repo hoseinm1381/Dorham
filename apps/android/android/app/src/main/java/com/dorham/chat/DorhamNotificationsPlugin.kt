@@ -1,5 +1,8 @@
 package com.dorham.chat
 import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -38,6 +41,23 @@ class DorhamNotificationsPlugin : Plugin() {
     @PluginMethod fun connectionNoticeSettings(call: PluginCall) {
         try { activity.startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, "dorham.connection")); call.resolve() }
         catch (error: Exception) { call.reject("Connection notice settings could not be opened.", error) }
+    }
+    @PluginMethod fun testAlert(call: PluginCall) {
+        if (!DorhamNotificationService.permitted(context)) { call.reject("Allow notifications in Android settings to receive alerts."); return }
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val persian = store().prefs.getString("language", "en-US") == "fa-IR"
+        val channel = "dorham.messages"
+        manager.createNotificationChannel(NotificationChannel(channel, if (persian) "پیام‌ها و اشاره‌ها" else "Messages and mentions", NotificationManager.IMPORTANCE_DEFAULT))
+        if (manager.getNotificationChannel(channel)?.importance == NotificationManager.IMPORTANCE_NONE) {
+            call.reject("Allow notifications in Android settings to receive alerts.")
+            return
+        }
+        manager.notify("dorham.test", 1, Notification.Builder(context, channel)
+            .setSmallIcon(com.dorham.chat.R.mipmap.ic_launcher)
+            .setContentTitle(if (persian) "آزمایش اعلان دورهم" else "Dorham test notification")
+            .setContentText(if (persian) "اعلان‌های این دستگاه فعال هستند." else "Notifications work on this device.")
+            .setVisibility(Notification.VISIBILITY_PRIVATE).setAutoCancel(true).build())
+        call.resolve()
     }
     @PluginMethod fun getChatMutes(call: PluginCall) {
         try { call.resolve(JSObject().put("mutedConversationIds", JSONArray(store().mutedChats(call.getString("origin") ?: "", call.getString("accountId") ?: "").toList()))) }
