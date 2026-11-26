@@ -38,6 +38,7 @@ const changes: Record<Platform, { version: string; notes: string[] }[]> = {
     { version: '1.4.0', notes: ['Listen to music together in voice and set your own listening volume.'] },
   ],
   Android: [
+    { version: '1.5.6', notes: ['Save chat photos and videos directly to your gallery or keep them as files.', 'Open photos and videos full screen and pinch or double-tap to zoom.'] },
     { version: '1.5.5', notes: ['Tap + in chat to share photos and videos from Gallery or browse your files. You can pick up to four attachments at once.'] },
     { version: '1.5.4', notes: [louderCues, downloadLocation] },
     clearerSettings,

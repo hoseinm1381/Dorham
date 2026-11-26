@@ -17,3 +17,50 @@
 .image-viewer > header button { font-size:28px; padding:0 8px; }
 .image-viewer > img { display:block; max-width:90vw; max-height:76dvh; object-fit:contain; margin:auto auto 12px; }
 @media(max-width:600px) { .media-attachment { width:100%; } .attachment-preview video { width:100%; } .attachment-caption { gap:6px; padding:8px; } }
+
+.android-gallery-attachment .attachment-caption { flex-wrap:wrap; }
+.android-gallery-attachment .attachment-caption > span { flex-basis:100%; }
+.android-media-save { display:flex; flex-wrap:wrap; gap:6px; }
+.android-gallery-attachment .attachment-download,
+.android-media-save .attachment-download { min-height:40px; padding:8px 10px; font-size:12px; }
+.android-media-save .attachment-download:first-child { background:#aaa0ff24; color:#e2dcff; border-radius:8px; }
+.android-media-viewer[open] {
+  position:fixed;
+  inset:0;
+  box-sizing:border-box;
+  margin:0;
+  width:100%;
+  height:100dvh;
+  max-width:none;
+  max-height:none;
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  border:0;
+  background:#090a10;
+  color:#f4f2fa;
+  overflow:hidden;
+}
+.android-media-viewer::backdrop { background:#090a10; }
+.android-media-viewer > header { display:flex; align-items:center; gap:4px; padding:3px 8px; background:#141620; }
+.android-media-viewer > header strong { flex:1; min-width:0; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; font-size:14px; }
+.android-media-viewer > header button,
+.android-media-playback button { display:grid; place-items:center; width:44px; height:44px; padding:0; flex:none; color:inherit; }
+.android-media-viewer button:disabled { opacity:.45; }
+.android-media-stage {
+  min-height:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  touch-action:none;
+  user-select:none;
+}
+.android-media-stage > img,
+.android-media-stage > video { display:block; width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; }
+.android-media-stage > p { margin:0; padding:16px; text-align:center; }
+.android-media-viewer > footer { display:grid; gap:4px; padding:4px 12px 8px; background:#141620; }
+.android-media-viewer footer progress { width:100%; }
+.android-media-playback { display:flex; align-items:center; gap:6px; font-size:12px; }
+.android-media-playback input { flex:1; min-width:0; direction:ltr; }
+.android-media-status { margin:0; font-size:12px; }

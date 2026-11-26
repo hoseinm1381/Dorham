@@ -180,28 +180,46 @@ export async function uploadAttachment(file: File, conversationId: string, signa
     return finished();
   } catch (e) { await request(`/attachments/${reserved.id}`, {}, 'DELETE').catch(() => {}); await removeLocal(scope, 'upload', conversationId).catch(() => {}); throw e; }
 }
-export async function downloadAttachment(id: string, name: string, conversation?: string, onProgress?: (fraction: number) => void, signal?: AbortSignal) {
+function encodeCachedDownload(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function downloadAttachment(id: string, name: string, conversation?: string, onProgress?: (fraction: number) => void, signal?: AbortSignal, gallery = false) {
   const scope = storageScope(), mediaKey = `full:${id}`;
-  const folder = await prepareBrowserDownload();
+  const android = Capacitor.getPlatform() === 'android';
+  const folder = android ? null : await prepareBrowserDownload();
   let blob = await readLocal<Blob>(scope, 'media', mediaKey);
+  if (android) {
+    const cachedData = blob && blob.size > 0 && blob.size <= 8 * 1024 * 1024 ? await encodeCachedDownload(blob) : undefined;
+    if (!cachedData) await waitForBulkTransfer(signal);
+    const bandwidth = cachedData ? undefined : pauseBulkRequest(signal);
+    const transfer = bandwidth?.signal ?? signal;
+    try {
+      if (!cachedData) {
+        try { await maintainSession(); } catch (cause) { if (navigator.onLine !== false) throw cause; }
+      }
+      const limit = Math.max(0, storageSettings(scope).limit * 1024 * 1024 - await localMediaBytes(scope).catch(() => 0));
+      if (scope !== storageScope()) throw new Error('Your account changed. Reopen the download to continue.');
+      const listener = await files.addListener('download', (state: { active: boolean; progress: number }) => { if (state.active) onProgress?.(state.progress / 100); });
+      const pause = () => { void files.cancel().catch(() => {}); };
+      try {
+        transfer?.throwIfAborted();
+        transfer?.addEventListener('abort', pause, { once: true });
+        await files.download({ url: `${base}/api/v1/attachments/${encodeURIComponent(id)}/download`, name, accessToken: access, scope, limit, gallery, cachedData });
+      } finally { transfer?.removeEventListener('abort', pause); await listener.remove(); }
+    } finally { bandwidth?.release(); }
+    return;
+  }
   if (!blob) {
     await waitForBulkTransfer(signal);
     const bandwidth = pauseBulkRequest(signal);
     signal = bandwidth.signal;
     try {
-    if (Capacitor.getPlatform() === 'android') {
-      try { await maintainSession(); } catch (cause) { if (navigator.onLine !== false) throw cause; }
-      if (scope !== storageScope()) return;
-      const listener = await files.addListener('download', (state: { active: boolean; progress: number }) => { if (state.active) onProgress?.(state.progress / 100); });
-      const pause = () => { void files.cancel().catch(() => {}); };
-      signal?.addEventListener('abort', pause, { once: true });
-      try {
-        const limit = Math.max(0, storageSettings(scope).limit * 1024 * 1024 - await localMediaBytes(scope).catch(() => 0));
-        signal?.throwIfAborted();
-        await files.download({ url: `${base}/api/v1/attachments/${encodeURIComponent(id)}/download`, name, accessToken: access, scope, limit });
-      } finally { signal?.removeEventListener('abort', pause); await listener.remove(); }
-      return;
-    }
     await maintainSession();
     const partialKey = `partial:${id}`;
     let partial = await readLocal<{ blob: Blob; etag: string }>(scope, 'media', partialKey);

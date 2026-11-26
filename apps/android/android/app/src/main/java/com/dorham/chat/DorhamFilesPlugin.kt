@@ -7,6 +7,8 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.util.Base64
+import java.util.Locale
 import androidx.activity.result.ActivityResult
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -67,6 +69,15 @@ class DorhamFilesPlugin : Plugin() {
     private fun progress(value: Int, active: Boolean = true) { notifyListeners("download", JSObject().put("progress", value).put("active", active)) }
     private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
     private fun cache(scope: String) = File(File(context.cacheDir, "dorham-transfers"), digest(scope))
+    private fun mediaMimeType(name: String) = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "mp4" -> "video/mp4"
+        "webm" -> "video/webm"
+        else -> null
+    }
     private fun trim(cache: File, maximum: Long, keep: File? = null) {
         val ordered = cache.listFiles { file -> file.extension == "part" || file.extension == "ready" }.orEmpty().sortedByDescending { it.lastModified() }
         var total = ordered.sumOf { it.length() }
@@ -91,6 +102,7 @@ class DorhamFilesPlugin : Plugin() {
         worker.execute { trim(directory, maximum); call.resolve() }
     }
     @PluginMethod fun download(call: PluginCall) {
+        val gallery = call.getBoolean("gallery", false) == true
         synchronized(this) { if (busy) { call.reject("A download is already active"); return }; busy = true }
         cancelled = false; progress(0)
         worker.execute {
@@ -101,11 +113,25 @@ class DorhamFilesPlugin : Plugin() {
                 require(url.protocol == "https" || (url.protocol == "http" && url.host in listOf("localhost", "127.0.0.1", "10.0.2.2"))) { "HTTPS is required" }
                 require(url.userInfo == null && url.path.matches(Regex("/api/v1/attachments/[0-9a-fA-F-]{36}/download")) && url.query == null) { "Invalid download address" }
                 val name = requireNotNull(call.getString("name")); require(name.length in 1..180 && name.none { it.code < 32 || it == '/' || it == '\\' }) { "Invalid download name" }
+                val mediaType = mediaMimeType(name)
+                require(!gallery || mediaType != null) { "Only photos and videos can be saved to the gallery" }
+                val mimeType = mediaType ?: "application/octet-stream"
                 val scope = requireNotNull(call.getString("scope")); require(scope.isNotBlank() && scope.length <= 512)
                 val directory = cache(scope); directory.mkdirs()
                 val key = digest(url.toExternalForm())
                 val part = File(directory, "$key.part"); val ready = File(directory, "$key.ready"); val validator = File(directory, "$key.etag")
                 val maximum = call.getDouble("limit")?.toLong()?.coerceIn(0, 524288000) ?: 104857600
+                val cachedData = call.getString("cachedData")
+                if (!ready.isFile && cachedData != null) {
+                    val maxCachedBytes = 8 * 1024 * 1024
+                    require(cachedData.length <= (maxCachedBytes + 2) / 3 * 4)
+                    val bytes = Base64.decode(cachedData, Base64.NO_WRAP)
+                    require(bytes.size in 1..maxCachedBytes)
+                    check(!cancelled)
+                    validator.delete()
+                    part.writeBytes(bytes)
+                    require(part.renameTo(ready)) { "Could not save cached file" }
+                }
                 if (!ready.isFile) {
                     connection = url.openConnection() as HttpURLConnection
                     activeConnection = connection
@@ -132,25 +158,45 @@ class DorhamFilesPlugin : Plugin() {
                     require(part.renameTo(ready)) { "Could not save downloaded file" }
                     validator.delete()
                 }
+                check(!cancelled)
                 ready.setLastModified(System.currentTimeMillis())
                 val resolver = context.contentResolver
-                val selected = folderUri()
+                val selected = if (gallery) null else folderUri()
                 val target = if (selected != null) {
                     val parent = DocumentsContract.buildDocumentUriUsingTree(selected, DocumentsContract.getTreeDocumentId(selected))
-                    DocumentsContract.createDocument(resolver, parent, "application/octet-stream", name)
+                    DocumentsContract.createDocument(resolver, parent, mimeType, name)
                 } else {
-                    val values = ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, name)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                        put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Dorham")
-                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    val (collection, folder) = when {
+                        gallery && mimeType.startsWith("image/") -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_PICTURES
+                        gallery -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_MOVIES
+                        else -> MediaStore.Downloads.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_DOWNLOADS
                     }
-                    resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                        put(MediaStore.MediaColumns.MIME_TYPE, if (gallery) mimeType else "application/octet-stream")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/Dorham")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    resolver.insert(collection, values)
                 } ?: throw IllegalStateException("Could not create download")
                 destination = target
-                resolver.openOutputStream(target)?.use { output -> ready.inputStream().use { input -> input.copyTo(output) } }
+                resolver.openOutputStream(target)?.use { output ->
+                    ready.inputStream().use { input ->
+                        val buffer = ByteArray(65536)
+                        while (true) {
+                            check(!cancelled)
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
                     ?: throw IllegalStateException("Could not write download")
-                if (selected == null) resolver.update(target, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                check(!cancelled)
+                if (selected == null) {
+                    val published = resolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                    check(published == 1) { "Could not publish download" }
+                }
                 trim(directory, maximum)
                 call.resolve(JSObject().put("saved", true))
             } catch (error: Exception) {
@@ -158,8 +204,11 @@ class DorhamFilesPlugin : Plugin() {
                     if (DocumentsContract.isDocumentUri(context, uri)) DocumentsContract.deleteDocument(context.contentResolver, uri)
                     else context.contentResolver.delete(uri, null, null)
                 } }
-                call.reject(if (error is SecurityException) "Allow access to the saved download folder or change it in Storage & Downloads."
-                    else "Download paused. Select Download to resume.")
+                call.reject(when {
+                    gallery && !cancelled -> "Could not save to gallery. Try again."
+                    error is SecurityException -> "Allow access to the saved download folder or change it in Storage & Downloads."
+                    else -> "Download paused. Select Download to resume."
+                })
             } finally { progress(100, false); activeConnection = null; connection?.disconnect(); synchronized(this) { busy = false } }
         }
     }

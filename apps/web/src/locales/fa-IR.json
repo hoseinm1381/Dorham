@@ -2028,5 +2028,18 @@
   "{count} attachments waiting": "{count} پیوست در صف",
   "Clear queue": "پاک کردن صف",
   "Some files were skipped. Choose a supported format up to 100 MiB.": "برخی فایل‌ها رد شدند. فرمت پشتیبانی‌شده و حداکثر ۱۰۰ مگابایت را انتخاب کنید.",
-  "Tap + in chat to share photos and videos from Gallery or browse your files. You can pick up to four attachments at once.": "در گفتگو + را بزنید تا عکس و ویدیو از گالری یا فایل‌های دیگر را بفرستید. می‌توانید هم‌زمان تا چهار پیوست انتخاب کنید."
+  "Tap + in chat to share photos and videos from Gallery or browse your files. You can pick up to four attachments at once.": "در گفتگو + را بزنید تا عکس و ویدیو از گالری یا فایل‌های دیگر را بفرستید. می‌توانید هم‌زمان تا چهار پیوست انتخاب کنید.",
+  "Save to gallery": "ذخیره در گالری",
+  "Save as file": "ذخیره به‌عنوان فایل",
+  "Saved to gallery": "در گالری ذخیره شد",
+  "File saved": "فایل ذخیره شد",
+  "Could not save to gallery. Try again.": "در گالری ذخیره نشد. دوباره تلاش کنید.",
+  "Open video": "باز کردن ویدیو",
+  "Video viewer": "نمایشگر ویدیو",
+  "Close viewer": "بستن نمایشگر",
+  "Zoom in": "بزرگ‌نمایی",
+  "Zoom out": "کوچک‌نمایی",
+  "Video position": "موقعیت پخش ویدیو",
+  "Save chat photos and videos directly to your gallery or keep them as files.": "عکس‌ها و ویدیوهای گفتگو را مستقیماً در گالری ذخیره کنید یا به‌صورت فایل نگه دارید.",
+  "Open photos and videos full screen and pinch or double-tap to zoom.": "عکس‌ها و ویدیوها را تمام‌صفحه باز کنید و با دو انگشت یا دو بار لمس، بزرگ‌نمایی کنید."
 }
